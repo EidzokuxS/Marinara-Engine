@@ -1809,6 +1809,8 @@ export function GameSurface({
   const gameSnapshot = useGameStateStore((s) => (s.current?.chatId === activeChatId ? s.current : null));
   const chatCharacterIds = useMemo(() => getChatCharacterIds(chat.characterIds), [chat.characterIds]);
   const useSpotifyGameMusic = chatMeta.gameUseSpotifyMusic === true;
+  const activeGameMetaId = typeof chatMeta.gameId === "string" ? chatMeta.gameId : "";
+  const sceneRuntimeScopeKey = `${activeChatId}:${activeGameMetaId}`;
   const { data: connectionsList } = useConnections();
   const updateChat = useUpdateChat();
   const languageConnections = useMemo(
@@ -2303,15 +2305,15 @@ export function GameSurface({
     setAudioSettingsHydrated(true);
   }, [persistedGameAudioSettings]);
 
-  // Clear stale party dialogue when switching chats (M7)
-  const prevActiveChatRef = useRef(activeChatId);
+  // Clear stale runtime state when switching chats or replacing the game in the same chat.
+  const prevSceneRuntimeScopeRef = useRef(sceneRuntimeScopeKey);
   useEffect(() => {
     inventoryItemsRef.current = inventoryItems;
   }, [inventoryItems]);
 
   useEffect(() => {
-    if (prevActiveChatRef.current === activeChatId) return; // skip initial mount
-    prevActiveChatRef.current = activeChatId;
+    if (prevSceneRuntimeScopeRef.current === sceneRuntimeScopeKey) return; // skip initial mount
+    prevSceneRuntimeScopeRef.current = sceneRuntimeScopeKey;
     recentMusicHistoryRef.current = normalizeRecentMusicHistory(chatMeta.gameRecentMusic);
     recentSpotifyTrackHistoryRef.current = normalizeRecentSpotifyTrackHistory(chatMeta.gameRecentSpotifyTracks);
     setPartyDialogue([]);
@@ -2329,7 +2331,7 @@ export function GameSurface({
     setCombatSpriteSuggestion(null);
     setNarrationDoneMsgId(null);
     lastProcessedMsgRef.current = null;
-    // Reset inventory/readables for the new chat
+    // Reset inventory/readables for the new chat or game.
     setInventoryItems((chatMeta.gameInventory as Array<{ name: string; quantity: number }>) ?? []);
     setInventoryNotifications([]);
     setPendingInventorySegmentUpdates([]);
@@ -2344,7 +2346,7 @@ export function GameSurface({
     setPrepareSessionWidgetsOpen(false);
     // Allow the auto-tutorial to re-evaluate for the new chat (guard still gates on disabled flag)
     tutorialAutoTriggeredRef.current = false;
-  }, [activeChatId, chatMeta.gameInventory, chatMeta.gameRecentMusic, chatMeta.gameRecentSpotifyTracks]);
+  }, [sceneRuntimeScopeKey, chatMeta.gameInventory, chatMeta.gameRecentMusic, chatMeta.gameRecentSpotifyTracks]);
 
   const clearPendingInteractiveCommands = useCallback(() => {
     setActiveChoices(null);
@@ -2531,21 +2533,21 @@ export function GameSurface({
     fetchManifest();
   }, [fetchManifest]);
 
-  // Clean up audio + reset playback state when SWITCHING chats.
+  // Clean up audio + reset playback state when switching chats or replacing the game in the same chat.
   // On unmount, only dispose audio (stop sounds) but keep store state intact so that
   // same-chat remount (e.g. returning from persona editor) can read it immediately
   // without waiting for the scene restore effect.
-  const prevChatIdRef = useRef(activeChatId);
+  const prevSceneMediaScopeRef = useRef(sceneRuntimeScopeKey);
   useEffect(() => {
-    if (prevChatIdRef.current !== activeChatId) {
+    if (prevSceneMediaScopeRef.current !== sceneRuntimeScopeKey) {
       audioManager.dispose();
       useGameAssetStore.getState().resetPlaybackState();
-      prevChatIdRef.current = activeChatId;
+      prevSceneMediaScopeRef.current = sceneRuntimeScopeKey;
     }
     return () => {
       audioManager.dispose();
     };
-  }, [activeChatId]);
+  }, [sceneRuntimeScopeKey]);
 
   // Reconnect audio and background on mount if the store was disposed
   // (e.g. user left to home and returned to the same game).
@@ -3127,6 +3129,18 @@ export function GameSurface({
   // ── Restore scene assets (background/music/ambient) from chat metadata on page load ──
   const sceneRestoredRef = useRef(false);
   const partyDialogueRestoredRef = useRef(false);
+  const restoredSceneScopeRef = useRef(sceneRuntimeScopeKey);
+
+  useEffect(() => {
+    if (restoredSceneScopeRef.current === sceneRuntimeScopeKey) return;
+    restoredSceneScopeRef.current = sceneRuntimeScopeKey;
+    sceneRestoredRef.current = false;
+    partyDialogueRestoredRef.current = false;
+    isRestoredRef.current = false;
+    sceneReadyMsgIdRef.current = undefined;
+    weatherMsgRef.current = null;
+    lastProcessedMsgRef.current = null;
+  }, [sceneRuntimeScopeKey]);
 
   if (sceneReadyMsgIdRef.current === undefined && !isMessagesLoading) {
     if (latestAssistantMsg && !isStreaming) {
@@ -7421,23 +7435,23 @@ export function GameSurface({
     return undefined;
   }, [sceneAnalysisEnabled, chatBackground, currentBackground, scopedAssetMap]);
 
-  const lastResolvedBackgroundRef = useRef<{ chatId: string; url?: string }>({ chatId: activeChatId });
+  const lastResolvedBackgroundRef = useRef<{ scopeKey: string; url?: string }>({ scopeKey: sceneRuntimeScopeKey });
   useEffect(() => {
-    if (lastResolvedBackgroundRef.current.chatId !== activeChatId) {
-      lastResolvedBackgroundRef.current = { chatId: activeChatId };
+    if (lastResolvedBackgroundRef.current.scopeKey !== sceneRuntimeScopeKey) {
+      lastResolvedBackgroundRef.current = { scopeKey: sceneRuntimeScopeKey };
     }
-  }, [activeChatId]);
+  }, [sceneRuntimeScopeKey]);
   useEffect(() => {
     if (resolvedBackground !== undefined) {
-      lastResolvedBackgroundRef.current = { chatId: activeChatId, url: resolvedBackground };
-    } else if (!scenePreparing && lastResolvedBackgroundRef.current.chatId === activeChatId) {
-      lastResolvedBackgroundRef.current = { chatId: activeChatId };
+      lastResolvedBackgroundRef.current = { scopeKey: sceneRuntimeScopeKey, url: resolvedBackground };
+    } else if (!scenePreparing && lastResolvedBackgroundRef.current.scopeKey === sceneRuntimeScopeKey) {
+      lastResolvedBackgroundRef.current = { scopeKey: sceneRuntimeScopeKey };
     }
-  }, [activeChatId, resolvedBackground, scenePreparing]);
+  }, [sceneRuntimeScopeKey, resolvedBackground, scenePreparing]);
 
   const displayedBackground =
     resolvedBackground ??
-    (scenePreparing && lastResolvedBackgroundRef.current.chatId === activeChatId
+    (scenePreparing && lastResolvedBackgroundRef.current.scopeKey === sceneRuntimeScopeKey
       ? lastResolvedBackgroundRef.current.url
       : undefined);
 
