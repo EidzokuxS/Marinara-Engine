@@ -218,7 +218,24 @@ export function getNodeEnv() {
 }
 
 export function getLogLevel() {
+  if (isPromptConnectionLogPreset()) return "debug";
   return normalizeEnvValue(process.env.LOG_LEVEL) ?? "warn";
+}
+
+export function getLogPreset() {
+  return normalizeEnvValue(process.env.LOG_PRESET)?.toLowerCase() ?? "default";
+}
+
+export function isPromptConnectionLogPreset() {
+  const preset = getLogPreset().replace(/_/g, "-");
+  return preset === "prompt-connections";
+}
+
+export function isRequestLoggingDisabled() {
+  if (isPromptConnectionLogPreset()) return true;
+  const raw = normalizeEnvValue(process.env.LOG_DISABLE_REQUEST_LOGGING);
+  if (raw !== null) return isEnabledFlag(raw);
+  return false;
 }
 
 export function getServerProtocol() {

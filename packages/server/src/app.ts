@@ -30,6 +30,7 @@ import { getBuildCommit, getBuildLabel } from "./config/build-info.js";
 import {
   getLogLevel,
   getNodeEnv,
+  isRequestLoggingDisabled,
   isFileStorageBackend,
   isAutoCreateDefaultConnectionDisabled,
 } from "./config/runtime-config.js";
@@ -47,6 +48,7 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
       level: getLogLevel(),
       transport: getNodeEnv() !== "production" ? { target: "pino-pretty", options: { colorize: true } } : undefined,
     },
+    disableRequestLogging: isRequestLoggingDisabled,
     bodyLimit: MAX_UPLOAD_BYTES, // Large profile imports can include many base64 avatars.
     ...(https && { https }),
   });
