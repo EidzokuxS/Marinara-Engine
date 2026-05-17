@@ -1,12 +1,12 @@
 // ──────────────────────────────────────────────
 // React Query: Generation (streaming + agent pipeline)
 // ──────────────────────────────────────────────
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import type { AvatarCropValue } from "../lib/utils";
 import { useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { toast, type ExternalToast } from "sonner";
 import { api } from "../lib/api-client";
-import { formatAgentFailuresToast, toAgentFailure } from "../lib/agent-failures";
+import { formatAgentFailuresToast, toAgentFailure, type AgentFailure } from "../lib/agent-failures";
 import { chatBackgroundMetadataToUrl } from "../lib/backgrounds";
 import { agentKeys } from "./use-agents";
 import type { PendingCardUpdate } from "../stores/agent.store";
@@ -16,10 +16,33 @@ import {
   type EditableCharacterCardField,
 } from "@marinara-engine/shared";
 
+type RetryAgentsOptions = {
+  lorebookKeeperBackfill?: boolean;
+  forMessageId?: string;
+  secretPlotRerollMode?: "full" | "turn_only";
+};
+
+type RetryAgentsFn = (chatId: string, agentTypes: string[], options?: RetryAgentsOptions) => Promise<void>;
+
 /** Show a persistent, copyable error toast and log to console */
-function showError(msg: string) {
+function showError(msg: string, options?: Pick<ExternalToast, "action">) {
   console.error("[Generation]", msg);
-  toast.error(msg, { duration: 15000 });
+  toast.error(msg, { duration: 15000, ...options });
+}
+
+function showAgentFailuresError(failures: AgentFailure[], onRetry?: () => void) {
+  const hasIllustratorFailure = failures.some((failure) => failure.agentType === "illustrator");
+  showError(
+    formatAgentFailuresToast(failures),
+    hasIllustratorFailure && onRetry
+      ? {
+          action: {
+            label: "Try again",
+            onClick: () => onRetry(),
+          },
+        }
+      : undefined,
+  );
 }
 
 const shownAgentWarnings = new Set<string>();
@@ -538,6 +561,7 @@ function applyGameStatePatchToStore(
  */
 export function useGenerate() {
   const qc = useQueryClient();
+  const retryAgentsRef = useRef<RetryAgentsFn | null>(null);
   // Use individual selectors to avoid re-rendering on every store change
   const setStreaming = useChatStore((s) => s.setStreaming);
   const setMariPhase = useChatStore((s) => s.setMariPhase);
@@ -1363,7 +1387,9 @@ export function useGenerate() {
               const errData = event.data as { agentType: string; agentName?: string | null; error: string };
               const failure = toAgentFailure(errData);
               setFailedAgentFailures([failure]);
-              showError(formatAgentFailuresToast([failure]));
+              showAgentFailuresError([failure], () => {
+                void retryAgentsRef.current?.(params.chatId, [failure.agentType]);
+              });
               break;
             }
 
@@ -1531,7 +1557,12 @@ export function useGenerate() {
               }>;
               const failures = failedList.map(toAgentFailure);
               setFailedAgentFailures(failures);
-              showError(formatAgentFailuresToast(failures));
+              showAgentFailuresError(failures, () => {
+                void retryAgentsRef.current?.(
+                  params.chatId,
+                  failures.map((failure) => failure.agentType),
+                );
+              });
               break;
             }
           }
@@ -1751,15 +1782,7 @@ export function useGenerate() {
   );
 
   const retryAgents = useCallback(
-    async (
-      chatId: string,
-      agentTypes: string[],
-      options?: {
-        lorebookKeeperBackfill?: boolean;
-        forMessageId?: string;
-        secretPlotRerollMode?: "full" | "turn_only";
-      },
-    ) => {
+    async (chatId: string, agentTypes: string[], options?: RetryAgentsOptions) => {
       const isActiveChat = () => useChatStore.getState().activeChatId === chatId;
       const abortController = new AbortController();
       setProcessing(true);
@@ -1916,7 +1939,9 @@ export function useGenerate() {
                 const failure = toAgentFailure(result);
                 failedRetryFailures.push(failure);
                 setFailedAgentFailures(failedRetryFailures);
-                showError(formatAgentFailuresToast([failure]));
+                showAgentFailuresError([failure], () => {
+                  void retryAgentsRef.current?.(chatId, [failure.agentType], options);
+                });
               }
               break;
             }
@@ -1928,7 +1953,13 @@ export function useGenerate() {
               }>;
               const failures = failedList.map(toAgentFailure);
               setFailedAgentFailures(failures);
-              showError(formatAgentFailuresToast(failures));
+              showAgentFailuresError(failures, () => {
+                void retryAgentsRef.current?.(
+                  chatId,
+                  failures.map((failure) => failure.agentType),
+                  options,
+                );
+              });
               break;
             }
             case "game_state":
@@ -1959,7 +1990,9 @@ export function useGenerate() {
               hasError = true;
               const failure = toAgentFailure(errData);
               setFailedAgentFailures([failure]);
-              showError(formatAgentFailuresToast([failure]));
+              showAgentFailuresError([failure], () => {
+                void retryAgentsRef.current?.(chatId, [failure.agentType], options);
+              });
               break;
             }
             case "error": {
@@ -2007,6 +2040,8 @@ export function useGenerate() {
       qc,
     ],
   );
+
+  retryAgentsRef.current = retryAgents;
 
   return { generate, retryAgents };
 }

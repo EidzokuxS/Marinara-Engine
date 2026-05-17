@@ -477,7 +477,7 @@ function ActionsGroup({
   chatId,
   injectionSourceMessages,
   agentConfigs,
-  isVertical: _isVertical,
+  isVertical,
   agentsOpen,
   setAgentsOpen,
   isAgentProcessing,
@@ -534,6 +534,7 @@ function ActionsGroup({
   // Badge count — unique agent types that produced results
   const uniqueAgentCount = new Set(thoughtBubbles.map((b) => b.agentId)).size;
   const badgeCount = uniqueAgentCount + customAgentRuns.length + (echoMessages.length > 0 ? 1 : 0);
+  const showIllustratorRetry = failedAgentTypes.includes("illustrator") && !!onRetryFailedAgents;
 
   // ── Shared dropdown portal (used by both desktop & mobile) ──
   const dropdownContent =
@@ -577,7 +578,7 @@ function ActionsGroup({
     );
 
   return (
-    <div className="relative">
+    <div className={cn("relative flex items-center gap-1", isVertical && "flex-col")}>
       <button
         ref={btnRef}
         onClick={() => setAgentsOpen(!agentsOpen)}
@@ -611,6 +612,19 @@ function ActionsGroup({
           </span>
         )}
       </button>
+      {showIllustratorRetry && (
+        <button
+          type="button"
+          onClick={() => onRetryFailedAgents?.()}
+          disabled={isAgentProcessing}
+          className="flex h-8 items-center justify-center gap-1 rounded-lg border border-amber-400/30 bg-amber-500/15 px-2 text-[0.625rem] font-semibold text-amber-200 transition-colors hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-50 md:h-10"
+          title="Try Illustrator again"
+          aria-label="Try Illustrator again"
+        >
+          <RefreshCw size="0.75rem" className={cn("shrink-0", isAgentProcessing && "animate-spin")} />
+          <span className="hidden md:inline">{isAgentProcessing ? "Retrying..." : "Try again"}</span>
+        </button>
+      )}
       {dropdownContent}
     </div>
   );
