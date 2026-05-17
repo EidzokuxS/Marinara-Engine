@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ComponentProps,
+  type CSSProperties,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -99,11 +100,28 @@ function WeatherEffectsConnected() {
   );
 }
 
-function CrossfadeBackground({ url, className }: { url: string | null; className?: string }) {
+function getBackgroundBlurStyle(blurPx: number): Pick<CSSProperties, "filter" | "transform"> {
+  if (blurPx <= 0) return {};
+  return {
+    filter: `blur(${blurPx}px)`,
+    transform: `scale(${Math.min(1.08, 1 + blurPx * 0.0025)})`,
+  };
+}
+
+function CrossfadeBackground({
+  url,
+  className,
+  blurPx = 0,
+}: {
+  url: string | null;
+  className?: string;
+  blurPx?: number;
+}) {
   const [bgA, setBgA] = useState<string | null>(url);
   const [bgB, setBgB] = useState<string | null>(null);
   const [aActive, setAActive] = useState(true);
   const activeSlot = useRef<"a" | "b">("a");
+  const backgroundBlurStyle = getBackgroundBlurStyle(blurPx);
 
   useEffect(() => {
     const currentUrl = activeSlot.current === "a" ? bgA : bgB;
@@ -147,14 +165,24 @@ function CrossfadeBackground({ url, className }: { url: string | null; className
           "mari-background absolute inset-0 bg-cover bg-center bg-no-repeat transition-opacity duration-700 ease-in-out",
           className,
         )}
-        style={{ backgroundImage: bgA ? `url(${bgA})` : "none", opacity: aActive ? 1 : 0 }}
+        style={{
+          backgroundImage: bgA ? `url(${bgA})` : "none",
+          opacity: aActive ? 1 : 0,
+          transition: "opacity 700ms ease-in-out, filter 180ms ease-out, transform 180ms ease-out",
+          ...backgroundBlurStyle,
+        }}
       />
       <div
         className={cn(
           "mari-background absolute inset-0 bg-cover bg-center bg-no-repeat transition-opacity duration-700 ease-in-out",
           className,
         )}
-        style={{ backgroundImage: bgB ? `url(${bgB})` : "none", opacity: aActive ? 0 : 1 }}
+        style={{
+          backgroundImage: bgB ? `url(${bgB})` : "none",
+          opacity: aActive ? 0 : 1,
+          transition: "opacity 700ms ease-in-out, filter 180ms ease-out, transform 180ms ease-out",
+          ...backgroundBlurStyle,
+        }}
       />
     </>
   );
@@ -676,13 +704,14 @@ export function ChatRoleplaySurface({
     : undefined;
   const sidebarOpen = useUIStore((s) => s.sidebarOpen);
   const rightPanelOpen = useUIStore((s) => s.rightPanelOpen);
+  const chatBackgroundBlur = useUIStore((s) => s.chatBackgroundBlur);
   const hideEchoChamberOnMobile =
     sidebarOpen || rightPanelOpen || settingsOpen || filesOpen || galleryOpen || wizardOpen;
 
   return (
     <div data-component="ChatArea.Roleplay" className="flex flex-1 overflow-hidden">
       <div className="rpg-chat-area mari-chat-area relative flex flex-1 flex-col overflow-hidden">
-        <CrossfadeBackground url={chatBackground} />
+        <CrossfadeBackground url={chatBackground} blurPx={chatBackgroundBlur} />
         <div className="rpg-overlay absolute inset-0" />
         <div className="rpg-vignette pointer-events-none absolute inset-0" />
         {weatherEffects && <WeatherEffectsConnected />}

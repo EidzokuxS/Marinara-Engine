@@ -224,6 +224,8 @@ interface UIState {
   modal: { type: string; props?: Record<string, unknown> } | null;
   theme: "dark" | "light";
   chatBackground: string | null;
+  /** Native blur applied to selected chat/game background images, in px. */
+  chatBackgroundBlur: number;
   /** When set, the main area shows the full-page character editor instead of chat */
   characterDetailId: string | null;
   /** When set, the main area shows the full-page lorebook editor instead of chat */
@@ -452,6 +454,7 @@ interface UIState {
   closeModal: () => void;
   setTheme: (theme: "dark" | "light") => void;
   setChatBackground: (url: string | null) => void;
+  setChatBackgroundBlur: (v: number) => void;
   openCharacterDetail: (id: string) => void;
   closeCharacterDetail: () => void;
   openLorebookDetail: (id: string) => void;
@@ -600,6 +603,7 @@ export function pickSyncedSettings(state: UIState) {
     trackerPanelSectionOrder: state.trackerPanelSectionOrder,
     theme: state.theme,
     chatBackground: state.chatBackground,
+    chatBackgroundBlur: state.chatBackgroundBlur,
     fontSize: state.fontSize,
     language: state.language,
     chatFontSize: state.chatFontSize,
@@ -702,6 +706,7 @@ export const useUIStore = create<UIState>()(
       modal: null,
       theme: "dark" as const,
       chatBackground: null,
+      chatBackgroundBlur: 0,
       characterDetailId: null,
       lorebookDetailId: null,
       presetDetailId: null,
@@ -869,6 +874,7 @@ export const useUIStore = create<UIState>()(
       closeModal: () => set({ modal: null }),
       setTheme: (theme) => set({ theme }),
       setChatBackground: (url) => set({ chatBackground: url }),
+      setChatBackgroundBlur: (v) => set({ chatBackgroundBlur: Math.max(0, Math.min(24, Math.round(v))) }),
       openCharacterDetail: (id) =>
         set({
           characterDetailId: id,
@@ -1223,7 +1229,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "marinara-engine-ui",
-      version: 31,
+      version: 32,
       // Debounce localStorage writes to avoid sync I/O on every state change
       storage: createJSONStorage(() => {
         let timer: ReturnType<typeof setTimeout> | null = null;
@@ -1498,6 +1504,10 @@ export const useUIStore = create<UIState>()(
           persisted.summaryPopoverSettings = normalizeSummaryPopoverSettings(persisted.summaryPopoverSettings);
         }
         persisted.summaryPopoverSettings = normalizeSummaryPopoverSettings(persisted.summaryPopoverSettings);
+        // v31 -> v32: add native chat/game background blur.
+        if (version <= 31 && persisted.chatBackgroundBlur === undefined) {
+          persisted.chatBackgroundBlur = 0;
+        }
         return persisted;
       },
       partialize: (state) => ({
@@ -1514,6 +1524,7 @@ export const useUIStore = create<UIState>()(
         trackerPanelSectionOrder: state.trackerPanelSectionOrder,
         theme: state.theme,
         chatBackground: state.chatBackground,
+        chatBackgroundBlur: state.chatBackgroundBlur,
         fontSize: state.fontSize,
         language: state.language,
         chatFontSize: state.chatFontSize,

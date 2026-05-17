@@ -921,6 +921,8 @@ function AppearanceSettings() {
   const setVisualTheme = useUIStore((s) => s.setVisualTheme);
   const chatBackground = useUIStore((s) => s.chatBackground);
   const setChatBackgroundRaw = useUIStore((s) => s.setChatBackground);
+  const chatBackgroundBlur = useUIStore((s) => s.chatBackgroundBlur);
+  const setChatBackgroundBlur = useUIStore((s) => s.setChatBackgroundBlur);
   const activeChatId = useChatStore((s) => s.activeChatId);
   const updateMeta = useUpdateChatMetadata();
   // Persist background changes to the active chat's metadata immediately so
@@ -1701,6 +1703,26 @@ function AppearanceSettings() {
             </button>
           )}
         </div>
+        <label className="flex flex-col gap-1 rounded-lg bg-[var(--secondary)]/45 p-3 ring-1 ring-[var(--border)]/70">
+          <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium">
+            Background Blur
+            <HelpTooltip text="Softens selected Roleplay and Game mode background images behind the chat UI. Set to 0px to keep backgrounds sharp." />
+          </span>
+          <div className="flex items-center gap-3">
+            <input
+              type="range"
+              min={0}
+              max={24}
+              step={1}
+              value={chatBackgroundBlur}
+              onChange={(e) => setChatBackgroundBlur(Number(e.target.value))}
+              className="min-w-0 flex-1 accent-[var(--primary)]"
+            />
+            <span className="w-12 text-right text-xs tabular-nums text-[var(--muted-foreground)]">
+              {chatBackgroundBlur === 0 ? "Off" : `${chatBackgroundBlur}px`}
+            </span>
+          </div>
+        </label>
         <BackgroundPicker selected={chatBackground} onSelect={setChatBackground} />
       </div>
     </div>
