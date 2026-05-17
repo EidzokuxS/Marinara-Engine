@@ -4,6 +4,7 @@
 // Calls image generation APIs (OpenAI DALL-E, Pollinations, Stability, etc.)
 // based on a user's configured image_generation connection.
 
+import { createHash } from "crypto";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { inflateRawSync } from "zlib";
@@ -22,6 +23,7 @@ import {
   type NovelAiDefaults,
 } from "@marinara-engine/shared";
 import { isImageLocalUrlsEnabled } from "../../config/runtime-config.js";
+import { generateRunPodComfyUI } from "./runpod-comfyui.service.js";
 import { normalizeLoopbackUrl, safeFetch, validateOutboundUrl } from "../../utils/security.js";
 
 const GALLERY_DIR = join(DATA_DIR, "gallery");
@@ -43,6 +45,8 @@ export interface ImageGenRequest {
   width?: number;
   height?: number;
   model?: string;
+  /** For endpoint-based image services (e.g. RunPod): the endpoint/instance ID. */
+  imageEndpointId?: string;
   /** Optional ComfyUI workflow JSON. Placeholders like %prompt%, %width%, %height%, %seed% will be replaced. */
   comfyWorkflow?: string;
   /** Optional connection-scoped defaults for local Stable Diffusion backends. */
@@ -78,6 +82,7 @@ const EXPLICIT_IMAGE_SOURCES = new Set([
   "xai",
   "comfyui",
   "automatic1111",
+  "runpod_comfyui",
   "gemini_image",
 ]);
 
@@ -143,6 +148,16 @@ export async function generateImage(
       return generateXAI(normalizedBaseUrl, apiKey, scopedRequest);
     case "comfyui":
       return generateComfyUI(normalizedBaseUrl, scopedRequest);
+    case "runpod_comfyui": {
+      const endpointId = scopedRequest.imageEndpointId || "";
+      if (!endpointId) {
+        throw new Error(
+          "RunPod ComfyUI requires an endpoint ID. " +
+            "Enter your RunPod endpoint ID in the Endpoint ID field (e.g. 'abc123def456').",
+        );
+      }
+      return generateRunPodComfyUI(normalizedBaseUrl, endpointId, apiKey, scopedRequest);
+    }
     case "automatic1111":
       return generateAutomatic1111(normalizedBaseUrl, scopedRequest);
     case "gemini_image":
@@ -1583,10 +1598,7 @@ function buildDefaultComfyUiWorkflow(defaults: ComfyUiDefaults): Record<string, 
   return workflow;
 }
 
-function replaceComfyUiPlaceholders(
-  value: unknown,
-  replacements: Record<string, string | number>,
-): unknown {
+function replaceComfyUiPlaceholders(value: unknown, replacements: Record<string, string | number>): unknown {
   if (typeof value === "string") {
     const exactReplacement = replacements[value];
     if (exactReplacement !== undefined) return exactReplacement;
@@ -1608,6 +1620,34 @@ function replaceComfyUiPlaceholders(
   }
 
   return value;
+}
+
+async function uploadComfyReferenceImage(base: string, reference: string): Promise<string> {
+  const decoded = decodeReferenceImage(reference);
+  const imageBytes = Buffer.from(decoded.base64, "base64");
+  const hash = createHash("sha256").update(imageBytes).digest("hex").slice(0, 16);
+  const filename = `marinara-ref-${hash}.${decoded.ext}`;
+
+  const formData = new FormData();
+  formData.append("image", new Blob([imageBytes], { type: decoded.mimeType }), filename);
+  formData.append("overwrite", "true");
+
+  const resp = await localImageBackendFetch(`${base}/upload/image`, {
+    method: "POST",
+    body: formData,
+    signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => "Unknown error");
+    throw new Error(`ComfyUI reference image upload failed (${resp.status}): ${sanitizeErrorText(errText)}`);
+  }
+
+  const result = (await resp.json()) as { name?: string };
+  if (!result.name) {
+    throw new Error("ComfyUI did not return a filename for the uploaded reference image");
+  }
+  return result.name;
 }
 
 async function generateComfyUI(baseUrl: string, request: ImageGenRequest): Promise<ImageGenResult> {
@@ -1648,10 +1688,12 @@ async function generateComfyUI(baseUrl: string, request: ImageGenRequest): Promi
   if (request.model) {
     replacements["%model%"] = request.model;
   }
-  if (request.referenceImage) {
-    replacements["%reference_image%"] = request.referenceImage;
-  } else if (request.referenceImages?.length) {
-    replacements["%reference_image%"] = request.referenceImages[0]!;
+  const reference = request.referenceImage ?? request.referenceImages?.[0];
+  if (reference) {
+    replacements["%reference_image%"] = reference;
+    if (JSON.stringify(workflow).includes("%reference_image_name%")) {
+      replacements["%reference_image_name%"] = await uploadComfyReferenceImage(base, reference);
+    }
   }
   const resolvedWorkflow = replaceComfyUiPlaceholders(workflow, replacements);
 

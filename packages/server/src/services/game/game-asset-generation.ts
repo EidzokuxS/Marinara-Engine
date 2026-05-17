@@ -260,6 +260,7 @@ export interface NpcPortraitRequest {
   imgBaseUrl: string;
   imgApiKey: string;
   imgService?: string | null;
+  imgEndpointId?: string | null;
   imgComfyWorkflow?: string | undefined;
   imgDefaults?: ImageGenerationDefaultsProfile | null;
   debugLog?: (message: string, ...args: any[]) => void;
@@ -320,6 +321,7 @@ export async function generateNpcPortrait(req: NpcPortraitRequest): Promise<stri
         model: req.imgModel,
         width: size.width,
         height: size.height,
+        imageEndpointId: req.imgEndpointId || undefined,
         comfyWorkflow: req.imgComfyWorkflow || undefined,
         imageDefaults: req.imgDefaults ?? undefined,
       },
@@ -371,6 +373,7 @@ export interface BackgroundGenRequest {
   imgBaseUrl: string;
   imgApiKey: string;
   imgService?: string | null;
+  imgEndpointId?: string | null;
   imgComfyWorkflow?: string | undefined;
   imgDefaults?: ImageGenerationDefaultsProfile | null;
   debugLog?: (message: string, ...args: any[]) => void;
@@ -403,6 +406,7 @@ export interface SceneIllustrationGenRequest {
   imgBaseUrl: string;
   imgApiKey: string;
   imgService?: string | null;
+  imgEndpointId?: string | null;
   imgComfyWorkflow?: string | undefined;
   imgDefaults?: ImageGenerationDefaultsProfile | null;
   debugLog?: (message: string, ...args: any[]) => void;
@@ -497,6 +501,7 @@ export async function generateBackground(req: BackgroundGenRequest): Promise<str
         model: req.imgModel,
         width: size.width,
         height: size.height,
+        imageEndpointId: req.imgEndpointId || undefined,
         comfyWorkflow: req.imgComfyWorkflow || undefined,
         imageDefaults: req.imgDefaults ?? undefined,
       },
@@ -563,6 +568,7 @@ export async function generateChatBackground(req: ChatBackgroundGenRequest): Pro
         model: req.imgModel,
         width: size.width,
         height: size.height,
+        imageEndpointId: req.imgEndpointId || undefined,
         comfyWorkflow: req.imgComfyWorkflow || undefined,
         imageDefaults: req.imgDefaults ?? undefined,
       },
@@ -626,6 +632,7 @@ export async function generateSceneIllustration(req: SceneIllustrationGenRequest
         model: req.imgModel,
         width: size.width,
         height: size.height,
+        imageEndpointId: req.imgEndpointId || undefined,
         comfyWorkflow: req.imgComfyWorkflow || undefined,
         imageDefaults: req.imgDefaults ?? undefined,
         referenceImages: req.referenceImages?.length ? req.referenceImages.slice(0, 4) : undefined,

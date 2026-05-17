@@ -138,9 +138,7 @@ async function readAvatarDataUrl(avatarPath: string | null | undefined): Promise
 // Read every sprite file in data/sprites/<id>/ and return it as
 // { filename, data } so import can restore the same expression set under a
 // new id.
-async function readSpritesForId(
-  id: string,
-): Promise<Array<{ filename: string; data: string }>> {
+async function readSpritesForId(id: string): Promise<Array<{ filename: string; data: string }>> {
   const dir = join(DATA_DIR, "sprites", id);
   if (!existsSync(dir)) return [];
   let entries: string[];
@@ -334,6 +332,7 @@ export async function charactersRoutes(app: FastifyInstance) {
         height,
         referenceImage: referenceImages[0],
         referenceImages: referenceImages.length > 1 ? referenceImages : undefined,
+        imageEndpointId: conn.imageEndpointId || undefined,
         comfyWorkflow: conn.comfyuiWorkflow || undefined,
         imageDefaults,
       });
