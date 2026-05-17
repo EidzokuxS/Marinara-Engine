@@ -50,6 +50,10 @@ export interface GmPromptContext {
   rating?: "sfw" | "nsfw";
   /** Whether a separate scene model handles bg, music, sfx, ambient, widgets, expressions */
   hasSceneModel?: boolean;
+  /** Whether inline GM scene tags may request generated location backgrounds. */
+  canGenerateBackgrounds?: boolean;
+  /** Unified image style/instructions generated during game setup. */
+  artStylePrompt?: string;
   /** Whether the player moved to a new location since last turn (false = send location summary instead of full map) */
   playerMoved?: boolean;
   /** Approximate turn number in the current session (1-based, used for prompt gating) */
@@ -607,6 +611,8 @@ export function buildGmFormatReminder(
   ctx: Pick<
     GmPromptContext,
     | "hasSceneModel"
+    | "canGenerateBackgrounds"
+    | "artStylePrompt"
     | "hudWidgets"
     | "turnNumber"
     | "gameActiveState"
@@ -781,6 +787,16 @@ export function buildGmFormatReminder(
 
   if (!ctx.hasSceneModel) {
     lines.push(`Scene tags allowed: [sfx: ...] [bg: ...] [ambient: ...]`);
+    if (ctx.canGenerateBackgrounds) {
+      lines.push(
+        `- If the scene moves to a new visually important location and no existing background tag fits, use [bg: backgrounds:generated:<short-location-slug>].`,
+      );
+      if (ctx.artStylePrompt?.trim()) {
+        lines.push(
+          `- Generated scene images must follow this visual instruction: ${normalizePromptText(ctx.artStylePrompt)}.`,
+        );
+      }
+    }
   }
 
   if (hudWidgets.length > 0) {
