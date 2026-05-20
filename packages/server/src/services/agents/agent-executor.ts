@@ -1426,9 +1426,61 @@ function extractJson(text: string): string {
 
 /** Fix common LLM JSON mistakes: trailing commas, comments, ellipsis placeholders. */
 function repairJson(str: string): string {
-  return str
-    .replace(/\/\/[^\n]*/g, "") // remove single-line comments
-    .replace(/\/\*[\s\S]*?\*\//g, "") // remove multi-line comments
-    .replace(/,\s*([\]\}])/g, "$1") // remove trailing commas before ] or }
-    .replace(/\.\.\.[^"\n]*/g, ""); // remove ... continuations/placeholders
+  try {
+    JSON.parse(str);
+    return str;
+  } catch {
+    return stripJsonRepairTokens(str).replace(/,\s*([\]\}])/g, "$1");
+  }
+}
+
+function stripJsonRepairTokens(str: string): string {
+  let repaired = "";
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < str.length; index += 1) {
+    const char = str[index] ?? "";
+    const next = str[index + 1];
+    const nextTwo = str.slice(index, index + 3);
+
+    if (inString) {
+      repaired += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      repaired += char;
+      continue;
+    }
+
+    if (char === "/" && next === "/") {
+      while (index + 1 < str.length && str[index + 1] !== "\n") index += 1;
+      continue;
+    }
+
+    if (char === "/" && next === "*") {
+      index += 2;
+      while (index + 1 < str.length && !(str[index] === "*" && str[index + 1] === "/")) index += 1;
+      index += 1;
+      continue;
+    }
+
+    if (nextTwo === "...") {
+      index += 2;
+      continue;
+    }
+
+    repaired += char;
+  }
+
+  return repaired;
 }
