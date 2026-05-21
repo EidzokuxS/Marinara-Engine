@@ -28,7 +28,7 @@ echo  [OK] Installer started successfully
 echo.
 
 :: -- Choose install location --
-set "INSTALL_DIR=%USERPROFILE%\Marinara-Engine"
+set "INSTALL_DIR=%LOCALAPPDATA%\Marinara-Engine"
 set "USER_INPUT="
 set /p "USER_INPUT=  Install location [%INSTALL_DIR%]: "
 if not "%USER_INPUT%"=="" set "INSTALL_DIR=%USER_INPUT%"
