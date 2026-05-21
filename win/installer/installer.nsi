@@ -46,7 +46,7 @@ ShowInstDetails show
 !define MUI_UNICON "app-icon.ico"
 !define MUI_ABORTWARNING
 !define MUI_ABORTWARNING_TEXT "Are you sure you want to cancel ${APP_NAME} installation?"
-BrandingText "${APP_NAME} v${APP_VERSION} — AI Chat & Roleplay Engine"
+BrandingText "${APP_NAME} v${APP_VERSION} - AI Chat & Roleplay Engine"
 
 ; ── Header image (150x57 banner shown on every page) ──
 ; Uncomment if you create installer/header.bmp:
@@ -69,9 +69,8 @@ Click Next to continue."
 
 ; ── Directory page ──
 !define MUI_DIRECTORYPAGE_TEXT_TOP "\
-Choose where to install ${APP_NAME}. About 3 GB of free space is recommended for the app, dependencies, and local data.$\r$\n$\r$\n\
-If you are upgrading an existing install, choose the same Marinara-Engine folder that already contains your data. Your chats, characters, and data live under packages\server\data inside this folder.$\r$\n$\r$\n\
-During install, Windows may count thousands of dependency folders; those are app files, not your chats."
+Choose where to install ${APP_NAME}. About 3 GB of free space is recommended.$\r$\n$\r$\n\
+Upgrading? Pick the same Marinara-Engine folder that already has your data. Chats and characters live under packages\server\data. Windows may count many dependency folders; those are normal app files."
 
 ; ── Finish page ──
 !define MUI_FINISHPAGE_TITLE "Installation Complete!"
@@ -153,17 +152,17 @@ Function WarnSameDirectoryReinstall
   ${EndIf}
   ${If} ${FileExists} "$INSTDIR\packages\server\data\*.*"
     StrCpy $1 "1"
-    StrCpy $USER_DATA_PATHS "$USER_DATA_PATHS$\r$\n  - $INSTDIR\packages\server\data"
+    StrCpy $USER_DATA_PATHS "$USER_DATA_PATHS$\r$\n$INSTDIR\packages\server\data"
   ${EndIf}
   ${If} ${FileExists} "$INSTDIR\data\*.*"
     StrCpy $1 "1"
-    StrCpy $USER_DATA_PATHS "$USER_DATA_PATHS$\r$\n  - $INSTDIR\data"
+    StrCpy $USER_DATA_PATHS "$USER_DATA_PATHS$\r$\n$INSTDIR\data"
   ${EndIf}
   ${If} $1 != "1"
     Return
   ${EndIf}
   ${If} $USER_DATA_PATHS == ""
-    StrCpy $USER_DATA_PATHS "$\r$\n  - $INSTDIR\packages\server\data (if present)$\r$\n  - $INSTDIR\data (older installs, if present)"
+    StrCpy $USER_DATA_PATHS "$\r$\n$INSTDIR\packages\server\data (if present)$\r$\n$INSTDIR\data (older installs, if present)"
   ${EndIf}
 
   MessageBox MB_YESNO|MB_ICONEXCLAMATION "\
