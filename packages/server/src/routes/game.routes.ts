@@ -3621,6 +3621,11 @@ export async function gameRoutes(app: FastifyInstance) {
         gameLastIllustrationTurn: _previousIllustrationTurn,
         gameLastIllustrationSessionNumber: _previousIllustrationSessionNumber,
         gameLastIllustrationTag: _previousIllustrationTag,
+        gameSceneBackground: _previousSceneBackground,
+        gameSceneMusic: _previousSceneMusic,
+        gameSceneAmbient: _previousSceneAmbient,
+        gameRecentMusic: _previousRecentMusic,
+        gameRecentSpotifyTracks: _previousRecentSpotifyTracks,
         ...carryMeta
       } = prevMeta;
 
@@ -3637,6 +3642,11 @@ export async function gameRoutes(app: FastifyInstance) {
         gamePreviousSessionSummaries: summaries,
         gameDialogueChatId: null,
         gameCombatChatId: null,
+        gameSceneBackground: null,
+        gameSceneMusic: null,
+        gameSceneAmbient: null,
+        gameRecentMusic: [],
+        gameRecentSpotifyTracks: [],
         ...(carriedSetupConfig ? { gameSetupConfig: carriedSetupConfig } : {}),
         gamePartyCharacterIds: carriedPartyIds,
         enableAgents: true,
