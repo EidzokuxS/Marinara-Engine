@@ -12,6 +12,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/server/package.json packages/server/
 COPY packages/client/package.json packages/client/
+COPY scripts/clean-stale-client-artifacts.mjs scripts/clean-stale-client-artifacts.mjs
 
 # Enable corepack — version is read from the packageManager field in package.json
 RUN corepack enable && corepack install
@@ -56,6 +57,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/server/package.json packages/server/
 COPY packages/client/package.json packages/client/
+COPY scripts/clean-stale-client-artifacts.mjs scripts/clean-stale-client-artifacts.mjs
 
 # Enable corepack — version is read from the packageManager field in package.json
 RUN corepack enable && corepack install
