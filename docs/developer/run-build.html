@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Run and Build Marinara</title>
+    <link rel="stylesheet" href="./docs.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <strong>Marinara Engine</strong>
+          <span>Developer docs</span>
+        </div>
+        <nav class="nav" aria-label="Documentation">
+          <a href="./index.html">Overview</a>
+          <a href="./getting-started.html">Getting started</a>
+          <a href="./run-build.html" aria-current="page">Run and build</a>
+          <a href="./architecture.html">Architecture</a>
+          <a href="./modules.html">Modules</a>
+          <a href="./impact-areas.html">Impact areas</a>
+        </nav>
+      </aside>
+
+      <main class="content">
+        <p class="eyebrow">Local development</p>
+        <h1>Run and build the Tauri app from a clean checkout.</h1>
+        <p class="lead">
+          The app uses Vite for the React webview and Tauri v2 for the desktop
+          shell. Tauri starts Vite on port <code>1420</code> during desktop
+          development and bundles <code>dist/</code> for production builds.
+        </p>
+
+        <h2>Prerequisites</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Tool</th>
+              <th>Why it is needed</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Node.js and pnpm</td>
+              <td>Install JavaScript dependencies and run Vite, TypeScript, and Tauri CLI scripts.</td>
+            </tr>
+            <tr>
+              <td>Rust stable toolchain</td>
+              <td>Compile the Tauri host and Rust capability crates.</td>
+            </tr>
+            <tr>
+              <td>Platform Tauri prerequisites</td>
+              <td>Install the OS webview/build prerequisites required by Tauri for your platform.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2>Install Dependencies</h2>
+        <p>Run from the repo root:</p>
+        <pre><code>pnpm install</code></pre>
+
+        <h2>Run The Desktop App</h2>
+        <p>
+          This is the normal local development command. It starts Vite through
+          Tauri's <code>beforeDevCommand</code>, opens the Tauri window, and
+          connects the webview to <code>http://localhost:1420</code>.
+        </p>
+        <pre><code>pnpm tauri dev</code></pre>
+
+        <div class="callout">
+          Port <code>1420</code> is strict in <code>vite.config.ts</code>. If it
+          is already in use, stop the process using that port before running
+          Tauri dev.
+        </div>
+
+        <h2>Run The Web Shell Only</h2>
+        <p>
+          Use this when you only need the React webview. Tauri-only capabilities
+          may not work correctly because the desktop host is not running.
+        </p>
+        <pre><code>pnpm dev</code></pre>
+
+        <h2>Build The App</h2>
+        <p>Run the frontend build:</p>
+        <pre><code>pnpm build</code></pre>
+        <p>Build the Tauri desktop bundle:</p>
+        <pre><code>pnpm tauri build</code></pre>
+        <p>
+          Tauri runs <code>pnpm build</code> before bundling because
+          <code>src-tauri/tauri.conf.json</code> sets
+          <code>beforeBuildCommand</code> to <code>pnpm build</code>.
+        </p>
+        <p>
+          The public app name for bundles and the desktop window comes from
+          <code>src-tauri/tauri.conf.json</code>. Keep
+          <code>productName</code> and the main window <code>title</code> set to
+          <code>Marinara Engine</code>.
+        </p>
+
+        <h2>Run The Remote Rust Runtime</h2>
+        <p>
+          The remote runtime hosts the Rust API only. It does not serve the
+          React UI. Desktop clients can point Settings &gt; Advanced &gt; Remote
+          Runtime URL at this server to route supported storage, import,
+          connection, model-list, and LLM calls through HTTP.
+        </p>
+        <pre><code>cargo run --manifest-path src-tauri/Cargo.toml --bin marinara-server</code></pre>
+        <p>By default it listens on:</p>
+        <pre><code>http://127.0.0.1:8787</code></pre>
+        <p>Check the server with:</p>
+        <pre><code>curl http://127.0.0.1:8787/health</code></pre>
+        <p>Override the bind address and data directory with:</p>
+        <pre><code>MARINARA_SERVER_ADDR=0.0.0.0:8787
+MARINARA_DATA_DIR=/path/to/data</code></pre>
+        <div class="callout">
+          Remote-capable features must use the shared API HTTP pipeline:
+          <code>src/shared/api</code> wrapper, <code>remote-runtime.ts</code>
+          allowlist, <code>/api/invoke</code> or a dedicated HTTP route, then
+          <code>src-tauri/src/http_dispatch.rs</code> and the focused Rust
+          module. Do not call the server directly from feature or engine code.
+        </div>
+
+        <h2>Run The Remote Runtime With Docker</h2>
+        <p>Build and start the Rust API server with Docker Compose:</p>
+        <pre><code>docker compose up --build</code></pre>
+        <p>The compose service exposes:</p>
+        <pre><code>http://127.0.0.1:8787</code></pre>
+        <p>To build directly from GitHub, use Docker's remote git context:</p>
+        <pre><code>docker build -t marinara-engine-server https://github.com/Pasta-Devs/Marinara-Engine-Refactor.git#main
+docker run --rm -p 8787:8787 -v marinara-server-data:/data marinara-engine-server</code></pre>
+
+        <h2>Checks</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Use it when</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>pnpm typecheck</code></td>
+              <td>TypeScript, React, shared API, or engine code changed.</td>
+            </tr>
+            <tr>
+              <td><code>pnpm build</code></td>
+              <td>Imports, build output, frontend bundling, or production behavior changed.</td>
+            </tr>
+            <tr>
+              <td><code>cargo check --manifest-path src-tauri/Cargo.toml</code></td>
+              <td>Rust commands, capability crates, provider transport, storage, assets, or integrations changed.</td>
+            </tr>
+            <tr>
+              <td><code>pnpm check:docs</code></td>
+              <td>Docs, agent instructions, or repo skills changed.</td>
+            </tr>
+            <tr>
+              <td><code>pnpm check</code></td>
+              <td>Run the standard TypeScript, Rust, and docs checks together.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2>How Tauri Uses The Frontend</h2>
+        <pre class="mermaid">
+sequenceDiagram
+  participant Dev as Developer
+  participant Tauri as pnpm tauri dev
+  participant Vite as Vite dev server :1420
+  participant Rust as Rust Tauri host
+  participant Remote as marinara-server HTTP runtime
+  participant UI as React webview
+
+  Dev->>Tauri: pnpm tauri dev
+  Tauri->>Vite: beforeDevCommand pnpm dev
+  Tauri->>Rust: compile and launch
+  Rust->>UI: create desktop window
+  UI->>Vite: load app from devUrl
+  UI->>Rust: invoke embedded commands by default
+  UI->>Remote: route supported calls over HTTP when Remote Runtime URL is set
+        </pre>
+
+        <h2>Run These Docs</h2>
+        <p>Serve the static docs locally:</p>
+        <pre><code>pnpm docs:dev</code></pre>
+        <p>Then open:</p>
+        <pre><code>http://127.0.0.1:4174/</code></pre>
+        <p>
+          You can also open <code>docs/developer/index.html</code> directly from
+          the filesystem.
+        </p>
+        <div class="callout">
+          Use <code>pnpm docs:dev</code>, not <code>pnpm docs</code>. The shorter
+          command collides with pnpm/npm package documentation behavior.
+        </div>
+
+        <p class="footer">
+          Keep run/build command changes in sync with <code>package.json</code>,
+          <code>vite.config.ts</code>, and <code>src-tauri/tauri.conf.json</code>.
+        </p>
+      </main>
+    </div>
+    <script type="module" src="./shared.js"></script>
+  </body>
+</html>

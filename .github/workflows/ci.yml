@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    name: Frontend, Architecture, and Organization
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check:architecture
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm perf:size
+      - run: pnpm check:docs
+      - name: Unused code report
+        run: pnpm check:unused
+        continue-on-error: true
+
+  rust:
+    name: Rust Capability Layer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest,cargo-deny,cargo-machete
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+      - run: cargo check --manifest-path src-tauri/Cargo.toml --workspace
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
+      - run: cargo nextest run --manifest-path src-tauri/Cargo.toml --workspace
+      - name: Rust dependency policy report
+        run: cargo deny --manifest-path src-tauri/Cargo.toml check
+        continue-on-error: true
+      - name: Unused Rust dependency report
+        run: cargo machete --manifest-path src-tauri/Cargo.toml
+        continue-on-error: true
+
+  smoke:
+    name: Browser Smoke and Performance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:ui
+      - run: pnpm perf:lighthouse
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          if-no-files-found: ignore
