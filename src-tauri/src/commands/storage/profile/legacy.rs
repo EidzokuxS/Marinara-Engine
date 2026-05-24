@@ -2,7 +2,8 @@ use super::super::{
     game_state_snapshots,
     shared::{
         materialize_message_swipe_fields, non_negative_i64_value,
-        normalize_legacy_text_array_fields, string_array_from_value,
+        normalize_legacy_text_array_fields, normalize_legacy_text_bool_fields,
+        string_array_from_value,
     },
 };
 use super::assets::{normalize_legacy_profile_asset_paths, restore_legacy_profile_json_assets};
@@ -173,6 +174,18 @@ fn add_legacy_lorebook_links(rows: &mut [Value], tables: &Map<String, Value>) {
         normalize_legacy_text_array_fields(
             row,
             &["tags", "characterIds", "personaIds"],
+        );
+        // Pre-refactor also stored bool columns as TEXT (`"false"` / `"true"`).
+        // Without coercion, the frontend reads `lorebook.isGlobal === "false"`
+        // as truthy and renders every scoped lorebook as global in the editor.
+        normalize_legacy_text_bool_fields(
+            row,
+            &[
+                "isGlobal",
+                "enabled",
+                "recursiveScanning",
+                "excludeFromVectorization",
+            ],
         );
         let Some(object) = row.as_object_mut() else {
             continue;

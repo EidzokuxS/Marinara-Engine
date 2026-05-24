@@ -415,6 +415,38 @@ pub(crate) fn string_array_from_value(value: Option<&Value>) -> Vec<String> {
     }
 }
 
+/// Replace any text-encoded boolean field on a record object with a real
+/// JSON boolean. The pre-refactor server stored bool columns as TEXT
+/// (`"true"` / `"false"` strings); the refactor frontend reads these
+/// directly, so `lorebook.isGlobal === "false"` evaluates truthy and every
+/// scoped lorebook renders as a global one. Called from the migration
+/// import paths to bridge that schema gap.
+pub(crate) fn normalize_legacy_text_bool_fields(record: &mut Value, fields: &[&str]) {
+    let Some(object) = record.as_object_mut() else {
+        return;
+    };
+    for field in fields {
+        let Some(entry) = object.get_mut(*field) else {
+            continue;
+        };
+        if entry.is_boolean() {
+            continue;
+        }
+        let coerced = match entry.as_str().map(str::trim).map(str::to_ascii_lowercase) {
+            Some(raw) if raw == "true" || raw == "1" || raw == "yes" || raw == "on" => true,
+            Some(raw) if raw == "false" || raw == "0" || raw == "no" || raw == "off" => false,
+            _ => match entry.as_i64() {
+                Some(n) => n != 0,
+                None => match entry.as_f64() {
+                    Some(n) => n != 0.0,
+                    None => false,
+                },
+            },
+        };
+        *entry = Value::Bool(coerced);
+    }
+}
+
 /// Replace any text-encoded JSON-array field on a record object with a real
 /// JSON array. The pre-refactor server stored `tags`, `characterIds`,
 /// `personaIds`, etc. as TEXT columns (a JSON-stringified array); the

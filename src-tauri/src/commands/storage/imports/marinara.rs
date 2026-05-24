@@ -437,6 +437,18 @@ fn import_marinara_lorebook(
         &mut lorebook_data,
         &["tags", "characterIds", "personaIds"],
     );
+    // Pre-refactor also stored bool columns as TEXT (`"false"` / `"true"`).
+    // Refactor reads these directly, so `lorebook.isGlobal === "false"` is
+    // truthy and the editor shows every scoped lorebook as global.
+    normalize_legacy_text_bool_fields(
+        &mut lorebook_data,
+        &[
+            "isGlobal",
+            "enabled",
+            "recursiveScanning",
+            "excludeFromVectorization",
+        ],
+    );
     let mut lorebook = with_entity_defaults("lorebooks", lorebook_data.clone());
     if let Some(image) = data
         .get("avatar")
