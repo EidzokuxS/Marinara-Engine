@@ -1,109 +1,54 @@
-# ──────────────────────────────────────────────
-# Marinara Engine — Multi-stage Docker Build
-# ──────────────────────────────────────────────
+# syntax=docker/dockerfile:1
 
-# ── Stage 1: Build ──
-FROM node:24-slim AS builder
-ARG BUILD_COMMIT
+FROM rust:1-bookworm AS builder
+
 WORKDIR /app
 
-# Copy workspace config first (layer cache for deps)
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
-COPY packages/shared/package.json packages/shared/
-COPY packages/server/package.json packages/server/
-COPY packages/client/package.json packages/client/
-COPY scripts/clean-stale-client-artifacts.mjs scripts/clean-stale-client-artifacts.mjs
-
-# Enable corepack — version is read from the packageManager field in package.json
-RUN corepack enable && corepack install
-
-# Install all dependencies (including dev for building)
-# Use cache mount to avoid storing pnpm store in image
-RUN --mount=type=cache,target=/app/.pnpm-store \
-    pnpm install --frozen-lockfile
-
-# Copy source code
-COPY tsconfig.base.json ./
-COPY packages/shared/ packages/shared/
-COPY packages/server/ packages/server/
-COPY packages/client/ packages/client/
-
-# Build everything: shared → server + client in parallel
-# Increase heap for ARM64 emulation (QEMU) where memory pressure is high
-ENV NODE_OPTIONS="--max-old-space-size=4096"
-RUN pnpm build
-
-# Bake the git commit into build-meta.json so the app can display it.
-# __dirname in build-info.js resolves to packages/server/dist/config/
-RUN if [ -n "$BUILD_COMMIT" ]; then \
-      echo "{\"commit\":\"$BUILD_COMMIT\"}" > packages/server/dist/config/build-meta.json; \
-    fi
-
-# ── Stage 2: Production ──
-FROM node:24-slim AS production
-WORKDIR /app
-
-# llama-server dynamically links these at runtime
+# The server binary is Rust-only at runtime, but it currently lives in the Tauri
+# package, so Linux needs the native libraries required to compile that package.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      libssl3 \
-      libgomp1 \
-      libvulkan1 \
-      python3 \
-      python3-venv \
-    && rm -rf /var/lib/apt/lists/*
+    pkg-config \
+    libglib2.0-dev \
+    libgtk-3-dev \
+    libwebkit2gtk-4.1-dev \
+    libayatana-appindicator3-dev \
+    librsvg2-dev \
+    libsoup-3.0-dev \
+    ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
-# Copy workspace config
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
-COPY packages/shared/package.json packages/shared/
-COPY packages/server/package.json packages/server/
-COPY packages/client/package.json packages/client/
-COPY scripts/clean-stale-client-artifacts.mjs scripts/clean-stale-client-artifacts.mjs
+COPY src-tauri/Cargo.toml src-tauri/Cargo.lock ./src-tauri/
+COPY src-tauri/crates ./src-tauri/crates
+COPY src-tauri/src ./src-tauri/src
+COPY src-tauri/build.rs ./src-tauri/build.rs
+COPY src-tauri/tauri.conf.json ./src-tauri/tauri.conf.json
+COPY src-tauri/capabilities ./src-tauri/capabilities
+COPY src-tauri/icons ./src-tauri/icons
+COPY src-tauri/resources ./src-tauri/resources
 
-# Enable corepack — version is read from the packageManager field in package.json
-RUN corepack enable && corepack install
+RUN cargo build --manifest-path src-tauri/Cargo.toml --release --bin marinara-server
 
-# Install production deps only
-# Use cache mount to avoid storing pnpm store in image
-# Strip onnxruntime-web WASM blobs, uses onnxruntime-node (native)
-RUN --mount=type=cache,target=/app/.pnpm-store \
-    pnpm install --frozen-lockfile --prod && \
-    rm -rf /app/node_modules/.pnpm/onnxruntime-web@*
+FROM debian:bookworm-slim AS runtime
 
-# Copy built artifacts from builder
-COPY --from=builder /app/packages/shared/dist packages/shared/dist
-COPY --from=builder /app/packages/server/dist packages/server/dist
-COPY --from=builder /app/packages/client/dist packages/client/dist
-COPY scripts/docker-entrypoint.mjs /usr/local/bin/marinara-docker-entrypoint.mjs
-COPY scripts/install-backgroundremover.mjs scripts/install-backgroundremover.mjs
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libwebkit2gtk-4.1-0 \
+    libayatana-appindicator3-1 \
+    librsvg2-2 \
+    libsoup-3.0-0 \
+    ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
-# Ensure /app/data exists for runtime use (file storage, uploads, generated assets)
-RUN mkdir -p /app/data && \
-    chown node:node /app/data
+WORKDIR /app
 
-# Point the server at /app/data regardless of working directory
-ENV DATA_DIR=/app/data
-ENV FILE_STORAGE_DIR=/app/data/storage
-# Pin the Claude Agent SDK + synthetic-session writer to a path under the
-# already-chowned data volume. Avoids the post-setuid HOME=/root trap and
-# makes the future "mount your host ~/.claude here" workflow a single
-# -v flag for the user.
-ENV CLAUDE_CONFIG_DIR=/app/data/claude-config
+COPY --from=builder /app/src-tauri/target/release/marinara-server /usr/local/bin/marinara-server
+COPY --from=builder /app/src-tauri/resources /app/src-tauri/resources
 
-# File-native storage + user uploads live in /app/data at runtime.
-# Mount a volume here for persistence.
-VOLUME /app/data
+ENV MARINARA_SERVER_ADDR=0.0.0.0:8787
+ENV MARINARA_DATA_DIR=/data
 
-# Default port
-ENV PORT=7860
-ENV HOST=0.0.0.0
-ENV NODE_ENV=production
-ENV MARINARA_DOCKER=true
-ENV MARINARA_DOCKER_USER=node
-ENV MARINARA_DOCKER_GROUP=node
-EXPOSE 7860
+EXPOSE 8787
+VOLUME ["/data"]
 
-USER root
-
-# Run the server (serves both API and client SPA)
-ENTRYPOINT ["node", "/usr/local/bin/marinara-docker-entrypoint.mjs"]
-CMD ["node", "packages/server/dist/index.js"]
+CMD ["marinara-server"]

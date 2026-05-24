@@ -1,0 +1,36 @@
+{
+  "coreClaim": "",
+  "scope": {
+    "inScope": [],
+    "outOfScope": [],
+    "intendedFiles": [],
+    "riskFlags": []
+  },
+  "reproduction": {
+    "steps": [],
+    "reproducedBeforeFix": false,
+    "beforeEvidence": []
+  },
+  "riskClaimMatrix": [],
+  "verification": {
+    "originalReproPassed": false,
+    "edgeRowsTested": [],
+    "negativeRowsTested": [],
+    "afterEvidence": [],
+    "baselineCommand": "",
+    "baselinePassed": false
+  },
+  "manualBlockers": [
+    {
+      "item": "",
+      "blockingCoreClaim": false,
+      "reason": ""
+    }
+  ],
+  "pr": {
+    "url": "",
+    "evidencePublished": false,
+    "checks": "not run",
+    "automatedReview": "not checked"
+  }
+}

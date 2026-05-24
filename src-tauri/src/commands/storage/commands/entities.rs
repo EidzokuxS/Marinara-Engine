@@ -1,0 +1,243 @@
+use super::{avatars, game_state_snapshots, lorebook_images, shared};
+use crate::builtins::is_protected_record;
+use crate::state::AppState;
+use marinara_core::AppError;
+use serde_json::{json, Value};
+use tauri::State;
+
+#[tauri::command]
+pub fn storage_list(
+    state: State<'_, AppState>,
+    entity: String,
+    options: Option<Value>,
+) -> Result<Value, AppError> {
+    let mut rows = match options
+        .as_ref()
+        .and_then(|value| value.get("filters"))
+        .and_then(Value::as_object)
+    {
+        Some(filters) if !filters.is_empty() => state.storage.list_where(&entity, filters)?,
+        _ => state.storage.list(&entity)?,
+    };
+
+    let order_by = options
+        .as_ref()
+        .and_then(|value| value.get("orderBy"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty());
+    let descending = options
+        .as_ref()
+        .and_then(|value| value.get("descending"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    rows.sort_by(|a, b| {
+        let ordering = match order_by {
+            Some(field) => compare_json_values(a.get(field), b.get(field)),
+            None => compare_json_values(
+                a.get("sortOrder")
+                    .or_else(|| a.get("order"))
+                    .or_else(|| a.get("createdAt")),
+                b.get("sortOrder")
+                    .or_else(|| b.get("order"))
+                    .or_else(|| b.get("createdAt")),
+            ),
+        };
+        if descending {
+            ordering.reverse()
+        } else {
+            ordering
+        }
+    });
+
+    if entity == "messages" {
+        apply_message_pagination(&mut rows, options.as_ref());
+        for row in &mut rows {
+            shared::materialize_message_swipe_fields(row);
+        }
+        return Ok(Value::Array(rows));
+    }
+
+    if let Some(limit) = options
+        .as_ref()
+        .and_then(|value| value.get("limit"))
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+    {
+        rows.truncate(limit);
+    }
+
+    Ok(Value::Array(rows))
+}
+
+#[tauri::command]
+pub fn storage_get(
+    state: State<'_, AppState>,
+    entity: String,
+    id: String,
+) -> Result<Value, AppError> {
+    let mut value = state.storage.get(&entity, &id)?.unwrap_or(Value::Null);
+    if entity == "messages" {
+        shared::materialize_message_swipe_fields(&mut value);
+    }
+    Ok(value)
+}
+
+#[tauri::command]
+pub fn storage_create(
+    state: State<'_, AppState>,
+    entity: String,
+    value: Value,
+) -> Result<Value, AppError> {
+    state
+        .storage
+        .create(&entity, shared::with_entity_defaults(&entity, value))
+}
+
+#[tauri::command]
+pub fn storage_update(
+    state: State<'_, AppState>,
+    entity: String,
+    id: String,
+    patch: Value,
+) -> Result<Value, AppError> {
+    state.storage.patch(
+        &entity,
+        &id,
+        shared::normalize_update_patch(&entity, patch)?,
+    )
+}
+
+#[tauri::command]
+pub fn storage_delete(
+    state: State<'_, AppState>,
+    entity: String,
+    id: String,
+    force: Option<bool>,
+) -> Result<Value, AppError> {
+    if entity == "connections" {
+        return crate::connection_refs::delete_connection(&state, &id, force.unwrap_or(false));
+    }
+    if is_protected_record(&entity, &id) {
+        return Err(AppError::invalid_input(
+            "Built-in Professor Mari cannot be deleted",
+        ));
+    }
+    let existing = owned_record_for_delete(&state, &entity, &id)?;
+    let message_chat_id = if entity == "messages" {
+        existing
+            .as_ref()
+            .and_then(|record| record.get("chatId"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    } else {
+        None
+    };
+    let deleted = state.storage.delete(&entity, &id)?;
+    if deleted {
+        if let Some(record) = existing.as_ref() {
+            remove_owned_media(&state, &entity, record);
+        }
+        if let Some(chat_id) = message_chat_id {
+            game_state_snapshots::delete_tracker_snapshots_for_message(&state, &chat_id, &id)?;
+            game_state_snapshots::sync_chat_game_state_to_visible_tracker(&state, &chat_id)?;
+        }
+    }
+    Ok(json!({ "deleted": deleted }))
+}
+
+fn owned_record_for_delete(
+    state: &AppState,
+    entity: &str,
+    id: &str,
+) -> Result<Option<Value>, AppError> {
+    match entity {
+        "characters" | "personas" | "lorebooks" | "messages" => state.storage.get(entity, id),
+        _ => Ok(None),
+    }
+}
+
+fn remove_owned_media(state: &AppState, entity: &str, record: &Value) {
+    match entity {
+        "characters" | "personas" => avatars::remove_avatar_file(state, entity, record),
+        "lorebooks" => lorebook_images::remove_lorebook_image_file(state, record),
+        _ => {}
+    }
+}
+
+#[tauri::command]
+pub fn storage_duplicate(
+    state: State<'_, AppState>,
+    entity: String,
+    id: String,
+) -> Result<Value, AppError> {
+    shared::duplicate_record(&state, &entity, &id)
+}
+
+fn compare_json_values(left: Option<&Value>, right: Option<&Value>) -> std::cmp::Ordering {
+    match (left, right) {
+        (Some(Value::Number(a)), Some(Value::Number(b))) => a
+            .as_f64()
+            .partial_cmp(&b.as_f64())
+            .unwrap_or(std::cmp::Ordering::Equal),
+        (Some(Value::String(a)), Some(Value::String(b))) => a.cmp(b),
+        (Some(Value::Bool(a)), Some(Value::Bool(b))) => a.cmp(b),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        _ => std::cmp::Ordering::Equal,
+    }
+}
+
+fn apply_message_pagination(rows: &mut Vec<Value>, options: Option<&Value>) {
+    rows.sort_by(|a, b| {
+        let (a_created_at, a_id) = message_cursor(a);
+        let (b_created_at, b_id) = message_cursor(b);
+        a_created_at.cmp(b_created_at).then_with(|| a_id.cmp(b_id))
+    });
+
+    let before = options
+        .and_then(|value| value.get("before"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(parse_message_cursor);
+
+    if let Some((before_created_at, before_id)) = before {
+        rows.retain(|row| {
+            let (created_at, id) = message_cursor(row);
+            created_at < before_created_at.as_str()
+                || (created_at == before_created_at.as_str()
+                    && before_id.as_deref().is_some_and(|cursor_id| id < cursor_id))
+        });
+    }
+
+    let Some(limit) = options
+        .and_then(|value| value.get("limit"))
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+    else {
+        return;
+    };
+
+    if rows.len() > limit {
+        let keep_from = rows.len() - limit;
+        rows.drain(0..keep_from);
+    }
+}
+
+fn parse_message_cursor(cursor: &str) -> (String, Option<String>) {
+    let mut parts = cursor.splitn(2, '|');
+    let created_at = parts.next().unwrap_or_default().to_string();
+    let id = parts
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    (created_at, id)
+}
+
+fn message_cursor(row: &Value) -> (&str, &str) {
+    (
+        row.get("createdAt").and_then(Value::as_str).unwrap_or(""),
+        row.get("id").and_then(Value::as_str).unwrap_or(""),
+    )
+}
