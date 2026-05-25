@@ -420,6 +420,12 @@ fn configured_base_url(config: &Value) -> String {
     }
 }
 
+/// Builds the OpenAI-compatible voice discovery endpoint.
+///
+/// Nonblank model values are trimmed and sent as `model` so multi-model
+/// providers can return the right catalog. If URL parsing fails, return the
+/// raw legacy endpoint and let the provider request fail through the existing
+/// fallback path.
 fn openai_voices_url(base: &str, model: Option<&str>) -> String {
     let raw_url = format!("{base}/audio/voices");
     let Ok(mut url) = reqwest::Url::parse(&raw_url) else {
