@@ -5,7 +5,7 @@ import { useState, useRef } from "react";
 import { Modal } from "../../../../shared/components/ui/Modal";
 import { Download, FileJson, Image, CheckCircle, XCircle, Loader2, BookOpen } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { characterKeys } from "../hooks/use-characters";
+import { cacheCharacterListRecordFromResult, characterKeys } from "../hooks/use-characters";
 import { lorebookKeys } from "../../lorebooks/index";
 import { importApi } from "../../../../shared/api/import-api";
 import {
@@ -34,9 +34,11 @@ const TAG_IMPORT_OPTIONS: Array<{ value: TagImportMode; label: string; descripti
 
 export function ImportCharacterModal({ open, onClose }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const dragDepthRef = useRef(0);
   const [status, setStatus] = useState<"idle" | "loading" | "done">("idle");
   const [results, setResults] = useState<ImportResultRow[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [dropError, setDropError] = useState<string | null>(null);
   const [pendingLorebookChoice, setPendingLorebookChoice] = useState<{
     files: File[];
     previews: EmbeddedLorebookImportPreview[];
@@ -50,11 +52,47 @@ export function ImportCharacterModal({ open, onClose }: Props) {
     return head[0] === 0x50 && head[1] === 0x4b;
   };
 
+  const extractDroppedFiles = (event: React.DragEvent<HTMLElement>) => {
+    const items = Array.from(event.dataTransfer.items ?? []);
+    if (items.length > 0) {
+      const files: File[] = [];
+
+      for (const item of items) {
+        if (item.kind !== "file") {
+          return {
+            files: [] as File[],
+            error: "Drop supported character files here. Folders and other items are not supported.",
+          };
+        }
+
+        const file = item.getAsFile();
+        if (!file) {
+          return {
+            files: [] as File[],
+            error: "Folders are not supported here. Drop supported character files instead.",
+          };
+        }
+
+        files.push(file);
+      }
+
+      return files.length > 0
+        ? { files, error: null }
+        : { files: [] as File[], error: "Drop supported character files here." };
+    }
+
+    const files = Array.from(event.dataTransfer.files ?? []);
+    return files.length > 0
+      ? { files, error: null }
+      : { files: [] as File[], error: "Drop supported character files here." };
+  };
+
   const handleFiles = async (files: File[], importEmbeddedLorebook?: boolean) => {
     if (files.length === 0) return;
     setStatus("loading");
     setResults([]);
     setPendingLorebookChoice(null);
+    setDropError(null);
 
     try {
       const stCharacterFiles: File[] = [];
@@ -98,6 +136,7 @@ export function ImportCharacterModal({ open, onClose }: Props) {
 
       const nextResults: ImportResultRow[] = [];
       let importedLorebook = false;
+      let importedCharacterMissingCacheRecord = false;
 
       if (stCharacterFiles.length > 0) {
         const form = new FormData();
@@ -130,6 +169,10 @@ export function ImportCharacterModal({ open, onClose }: Props) {
 
         for (const result of batchResult.results) {
           if (result.lorebook?.lorebookId) importedLorebook = true;
+          if (result.success) {
+            const cached = cacheCharacterListRecordFromResult(qc, result);
+            if (!cached) importedCharacterMissingCacheRecord = true;
+          }
           nextResults.push({
             filename: result.filename,
             success: result.success,
@@ -152,6 +195,7 @@ export function ImportCharacterModal({ open, onClose }: Props) {
             success: boolean;
             name?: string;
             error?: string;
+            character?: unknown;
           }>({
             ...item.payload,
             timestampOverrides: {
@@ -160,6 +204,10 @@ export function ImportCharacterModal({ open, onClose }: Props) {
             },
           });
 
+          if (result.success) {
+            const cached = cacheCharacterListRecordFromResult(qc, result);
+            if (!cached) importedCharacterMissingCacheRecord = true;
+          }
           nextResults.push({
             filename: item.file.name,
             success: result.success,
@@ -176,7 +224,12 @@ export function ImportCharacterModal({ open, onClose }: Props) {
 
       for (const file of marinaraPackages) {
         try {
-          const result = await importApi.marinaraFile<{ success: boolean; name?: string; error?: string }>({
+          const result = await importApi.marinaraFile<{
+            success: boolean;
+            name?: string;
+            error?: string;
+            character?: unknown;
+          }>({
             file,
             fields: {
               timestampOverrides: JSON.stringify({
@@ -185,6 +238,10 @@ export function ImportCharacterModal({ open, onClose }: Props) {
               }),
             },
           });
+          if (result.success) {
+            const cached = cacheCharacterListRecordFromResult(qc, result);
+            if (!cached) importedCharacterMissingCacheRecord = true;
+          }
           nextResults.push({
             filename: file.name,
             success: result.success,
@@ -202,7 +259,7 @@ export function ImportCharacterModal({ open, onClose }: Props) {
       setResults(nextResults);
       setStatus("done");
 
-      if (nextResults.some((result) => result.success)) {
+      if (importedCharacterMissingCacheRecord) {
         qc.invalidateQueries({ queryKey: characterKeys.list() });
       }
       if (importedLorebook) {
@@ -220,10 +277,46 @@ export function ImportCharacterModal({ open, onClose }: Props) {
     }
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = 0;
     setDragOver(false);
-    handleFiles(Array.from(e.dataTransfer.files));
+
+    const { files, error } = extractDroppedFiles(e);
+    if (error) {
+      setDropError(error);
+      setPendingLorebookChoice(null);
+      setStatus("idle");
+      setResults([]);
+      return;
+    }
+
+    void handleFiles(files);
+  };
+
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current += 1;
+    setDropError(null);
+    setDragOver(true);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+    setDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setDragOver(false);
+    }
   };
 
   const reset = () => {
@@ -231,6 +324,9 @@ export function ImportCharacterModal({ open, onClose }: Props) {
     setResults([]);
     setPendingLorebookChoice(null);
     setTagImportMode("all");
+    setDropError(null);
+    dragDepthRef.current = 0;
+    setDragOver(false);
   };
 
   return (
@@ -326,11 +422,9 @@ export function ImportCharacterModal({ open, onClose }: Props) {
         {/* Drop zone */}
         <div
           onDrop={handleDrop}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
           onClick={() => fileRef.current?.click()}
           className={`flex cursor-pointer flex-col items-center gap-3 rounded-xl border-2 border-dashed p-8 transition-all ${
             dragOver
@@ -363,6 +457,12 @@ export function ImportCharacterModal({ open, onClose }: Props) {
             </span>
           </div>
         </div>
+
+        {dropError && (
+          <div className="rounded-lg border border-[var(--destructive)]/30 bg-[var(--destructive)]/10 p-3 text-xs text-[var(--destructive)]">
+            {dropError}
+          </div>
+        )}
 
         <input
           ref={fileRef}

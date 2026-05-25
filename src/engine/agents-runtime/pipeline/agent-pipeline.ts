@@ -3,6 +3,7 @@ import type { BaseLLMProvider } from "../../generation-core/llm/base-provider.js
 import {
   executeAgent,
   executeAgentBatch,
+  normalizeAgentMaxTokens,
   type AgentExecConfig,
   type AgentToolContext,
 } from "../executor/agent-executor.js";
@@ -167,7 +168,7 @@ async function executeGroup(
       type: agent.type,
       name: agent.name,
       model: agent.model,
-      maxTokens: normalizeAgentMaxParallelJobs(agent.maxParallelJobs),
+      maxTokens: normalizeAgentMaxTokens(agent.settings.maxTokens),
     })),
   });
   const groupContext = buildAgentContext(group.agents[0]!, context);

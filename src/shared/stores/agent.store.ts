@@ -64,6 +64,7 @@ interface AgentState {
   clearDebugLog: () => void;
   setFailedAgentTypes: (types: string[]) => void;
   setFailedAgentFailures: (failures: AgentFailure[]) => void;
+  addFailedAgentFailure: (failure: AgentFailure) => void;
   clearFailedAgentTypes: () => void;
   addThoughtBubble: (agentId: string, agentName: string, content: string) => void;
   dismissThoughtBubble: (index: number) => void;
@@ -134,6 +135,15 @@ export const useAgentStore = create<AgentState>((set) => ({
     set({
       failedAgentTypes: failures.map((failure) => failure.agentType),
       failedAgentFailures: failures,
+    }),
+  addFailedAgentFailure: (failure) =>
+    set((s) => {
+      const withoutSameType = s.failedAgentFailures.filter((f) => f.agentType !== failure.agentType);
+      const failures = [...withoutSameType, failure];
+      return {
+        failedAgentFailures: failures,
+        failedAgentTypes: failures.map((f) => f.agentType),
+      };
     }),
   clearFailedAgentTypes: () => set({ failedAgentTypes: [], failedAgentFailures: [] }),
 
