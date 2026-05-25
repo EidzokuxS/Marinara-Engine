@@ -1,0 +1,555 @@
+use marinara_core::{ensure_object, new_id, now_iso, AppError, AppResult};
+use marinara_security::validate_collection_name;
+use serde_json::{json, Map, Value};
+use std::collections::HashSet;
+use std::fs;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+#[derive(Clone)]
+pub struct FileStorage {
+    root: PathBuf,
+    lock: Arc<Mutex<()>>,
+}
+
+impl FileStorage {
+    pub fn new(root: impl Into<PathBuf>) -> AppResult<Self> {
+        let root = root.into();
+        fs::create_dir_all(root.join("collections"))?;
+        Ok(Self {
+            root,
+            lock: Arc::new(Mutex::new(())),
+        })
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn list(&self, collection: &str) -> AppResult<Vec<Value>> {
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| AppError::new("lock_error", "Storage lock poisoned"))?;
+        self.read_collection(collection)
+    }
+
+    pub fn list_where(
+        &self,
+        collection: &str,
+        filters: &Map<String, Value>,
+    ) -> AppResult<Vec<Value>> {
+        let rows = self.list(collection)?;
+        Ok(rows
+            .into_iter()
+            .filter(|row| {
+                let Some(obj) = row.as_object() else {
+                    return false;
+                };
+                filters
+                    .iter()
+                    .all(|(key, expected)| obj.get(key) == Some(expected))
+            })
+            .collect())
+    }
+
+    pub fn get(&self, collection: &str, id: &str) -> AppResult<Option<Value>> {
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| AppError::new("lock_error", "Storage lock poisoned"))?;
+        Ok(self
+            .read_collection(collection)?
+            .into_iter()
+            .find(|row| row.get("id").and_then(Value::as_str) == Some(id)))
+    }
+
+    pub fn create(&self, collection: &str, value: Value) -> AppResult<Value> {
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| AppError::new("lock_error", "Storage lock poisoned"))?;
+        let mut rows = self.read_collection(collection)?;
+        let mut object = ensure_object(value)?;
+        let id = object
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.trim().is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(new_id);
+        let now = now_iso();
+        object.insert("id".to_string(), Value::String(id.clone()));
+        object
+            .entry("createdAt".to_string())
+            .or_insert_with(|| Value::String(now.clone()));
+        object
+            .entry("updatedAt".to_string())
+            .or_insert_with(|| Value::String(now));
+        let record = Value::Object(object);
+        rows.retain(|row| row.get("id").and_then(Value::as_str) != Some(id.as_str()));
+        rows.push(record.clone());
+        self.write_collection(collection, &rows)?;
+        Ok(record)
+    }
+
+    pub fn upsert_with_id(&self, collection: &str, id: &str, value: Value) -> AppResult<Value> {
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| AppError::new("lock_error", "Storage lock poisoned"))?;
+        let mut rows = self.read_collection(collection)?;
+        let mut object = ensure_object(value)?;
+        let now = now_iso();
+        object.insert("id".to_string(), Value::String(id.to_string()));
+        object
+            .entry("createdAt".to_string())
+            .or_insert_with(|| Value::String(now.clone()));
+        object
+            .entry("updatedAt".to_string())
+            .or_insert_with(|| Value::String(now));
+        let record = Value::Object(object);
+        rows.retain(|row| row.get("id").and_then(Value::as_str) != Some(id));
+        rows.push(record.clone());
+        self.write_collection(collection, &rows)?;
+        Ok(record)
+    }
+
+    pub fn patch(&self, collection: &str, id: &str, patch: Value) -> AppResult<Value> {
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| AppError::new("lock_error", "Storage lock poisoned"))?;
+        let mut rows = self.read_collection(collection)?;
+        let patch = ensure_object(patch)?;
+        let mut found = None;
+        for row in &mut rows {
+            if row.get("id").and_then(Value::as_str) != Some(id) {
+                continue;
+            }
+            let Some(object) = row.as_object_mut() else {
+                return Err(AppError::invalid_input("Stored record is not an object"));
+            };
+            for (key, value) in patch {
+                object.insert(key, value);
+            }
+            object.insert("updatedAt".to_string(), Value::String(now_iso()));
+            found = Some(Value::Object(object.clone()));
+            break;
+        }
+        let Some(record) = found else {
+            return Err(AppError::not_found(format!(
+                "{collection}/{id} was not found"
+            )));
+        };
+        self.write_collection(collection, &rows)?;
+        Ok(record)
+    }
+
+    pub fn delete(&self, collection: &str, id: &str) -> AppResult<bool> {
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| AppError::new("lock_error", "Storage lock poisoned"))?;
+        let mut rows = self.read_collection(collection)?;
+        let before = rows.len();
+        rows.retain(|row| row.get("id").and_then(Value::as_str) != Some(id));
+        let deleted = rows.len() != before;
+        if deleted {
+            self.write_collection(collection, &rows)?;
+        }
+        Ok(deleted)
+    }
+
+    pub fn replace_all(&self, collection: &str, rows: Vec<Value>) -> AppResult<()> {
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| AppError::new("lock_error", "Storage lock poisoned"))?;
+        self.write_collection(collection, &rows)
+    }
+
+    pub fn replace_all_many(&self, replacements: Vec<(&str, Vec<Value>)>) -> AppResult<()> {
+        self.replace_all_many_and_then(replacements, || Ok(()))
+    }
+
+    pub fn replace_all_many_and_then<F>(
+        &self,
+        replacements: Vec<(&str, Vec<Value>)>,
+        after_install: F,
+    ) -> AppResult<()>
+    where
+        F: FnOnce() -> AppResult<()>,
+    {
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| AppError::new("lock_error", "Storage lock poisoned"))?;
+        self.replace_all_many_locked(replacements, after_install)
+    }
+
+    pub fn clear_all(&self) -> AppResult<()> {
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| AppError::new("lock_error", "Storage lock poisoned"))?;
+        let collections = self.root.join("collections");
+        if collections.exists() {
+            fs::remove_dir_all(&collections)?;
+        }
+        fs::create_dir_all(collections)?;
+        Ok(())
+    }
+
+    fn collection_path(&self, collection: &str) -> AppResult<PathBuf> {
+        validate_collection_name(collection)?;
+        Ok(self
+            .root
+            .join("collections")
+            .join(format!("{collection}.json")))
+    }
+
+    fn read_collection(&self, collection: &str) -> AppResult<Vec<Value>> {
+        let path = self.collection_path(collection)?;
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let raw = fs::read_to_string(path)?;
+        if raw.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        let parsed: Value = serde_json::from_str(&raw)?;
+        match parsed {
+            Value::Array(rows) => Ok(rows),
+            _ => Err(AppError::invalid_input(format!(
+                "Collection {collection} did not contain a JSON array"
+            ))),
+        }
+    }
+
+    fn write_collection(&self, collection: &str, rows: &[Value]) -> AppResult<()> {
+        let path = self.collection_path(collection)?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        fs::write(&tmp, serde_json::to_vec_pretty(rows)?)?;
+        fs::rename(tmp, path)?;
+        Ok(())
+    }
+
+    fn replace_all_many_locked<F>(
+        &self,
+        replacements: Vec<(&str, Vec<Value>)>,
+        after_install: F,
+    ) -> AppResult<()>
+    where
+        F: FnOnce() -> AppResult<()>,
+    {
+        let transaction_id = storage_transaction_id();
+        let mut pending = Vec::new();
+        let mut seen_paths = HashSet::new();
+        let prepare_result = (|| -> AppResult<()> {
+            for (index, (collection, rows)) in replacements.iter().enumerate() {
+                let path = self.collection_path(collection)?;
+                if !seen_paths.insert(path.clone()) {
+                    return Err(AppError::invalid_input(format!(
+                        "Duplicate collection replacement: {collection}"
+                    )));
+                }
+                let existed = path_exists_no_follow(&path)?;
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                let tmp = collection_transaction_path(&path, &transaction_id, index, "tmp")?;
+                let backup = collection_transaction_path(&path, &transaction_id, index, "backup")?;
+                pending.push(PendingCollectionReplacement {
+                    path,
+                    tmp,
+                    backup,
+                    existed,
+                });
+                let item = pending
+                    .last()
+                    .expect("pending collection replacement should exist");
+                fs::write(&item.tmp, serde_json::to_vec_pretty(rows)?)?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = prepare_result {
+            cleanup_pending_collection_temps(&pending);
+            return Err(error);
+        }
+
+        let mut backed_up = Vec::new();
+        let mut installed = Vec::new();
+        let result = (|| -> AppResult<()> {
+            for (index, item) in pending.iter().enumerate() {
+                if !item.existed {
+                    continue;
+                }
+                fs::rename(&item.path, &item.backup)?;
+                backed_up.push(index);
+            }
+            for (index, item) in pending.iter().enumerate() {
+                fs::rename(&item.tmp, &item.path)?;
+                installed.push(index);
+            }
+            after_install()?;
+            Ok(())
+        })();
+
+        if let Err(error) = result {
+            if let Err(rollback_error) =
+                rollback_collection_replacements(&pending, &backed_up, &installed)
+            {
+                cleanup_pending_collection_temps(&pending);
+                return Err(AppError::new(
+                    "storage_rollback_failed",
+                    format!(
+                        "{error}; additionally failed to roll back collection import: {rollback_error}"
+                    ),
+                ));
+            }
+            cleanup_pending_collection_transaction_files(&pending);
+            return Err(error);
+        }
+
+        cleanup_pending_collection_transaction_files(&pending);
+        Ok(())
+    }
+}
+
+struct PendingCollectionReplacement {
+    path: PathBuf,
+    tmp: PathBuf,
+    backup: PathBuf,
+    existed: bool,
+}
+
+fn rollback_collection_replacements(
+    pending: &[PendingCollectionReplacement],
+    backed_up: &[usize],
+    installed: &[usize],
+) -> AppResult<()> {
+    let mut first_error = None;
+    for index in installed.iter().rev() {
+        if let Err(error) = remove_path_if_exists(&pending[*index].path) {
+            first_error.get_or_insert(error);
+        }
+    }
+    for index in backed_up.iter().rev() {
+        let item = &pending[*index];
+        match path_exists_no_follow(&item.backup) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(error) => {
+                first_error.get_or_insert(error);
+                continue;
+            }
+        }
+        if let Err(error) = fs::rename(&item.backup, &item.path) {
+            first_error.get_or_insert(AppError::from(error));
+        }
+    }
+    if let Some(error) = first_error {
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn cleanup_pending_collection_temps(pending: &[PendingCollectionReplacement]) {
+    for item in pending {
+        let _ = remove_path_if_exists(&item.tmp);
+    }
+}
+
+fn cleanup_pending_collection_transaction_files(pending: &[PendingCollectionReplacement]) {
+    for item in pending {
+        let _ = remove_path_if_exists(&item.tmp);
+        let _ = remove_path_if_exists(&item.backup);
+    }
+}
+
+fn collection_transaction_path(
+    path: &Path,
+    transaction_id: &str,
+    index: usize,
+    kind: &str,
+) -> AppResult<PathBuf> {
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| AppError::invalid_input("Invalid collection path"))?;
+    Ok(path.with_file_name(format!(
+        "{file_name}.profile-import-{transaction_id}-{index}.{kind}"
+    )))
+}
+
+fn storage_transaction_id() -> String {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("{}-{nonce}", std::process::id())
+}
+
+fn path_exists_no_follow(path: &Path) -> AppResult<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn remove_path_if_exists(path: &Path) -> AppResult<()> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    if metadata.is_dir() {
+        fs::remove_dir_all(path)?;
+    } else {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+pub fn record_id(value: &Value) -> Option<&str> {
+    value.get("id").and_then(Value::as_str)
+}
+
+pub fn merge_object_field(
+    record: &mut Value,
+    field: &str,
+    patch: Map<String, Value>,
+) -> AppResult<()> {
+    let object = record
+        .as_object_mut()
+        .ok_or_else(|| AppError::invalid_input("Stored record is not an object"))?;
+    let current = object
+        .entry(field.to_string())
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .ok_or_else(|| AppError::invalid_input(format!("{field} is not an object")))?;
+    for (key, value) in patch {
+        current.insert(key, value);
+    }
+    object.insert("updatedAt".to_string(), Value::String(now_iso()));
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_storage_root(test_name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "marinara-storage-{test_name}-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).expect("temporary storage root should be created");
+        path
+    }
+
+    #[test]
+    fn replace_all_many_updates_multiple_collections() {
+        let root = temp_storage_root("replace-many");
+        let storage = FileStorage::new(&root).unwrap();
+
+        storage
+            .replace_all_many(vec![
+                ("characters", vec![json!({ "id": "character-1" })]),
+                ("personas", vec![json!({ "id": "persona-1" })]),
+            ])
+            .unwrap();
+
+        assert_eq!(storage.list("characters").unwrap()[0]["id"], "character-1");
+        assert_eq!(storage.list("personas").unwrap()[0]["id"], "persona-1");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn replace_all_many_rejects_invalid_collection_before_replacing_anything() {
+        let root = temp_storage_root("replace-many-invalid");
+        let storage = FileStorage::new(&root).unwrap();
+        storage
+            .replace_all("characters", vec![json!({ "id": "old-character" })])
+            .unwrap();
+
+        let error = storage
+            .replace_all_many(vec![
+                ("characters", vec![json!({ "id": "new-character" })]),
+                ("../bad", vec![json!({ "id": "bad" })]),
+            ])
+            .expect_err("invalid collection should reject the batch");
+
+        assert_eq!(error.code, "invalid_input");
+        assert_eq!(
+            storage.list("characters").unwrap()[0]["id"],
+            "old-character"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn replace_all_many_rejects_duplicate_collections_before_replacing_anything() {
+        let root = temp_storage_root("replace-many-duplicate");
+        let storage = FileStorage::new(&root).unwrap();
+        storage
+            .replace_all("characters", vec![json!({ "id": "old-character" })])
+            .unwrap();
+
+        let error = storage
+            .replace_all_many(vec![
+                ("characters", vec![json!({ "id": "new-character" })]),
+                ("characters", vec![json!({ "id": "duplicate-character" })]),
+            ])
+            .expect_err("duplicate collection should reject the batch");
+
+        assert_eq!(error.code, "invalid_input");
+        assert_eq!(
+            storage.list("characters").unwrap()[0]["id"],
+            "old-character"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn replace_all_many_rolls_back_when_after_install_fails() {
+        let root = temp_storage_root("replace-many-after-install-fails");
+        let storage = FileStorage::new(&root).unwrap();
+        storage
+            .replace_all("characters", vec![json!({ "id": "old-character" })])
+            .unwrap();
+
+        let error = storage
+            .replace_all_many_and_then(
+                vec![("characters", vec![json!({ "id": "new-character" })])],
+                || {
+                    Err(AppError::new(
+                        "asset_install_failed",
+                        "asset install failed",
+                    ))
+                },
+            )
+            .expect_err("after-install failure should reject the batch");
+
+        assert_eq!(error.code, "asset_install_failed");
+        assert_eq!(
+            storage.list("characters").unwrap()[0]["id"],
+            "old-character"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+}

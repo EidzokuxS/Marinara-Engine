@@ -1,0 +1,14 @@
+[
+  {
+    "coreClaim": "",
+    "riskType": "",
+    "entrypoints": [],
+    "currentPathsOrFormats": [],
+    "legacyPathsOrFormats": [],
+    "positiveRowsTested": [],
+    "negativeRowsTested": [],
+    "groundTruthFacts": [],
+    "userActionCopy": "",
+    "manualBlockers": []
+  }
+]

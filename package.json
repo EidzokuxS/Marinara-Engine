@@ -1,42 +1,95 @@
 {
   "name": "marinara-engine",
-  "version": "1.6.1",
   "private": true,
-  "description": "AI Chat & Roleplay Frontend — Conversation, Roleplay, Visual Novel",
-  "author": "Marianna",
-  "license": "AGPL-3.0",
+  "version": "0.1.0",
   "type": "module",
   "packageManager": "pnpm@10.33.2",
-  "engines": {
-    "node": ">=24 <26",
-    "pnpm": ">=10.33.2"
-  },
   "scripts": {
-    "preinstall": "node ./scripts/clean-stale-client-artifacts.mjs",
-    "dev": "pnpm build:shared && pnpm --filter @marinara-engine/server --filter @marinara-engine/client -r --parallel run dev",
-    "dev:server": "pnpm --filter @marinara-engine/server dev",
-    "dev:client": "pnpm build:shared && pnpm --filter @marinara-engine/client dev",
-    "build": "pnpm clean:stale-client && pnpm --filter @marinara-engine/shared build && pnpm --filter @marinara-engine/server --filter @marinara-engine/client --parallel run build",
-    "build:shared": "pnpm --filter @marinara-engine/shared build",
-    "build:server": "pnpm --filter @marinara-engine/server build",
-    "build:client": "pnpm build:shared && pnpm --filter @marinara-engine/client build",
-    "check": "pnpm clean:stale-client && pnpm impeccable:check && pnpm lint && pnpm build",
-    "start": "node packages/server/dist/index.js",
-    "format": "prettier --write \"packages/**/*.{ts,tsx}\"",
-    "clean:stale-client": "node ./scripts/clean-stale-client-artifacts.mjs",
-    "impeccable:check": "node ./scripts/check-impeccable-context.mjs",
-    "lint": "pnpm -r run lint",
-    "test": "node ./scripts/check-windows-installer-layout.mjs && pnpm -r run test",
-    "version:sync": "node ./scripts/sync-version.mjs",
-    "version:check": "node ./scripts/check-version-drift.mjs",
-    "backgroundremover:install": "node ./scripts/install-backgroundremover.mjs",
-    "backgroundremover:reinstall": "node ./scripts/install-backgroundremover.mjs --reinstall",
-    "guard:installer-artifacts": "node ./scripts/check-tracked-installers.mjs",
-    "release:notes": "node ./scripts/render-release-notes.mjs",
-    "clean": "pnpm -r --if-present run clean && node ./scripts/clean-workspace.mjs"
+    "dev": "vite",
+    "docs:dev": "vite docs/developer --host 127.0.0.1 --port 4174",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b",
+    "lint": "eslint .",
+    "check:architecture": "depcruise src --config .dependency-cruiser.cjs && node scripts/check-rust-structure.mjs",
+    "check:frontend": "tsc -b",
+    "check:rust": "cargo check --manifest-path src-tauri/Cargo.toml --workspace",
+    "check:rust:clippy": "cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings",
+    "check:rust:test": "cargo test --manifest-path src-tauri/Cargo.toml --workspace",
+    "check:rust:nextest": "cargo nextest run --manifest-path src-tauri/Cargo.toml --workspace",
+    "check:rust:deny": "cargo deny --manifest-path src-tauri/Cargo.toml check",
+    "check:rust:deps": "cargo machete --manifest-path src-tauri/Cargo.toml",
+    "check:docs": "node scripts/check-docs.mjs",
+    "check:unused": "knip",
+    "check": "pnpm check:architecture && pnpm check:frontend && pnpm check:rust && pnpm check:docs",
+    "test": "vitest run --passWithNoTests",
+    "test:ui": "playwright test",
+    "bench:ts": "vitest bench",
+    "bench:rust": "cargo bench --manifest-path src-tauri/Cargo.toml --workspace",
+    "perf:lighthouse": "lhci autorun",
+    "perf:size": "size-limit",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "6.3.1",
+    "@tanstack/react-query": "^5.100.9",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-window-state": "~2.4.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "dompurify": "^3.4.2",
+    "framer-motion": "^12.38.0",
+    "lucide-react": "^0.513.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "^3.5.0",
+    "zod": "3.25.76",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
-    "esbuild": "^0.27.7",
-    "prettier": "^3.8.3"
-  }
+    "@eslint/js": "^9.39.4",
+    "@lhci/cli": "^0.15.1",
+    "@playwright/test": "^1.60.0",
+    "@rollup/wasm-node": "4.60.2",
+    "@size-limit/preset-app": "^12.1.0",
+    "@tailwindcss/vite": "^4.2.4",
+    "@tauri-apps/cli": "^2",
+    "@types/node": "^25.8.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "autoprefixer": "^10.5.0",
+    "dependency-cruiser": "^17.4.2",
+    "eslint": "^9.39.4",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-boundaries": "^6.0.2",
+    "eslint-plugin-import-x": "^4.16.2",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "jsdom": "^29.1.1",
+    "knip": "^6.14.2",
+    "size-limit": "^12.1.0",
+    "tailwindcss": "^4.2.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.59.1",
+    "vite": "^7.3.2",
+    "vitest": "^4.1.7"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "size-limit": [
+    {
+      "path": "dist/assets/*.js",
+      "limit": "1.7 MB"
+    },
+    {
+      "path": "dist/assets/*.css",
+      "limit": "250 KB"
+    }
+  ]
 }

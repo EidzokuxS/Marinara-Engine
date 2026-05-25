@@ -1,232 +1,133 @@
 # Contributing to Marinara Engine
 
-This is the canonical contributor guide for Marinara Engine. Use it with `README.md` for the product overview, `CHANGELOG.md` for release notes, and `CLAUDE.md` only as a thin companion for maintainers using AI agent. All participants are expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+Marinara Engine is currently being rebuilt on the `refactor` branch as a local-first Tauri desktop app with a React UI, a React-free TypeScript product engine, and Rust capability modules. Use this guide with `README.md`, `AGENTS.md`, and the developer docs under `docs/developer/`.
 
-## Tech Stack
+## Branches
 
-| Layer    | Technology                                                     |
-| -------- | -------------------------------------------------------------- |
-| Frontend | React 19, Tailwind CSS v4, Framer Motion, Zustand, React Query |
-| Backend  | Fastify 5, file-backed storage, temporary SQL compatibility    |
-| PWA      | vite-plugin-pwa, Web App Manifest                              |
-| Shared   | TypeScript 5, Zod                                              |
-| Build    | Vite 6, pnpm workspaces                                        |
+Current development targets `refactor`.
+
+- Base feature, bug fix, and documentation branches on `refactor`.
+- Open pull requests against `refactor`.
+- Do not target `main` unless a maintainer explicitly asks for a mainline or release change.
+- Keep PRs focused. Separate architecture moves, product behavior, UI polish, and docs-only work when they can be reviewed independently.
 
 ## Development Setup
 
 Prerequisites:
 
-- Node.js 24 LTS+
-- Git
-- pnpm via the repo-pinned `packageManager` if you are not using the launchers
+- Node.js 22 or newer.
+- pnpm through the repo-pinned `packageManager`.
+- Rust stable toolchain.
+- Tauri v2 platform prerequisites for your OS.
 
 Typical local setup:
 
-```bash
+```sh
 git clone https://github.com/Pasta-Devs/Marinara-Engine.git
 cd Marinara-Engine
-git checkout staging
+git checkout refactor
 pnpm install
-pnpm build
-pnpm dev
+pnpm tauri dev
 ```
 
-> Active development happens on `staging`, not `main`. See [Branches](#branches) below before opening a PR.
+Useful commands:
 
-Useful entry points:
+```sh
+pnpm tauri dev
+pnpm dev
+pnpm build
+pnpm tauri build
+cargo run --manifest-path src-tauri/Cargo.toml --bin marinara-server
+docker compose up --build
+```
 
-- `pnpm dev` starts the server and client with hot reload.
-- `pnpm dev:server` starts only the API server.
-- `pnpm dev:client` starts only the Vite frontend.
-- `start.bat`, `start.sh`, and `start-termux.sh` run the launcher flow, including git-based auto-update and optional browser auto-open.
+- `pnpm tauri dev` is the normal desktop development command.
+- `pnpm dev` runs the web shell only. Tauri-only capabilities will not all work there.
+- `marinara-server` runs the hostable Rust HTTP runtime. It hosts the Rust API only, not the React UI.
+- `docker compose up --build` builds and starts the remote Rust runtime container.
 
-Copy `.env.example` to `.env` when you need to change ports, HTTPS settings, or launcher behavior such as `AUTO_OPEN_BROWSER=false`.
+## Current Source Shape
 
-## Branches
+The refactor branch is layered by ownership:
 
-Marinara Engine uses two long-lived branches:
+- `src/app` owns React bootstrap, app shell, providers, and startup effects.
+- `src/features` owns user-facing React workflows.
+- `src/features/shell` owns settings, imports, onboarding, Professor Mari, and integrations surfaces.
+- `src/features/modes` owns chat, roleplay, game, shared transcript UI, and the mode router.
+- `src/features/runtime` owns shared runtime systems such as generation, world-state, visuals, tracker, and haptics.
+- `src/features/catalog` owns resource-library UI and hooks for chats, characters, personas, lorebooks, presets, connections, agents, gallery, and knowledge sources.
+- `src/shared` owns feature-neutral frontend components, hooks, stores, types, and browser helpers.
+- `src/shared/api` owns typed adapters for embedded Tauri commands and the optional remote Rust runtime.
+- `src/engine` owns React-free product behavior, contracts, generation, agents, capability ports, and mode engines.
+- `src-tauri` owns the Tauri host, command facades, HTTP server and dispatch, and Rust capability crates for core, storage, assets, LLM, integrations, and security.
 
-| Branch    | Role                                                                                           |
-| --------- | ---------------------------------------------------------------------------------------------- |
-| `staging` | Active development. All feature branches, bug fixes, and documentation PRs should target this. |
-| `main`    | Release branch. Updated by maintainers as part of the release flow; do not target it directly. |
+This ownership map follows the current refactor actual-state design. Keep contributor guidance consistent with the developer docs and architecture diagrams when those change.
 
-Guidelines:
+## Architecture Rules
 
-- **Base your feature branch on `staging`**, not `main`. Run `git checkout staging && git pull` before branching.
-- **Open PRs against `staging`**. The GitHub web UI defaults to `main` (the repo's default branch); change the base to `staging` when filing the PR.
-- Do not target `main` directly unless a maintainer explicitly asks for a mainline-only change (e.g. release hotfix).
-- Update checks and installation guides continue to track `main`, since end users install from released versions.
+Start each change by naming the owner: app shell, catalog, runtime system, concrete mode, shared UI/helper, engine service, shared API adapter, Tauri command, hostable HTTP route, or Rust capability crate.
 
-## Repo Layout
+Hard boundaries:
 
-- `packages/client/` — React frontend, PWA shell, and UI components
-- `packages/server/` — Fastify API, file-backed storage bridge, importers, and AI agents
-- `packages/shared/` — Shared types, schemas, constants, and `APP_VERSION`
-- `android/` — Android WebView wrapper for the Termux-served local app
-- `win/` — Windows installer sources and helper scripts
-- `docs/` — Docs and repo media assets
-- `start.bat`, `start.sh`, `start-termux.sh` — platform launchers
+- Product behavior belongs in `src/engine`; React UI belongs in `src/features`; runtime wrappers belong in `src/shared/api`; privileged or hostable capabilities belong in `src-tauri`.
+- Engine code must not import React, Zustand stores, `@tauri-apps/api`, feature internals, or concrete `src/shared/api` adapters.
+- New or touched feature code should use focused shared API wrappers, not raw `invokeTauri` imports or raw remote-runtime `fetch`.
+- Remote-capable behavior must use the explicit path through `src/shared/api`, `remote-runtime.ts`, `src-tauri/src/http_server.rs`, and `src-tauri/src/http_dispatch.rs`.
+- Chat, roleplay, and game remain separate mode owners. Put reusable mode UI in shared mode UI, not in another concrete mode.
+- `src/shared` must stay feature-neutral and must not import from `src/features` or `src/app`.
+- Tauri commands should stay thin. Durable behavior belongs in focused Rust modules or crates.
+
+Known pressure points:
+
+- `src/features/modes/router/components/ModeSurface.tsx` is still broad. Avoid adding unrelated orchestration there when a mode, runtime, or catalog owner fits better.
+- `src/features/modes/game/components/GameSurface.tsx` is the largest UI orchestrator. Prefer extracting focused game-owned helpers or controllers when adding substantial behavior.
+- Some shared mode UI files are large. Keep them mode-neutral rather than using them as a place for concrete chat, roleplay, or game rules.
+- `src-tauri/src/lib.rs` still has a broad command registration list. Add commands deliberately and keep implementation outside the registry.
+- Import workflows are split, but dense modules remain. Trace storage, asset, security, and payload paths before changing imports.
 
 ## Validation
 
-Baseline validation:
+Run checks that match the change. `pnpm check` is the baseline combined check.
 
-```bash
+```sh
+pnpm typecheck
+pnpm build
+pnpm check:architecture
+pnpm check:docs
+cargo check --manifest-path src-tauri/Cargo.toml --workspace
 pnpm check
 ```
 
-This runs the Impeccable project-context guard, workspace lint/type checks, and the production build.
+Use these as a guide:
 
-Useful follow-up checks:
+- TypeScript, React, feature, or engine changes: `pnpm typecheck`.
+- Import graph, dependency boundaries, or bundling changes: `pnpm check:architecture` and usually `pnpm build`.
+- Rust commands, capability crates, provider transport, storage, imports, assets, native integrations, or hostable runtime changes: `cargo check --manifest-path src-tauri/Cargo.toml --workspace`.
+- Docs, templates, skills, or agent guidance: `pnpm check:docs`.
+- Visible UI behavior: run the app and manually verify the workflow. Use Playwright or screenshots when the change is visual or flow-sensitive.
+- Remote runtime behavior: run `marinara-server`, check `/health`, configure the app's Remote Runtime URL, and exercise the supported shared API path when practical.
 
-```bash
-pnpm version:check
-```
+CI also runs lint, tests, build, size checks, Rust clippy, Rust tests, and the Browser Smoke and Performance job. Local validation should still describe exactly what was run and what remains unverified.
 
-There is not a meaningful automated repo test suite yet. Do not present `pnpm test` as a reliable gate in docs or PR descriptions. When you change behavior, include the manual verification you performed.
+## Pull Requests
 
-## Logging
+Every PR should include:
 
-All server-side logging goes through a shared [Pino](https://getpino.io/) logger instance exported from `packages/server/src/lib/logger.ts`. The `LOG_LEVEL` environment variable controls the minimum severity that gets printed (default: `warn`). See `docs/CONFIGURATION.md` for user-facing level descriptions.
+- The user problem, bug, or maintenance goal.
+- The primary owner and impact area.
+- The files or modules touched.
+- Boundary notes for engine, shared API, feature layers, Rust commands, and remote runtime when relevant.
+- Manual verification notes for user-facing behavior.
+- Screenshots or recordings for visible UI changes.
+- Any remaining risk, follow-up work, or proof gaps.
 
-### Level guidelines
+Leave PR template checkboxes unchecked until a human has actually verified each item. If an AI agent drafts a PR body, treat the checkboxes as a to-do list, not as proof.
 
-| Level            | When to use                                         | Examples                                                                                         |
-| ---------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `logger.error()` | Unrecoverable failures that need investigation.     | Database errors, fatal agent failures, image generation crashes, command exceptions.             |
-| `logger.warn()`  | Something went wrong but the request can continue.  | Non-critical agent failures, empty model responses, missing connections, non-fatal catch blocks. |
-| `logger.info()`  | Operational milestones — "this happened".           | Seed results, game session lifecycle, commands executed, abort requests, device connections.     |
-| `logger.debug()` | Verbose detail only useful when actively debugging. | Full prompts/responses, token usage, timing traces, state patches, pipeline internals.           |
+## Docs And Release Notes
 
-### Code practices
+Keep docs accurate for the refactor branch:
 
-- **Never use `console.log/warn/error` in server code.** Always import and use the shared logger:
-
-  ```ts
-  import { logger } from "../lib/logger.js"; // adjust relative path
-  ```
-
-- **Pick the right level.** If you aren't sure, ask: "Would an operator running in production want to see this?" If yes → `info`. If only a developer debugging → `debug`.
-
-- **Use Pino format specifiers** for multi-argument calls. Pino does not auto-format extra positional arguments the way `console.log` does:
-
-  ```ts
-  // ✗ Wrong — second argument silently ignored by Pino
-  logger.info("Resolved agents:", agents.length);
-
-  // ✓ Correct — use %d / %s / %j format specifiers
-  logger.info("Resolved %d agents", agents.length);
-
-  // ✓ Also correct — template literals produce a single string
-  logger.info(`Resolved ${agents.length} agents`);
-  ```
-
-- **Log errors with the error object first** (Pino convention for structured output):
-
-  ```ts
-  // ✗ Avoid
-  logger.error("Import failed:", err);
-
-  // ✓ Prefer — Pino serialises the error with stack trace
-  logger.error(err, "Import failed");
-  ```
-
-- **Client-side code (`packages/client/`) should keep using `console.*`** — the browser has no Pino. Production builds automatically strip `console.log` via the Vite esbuild `pure` option; only `console.warn` and `console.error` survive.
-
-- **Route handlers** that already have access to `app.log` or `req.log` may use those instead of the shared logger — they are child loggers of the same Pino instance and inherit the same level.
-
-## Before You Open a Pull Request
-
-1. **Open an issue first.** Before writing code, open an issue or check [the tracker](https://github.com/Pasta-Devs/Marinara-Engine/issues) so we can agree on direction, scope, and whether someone else is already on it.
-
-2. **Test it yourself.** A green `pnpm check` is the minimum. Also build the app and container, click through your change, and try the obvious edge cases (light/dark mode, mobile, empty states, error paths). If you touched UI, include before/after screenshots. Upload or attach temporary PR proof screenshots to GitHub or a gist; do not commit them under `docs/pr-evidence/`. Keep committed images for intentional docs/reference assets such as README screenshots. CodeRabbit won't catch "the button is invisible in light mode" — only you can.
-
-3. **Don't trust AI-checked boxes.** If an AI agent ticked the test-plan checkboxes, treat them as your to-do list, not proof of testing. Verify each item in a real browser before submitting; untick anything you haven't personally confirmed.
-
-4. **Smaller and working beats big and broken.** We'd rather review a tight PR that works on the first try than a large one that needs multiple rounds of fixes.
-
-## AI Agent Workflow
-
-AI coding agents should use `.github/agents/chai-workflow.md` as an additive workflow overlay. It adapts the Chai Agent Workflow Pack for Marinara's branch, issue, PR, validation, and risky-work expectations.
-
-The overlay is not a substitute for this guide. When instructions conflict, follow this file, `AGENTS.md`, package-specific instructions, and maintainer requests first. The overlay is mainly a proof and coordination layer: reproduce before fixing when practical, verify the user-facing claim before saying done, keep PR/issue text exact, leave PR checkboxes unchecked for humans, and call out risky-work proof gaps honestly.
-
-## Pull Request Expectations
-
-- Target the `staging` branch. The GitHub UI defaults to `main`; change the base before submitting. See [Branches](#branches).
-- Link the issue or feature request your PR addresses. If there isn't one yet, open one first (see [Before You Open a Pull Request](#before-you-open-a-pull-request)).
-- Keep PRs focused. Separate unrelated refactors from user-facing fixes or documentation work.
-- Explain the why clearly in the PR description. Reviewers should understand the user problem, regression, or tradeoff being addressed, not just the implementation summary.
-- Update documentation in the same PR when behavior changes affect installation, updates, release flow, launchers, or platform-specific behavior.
-- Include screenshots or short recordings for UI changes.
-- Call out manual validation clearly, especially for launcher, installer, or Android wrapper changes.
-- Avoid version drift. If your PR intentionally bumps a release, update every version-bearing file in one pass.
-
-## Documentation Rules
-
-- `README.md` is the user-facing overview and quickstart, not the full release log.
-- `CHANGELOG.md` is the durable release-notes source and should be reusable for GitHub Releases.
-- `android/README.md` is scoped to the Android wrapper around the Termux-served app.
-- `CONTRIBUTING.md` is the canonical contributor and maintainer workflow document.
-- `docs/CONFIGURATION.md` is the environment variable and `.env` reference.
-- `docs/TROUBLESHOOTING.md` collects common user-facing issues and fixes.
-- `docs/FAQ.md` is the user-facing FAQ for common questions like LAN access.
-- If a change makes any existing doc misleading, fix that doc in the same PR.
-
-## Versioning and Releases
-
-Current policy:
-
-- Canonical version source: root `package.json`
-- Release tag format: `vX.Y.Z`
-- Changelog authority: `CHANGELOG.md`
-- Every other version-bearing file is derived and must be synchronized before tagging or publishing
-
-Current version touchpoints:
-
-| File                                        | Role                                                   |
-| ------------------------------------------- | ------------------------------------------------------ |
-| `package.json`                              | Canonical application version                          |
-| `packages/client/package.json`              | Derived workspace version                              |
-| `packages/server/package.json`              | Derived workspace version                              |
-| `packages/shared/package.json`              | Derived workspace version                              |
-| `packages/shared/src/constants/defaults.ts` | Shared `APP_VERSION` used by the app and update checks |
-| `win/installer/installer.nsi`               | Windows installer output version                       |
-| `win/installer/install.bat`                 | Windows installer banner text                          |
-| `android/app/build.gradle`                  | Android `versionName` and `versionCode`                |
-
-Android policy:
-
-- `versionName` must match the app version.
-- `versionCode` must increase monotonically for every shipped APK.
-
-Release-related behavior already in the repo:
-
-- Docker publishing is triggered by `v*` tags.
-- Tagged releases are published from `CHANGELOG.md` by the GitHub release workflow, with a temporary Android APK notice prepended so release-page downloaders know the APK still requires Termux.
-- The server update check reads the newest GitHub `v*` tag and uses matching release metadata when it exists.
-- Git-based installs can apply updates automatically; Docker installs are prompted with the pull command instead.
-- Pull request CI runs `pnpm check`, `pnpm version:check`, and the tracked-installer guard.
-- Built installer binaries belong on GitHub Releases and should not be committed back into the repository.
-
-Standard release flow:
-
-1. Bump the canonical version in root `package.json`.
-2. Run `pnpm version:sync -- --android-version-code <next-code>` to sync all derived version fields.
-3. Update `CHANGELOG.md`.
-4. Merge the release-ready `staging` change to `main`.
-5. Create and push the tag `vX.Y.Z` from the `main` commit that contains that exact version bump.
-6. Let the release workflows publish or update the GitHub Release, Windows installer, Android WebView shell APK, and GHCR container images (`X.Y.Z`, `X.Y`, `X`, `latest`, plus `X.Y.Z-lite` / `lite`) from the matching changelog entry.
-
-Release helpers now in the repo:
-
-- `pnpm version:sync -- --android-version-code <next-code>` updates the derived version files and README release references from the root `package.json` version.
-- `pnpm version:check` fails when those derived files drift out of sync.
-- `pnpm guard:installer-artifacts` fails when tracked installer binaries appear under `win/installer/*.exe`.
-- `pnpm release:notes -- <version>` renders the matching `CHANGELOG.md` entry for release publication and prepends the temporary Android APK / Termux notice.
-
-## Immediate Way Forward
-
-- Add launcher and installer smoke tests so startup parity is exercised automatically, not just by manual verification.
-- Consider a release wrapper script that bumps the root version, prompts for `versionCode`, runs `pnpm version:sync`, and opens the changelog entry for editing.
+- Update `README.md` and `docs/developer/` when run commands, architecture, source ownership, or validation changes.
+- Update `AGENTS.md` or repo skills only when contributor or agent workflow rules change.
+- Do not restore old `staging`, package-workspace, installer, release, screenshot, or changelog claims unless they are true for the refactor branch.
+- Public release packaging, installation pages, final screenshots, release notes, and license metadata are still being rebuilt around the new architecture.
