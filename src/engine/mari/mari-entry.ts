@@ -1,8 +1,24 @@
+export type MariTraceEvent = {
+  type: string;
+  label?: string;
+  summary?: string;
+  tool?: string;
+  status?: "success" | "error" | string;
+  startedAt?: string;
+  finishedAt?: string;
+  content?: string;
+  arguments?: unknown;
+  result?: unknown;
+  error?: string;
+  toolCalls?: unknown[];
+};
+
 export type MariMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
   createdAt: string;
+  trace?: MariTraceEvent[];
 };
 
 export type MariAttachment = {
@@ -81,10 +97,12 @@ export type MariEntryResponse = {
   content: string;
   createdAt: string;
   action: MariEntryAction;
+  trace: MariTraceEvent[];
 };
 
-export type MariGatewayResponse = Omit<MariEntryResponse, "action"> & {
+export type MariGatewayResponse = Omit<MariEntryResponse, "action" | "trace"> & {
   action?: unknown;
+  trace?: unknown;
 };
 
 export type MariGateway = {
@@ -103,7 +121,26 @@ export async function runProfessorMariEntry(input: MariEntryRequest, gateway: Ma
   return {
     ...response,
     action: normalizeMariEntryAction(response.action),
+    trace: normalizeMariTrace(response.trace),
   };
+}
+
+function normalizeMariTrace(value: unknown): MariTraceEvent[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord).map((event) => ({
+    type: typeof event.type === "string" ? event.type : "event",
+    ...(typeof event.label === "string" ? { label: event.label } : {}),
+    ...(typeof event.summary === "string" ? { summary: event.summary } : {}),
+    ...(typeof event.tool === "string" ? { tool: event.tool } : {}),
+    ...(typeof event.status === "string" ? { status: event.status } : {}),
+    ...(typeof event.startedAt === "string" ? { startedAt: event.startedAt } : {}),
+    ...(typeof event.finishedAt === "string" ? { finishedAt: event.finishedAt } : {}),
+    ...(typeof event.content === "string" ? { content: event.content } : {}),
+    ...("arguments" in event ? { arguments: event.arguments } : {}),
+    ...("result" in event ? { result: event.result } : {}),
+    ...(typeof event.error === "string" ? { error: event.error } : {}),
+    ...(Array.isArray(event.toolCalls) ? { toolCalls: event.toolCalls } : {}),
+  }));
 }
 
 function normalizeMariEntryAction(value: unknown): MariEntryAction {

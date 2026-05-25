@@ -119,7 +119,11 @@ struct MariWorkspaceFile {
     content: String,
 }
 
-pub(crate) async fn professor_mari_prompt(state: &AppState, body: Value) -> AppResult<Value> {
+pub(crate) async fn professor_mari_prompt(
+    state: &AppState,
+    body: Value,
+    trace_channel: tauri::ipc::Channel<Value>,
+) -> AppResult<Value> {
     let input: MariPromptRequest =
         serde_json::from_value(body).map_err(|error| AppError::invalid_input(error.to_string()))?;
     let connection_value = resolve_llm_connection_for_request(
@@ -129,7 +133,7 @@ pub(crate) async fn professor_mari_prompt(state: &AppState, body: Value) -> AppR
         }),
     )?;
     let connection = llm_connection_from_value(&connection_value)?;
-    let (content, action, trace) = run_mari_agent(state, connection, &input).await?;
+    let (content, action, trace) = run_mari_agent(state, connection, &input, trace_channel).await?;
 
     Ok(json!({
         "content": content,
@@ -143,9 +147,10 @@ async fn run_mari_agent(
     state: &AppState,
     connection: marinara_llm::LlmConnection,
     input: &MariPromptRequest,
+    trace_channel: tauri::ipc::Channel<Value>,
 ) -> AppResult<(String, Value, Vec<Value>)> {
     let workspace_seed = build_mari_workspace_seed(state)?;
-    let session = MariShellSession::new(input, workspace_seed).await?;
+    let session = MariShellSession::new(input, workspace_seed, trace_channel).await?;
     let tools = build_pi_like_tools(session.clone());
     let llm: Arc<dyn LLMProvider> = Arc::new(MarinaraLlmProvider::new(connection, session.clone()));
     let agent = ReActAgent::with_max_turns(ProfessorMariAgent { tools }, 8);
@@ -182,7 +187,10 @@ struct MarinaraLlmProvider {
 
 impl MarinaraLlmProvider {
     fn new(connection: marinara_llm::LlmConnection, session: Arc<MariShellSession>) -> Self {
-        Self { connection, session }
+        Self {
+            connection,
+            session,
+        }
     }
 
     async fn complete_chat(
@@ -397,6 +405,42 @@ fn map_marinara_tool_calls(values: Vec<Value>) -> Vec<ToolCall> {
             })
         })
         .collect()
+}
+
+fn model_turn_summary(content: &str, tool_calls: &[Value]) -> String {
+    if !tool_calls.is_empty() {
+        let names = tool_calls
+            .iter()
+            .filter_map(tool_call_name)
+            .collect::<Vec<_>>()
+            .join(", ");
+        if names.is_empty() {
+            format!("Requested {} tool call(s).", tool_calls.len())
+        } else {
+            format!("Requested tool call(s): {names}.")
+        }
+    } else if !content.trim().is_empty() {
+        "Prepared final reply.".to_string()
+    } else {
+        "Completed a model turn.".to_string()
+    }
+}
+
+fn summarize_tool_call_value(value: &Value) -> Value {
+    let function = value.get("function").unwrap_or(value);
+    json!({
+        "id": value.get("id").or_else(|| value.get("call_id")).cloned().unwrap_or(Value::Null),
+        "name": tool_call_name(value).unwrap_or("tool").to_string(),
+        "arguments": function.get("arguments").or_else(|| value.get("arguments")).cloned().unwrap_or_else(|| json!("{}")),
+    })
+}
+
+fn tool_call_name(value: &Value) -> Option<&str> {
+    value
+        .get("function")
+        .and_then(|function| function.get("name"))
+        .or_else(|| value.get("name"))
+        .and_then(Value::as_str)
 }
 
 fn sampling_parameters(sampling: Option<&SamplingOverrides>) -> Value {
@@ -1259,12 +1303,15 @@ struct MariShellSession {
     bash: Arc<Mutex<Bash>>,
     initial_files: Arc<RwLock<BTreeMap<String, Vec<u8>>>>,
     manifest: Arc<BTreeMap<String, MariWorkspaceBinding>>,
+    trace: Arc<RwLock<Vec<Value>>>,
+    trace_channel: tauri::ipc::Channel<Value>,
 }
 
 impl MariShellSession {
     async fn new(
         input: &MariPromptRequest,
         workspace_seed: MariWorkspaceSeed,
+        trace_channel: tauri::ipc::Channel<Value>,
     ) -> AppResult<Arc<Self>> {
         let fs = Arc::new(TrackingFs::new());
         fs.add_text_file("/workspace/system-prompt.md", MARI_SYSTEM_PROMPT);
@@ -1299,6 +1346,8 @@ impl MariShellSession {
             bash: Arc::new(Mutex::new(bash)),
             initial_files: Arc::new(RwLock::new(BTreeMap::new())),
             manifest: Arc::new(workspace_seed.bindings),
+            trace: Arc::new(RwLock::new(Vec::new())),
+            trace_channel,
         });
         let initial = session.snapshot_review_files().await?;
         *session.initial_files.write().unwrap() = initial;
@@ -1357,6 +1406,17 @@ impl MariShellSession {
         let current = self.snapshot_review_files().await?;
         let initial = self.initial_files.read().unwrap().clone();
         Ok(diff_file_maps(&initial, &current))
+    }
+
+    fn record_trace(&self, event: Value) {
+        self.trace.write().unwrap().push(event.clone());
+        let _ = self
+            .trace_channel
+            .send(json!({ "type": "trace", "event": event }));
+    }
+
+    fn trace_events(&self) -> Vec<Value> {
+        self.trace.read().unwrap().clone()
     }
 
     fn manifest_summary(&self) -> Value {
@@ -1501,13 +1561,44 @@ impl fmt::Debug for PiLikeTool {
 #[async_trait]
 impl ToolRuntime for PiLikeTool {
     async fn execute(&self, args: Value) -> Result<Value, ToolCallError> {
+        let started_at = chrono::Utc::now().to_rfc3339();
+        let tool_name = self.name().to_string();
+        let args_for_trace = summarize_tool_args(&tool_name, &args);
         let result = match self.kind {
             PiToolKind::Read => self.tool_read(args).await,
             PiToolKind::Bash => self.tool_bash(args).await,
             PiToolKind::Edit => self.tool_edit(args).await,
             PiToolKind::Write => self.tool_write(args).await,
         };
-        result.map_err(tool_runtime_error)
+        match result {
+            Ok(value) => {
+                self.session.record_trace(json!({
+                    "type": "tool_result",
+                    "label": tool_label(&tool_name),
+                    "tool": tool_name,
+                    "startedAt": started_at,
+                    "finishedAt": chrono::Utc::now().to_rfc3339(),
+                    "arguments": args_for_trace,
+                    "result": summarize_tool_result(&value),
+                    "status": "success",
+                }));
+                Ok(value)
+            }
+            Err(error) => {
+                let message = error.message.clone();
+                self.session.record_trace(json!({
+                    "type": "tool_result",
+                    "label": tool_label(&tool_name),
+                    "tool": tool_name,
+                    "startedAt": started_at,
+                    "finishedAt": chrono::Utc::now().to_rfc3339(),
+                    "arguments": args_for_trace,
+                    "error": message,
+                    "status": "error",
+                }));
+                Err(tool_runtime_error(error))
+            }
+        }
     }
 }
 
@@ -1597,6 +1688,59 @@ impl PiLikeTool {
                 required_str(&args, "content")?,
             )
             .await
+    }
+}
+
+fn tool_label(name: &str) -> String {
+    match name {
+        "read" => "Read file",
+        "bash" => "Run bash",
+        "edit" => "Edit file",
+        "write" => "Write file",
+        _ => "Use tool",
+    }
+    .to_string()
+}
+
+fn summarize_tool_args(tool: &str, args: &Value) -> Value {
+    match tool {
+        "read" => json!({
+            "path": args.get("path").cloned().unwrap_or(Value::Null),
+            "offset": args.get("offset").cloned().unwrap_or(Value::Null),
+            "limit": args.get("limit").cloned().unwrap_or(Value::Null),
+        }),
+        "bash" => json!({
+            "command": args.get("command").and_then(Value::as_str).map(truncate_tool_text).unwrap_or_default(),
+        }),
+        "edit" => json!({
+            "path": args.get("path").cloned().unwrap_or(Value::Null),
+            "oldText": args.get("oldText").and_then(Value::as_str).map(truncate_tool_text).unwrap_or_default(),
+            "newText": args.get("newText").and_then(Value::as_str).map(truncate_tool_text).unwrap_or_default(),
+        }),
+        "write" => json!({
+            "path": args.get("path").cloned().unwrap_or(Value::Null),
+            "content": args.get("content").and_then(Value::as_str).map(truncate_tool_text).unwrap_or_default(),
+        }),
+        _ => args.clone(),
+    }
+}
+
+fn summarize_tool_result(value: &Value) -> Value {
+    match value {
+        Value::Object(object) => Value::Object(
+            object
+                .iter()
+                .map(|(key, value)| {
+                    let next = match value {
+                        Value::String(text) => Value::String(truncate_tool_text(text)),
+                        _ => value.clone(),
+                    };
+                    (key.clone(), next)
+                })
+                .collect(),
+        ),
+        Value::String(text) => Value::String(truncate_tool_text(text)),
+        _ => value.clone(),
     }
 }
 

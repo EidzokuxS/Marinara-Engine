@@ -8,6 +8,7 @@ use tauri::State;
 pub async fn professor_mari_prompt(
     state: State<'_, AppState>,
     request: Value,
+    on_event: tauri::ipc::Channel<Value>,
 ) -> Result<Value, AppError> {
-    mari::professor_mari_prompt(&state, request).await
+    mari::professor_mari_prompt(&state, request, on_event).await
 }

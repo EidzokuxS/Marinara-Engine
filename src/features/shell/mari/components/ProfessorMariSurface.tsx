@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronUp, CircleUser, FileText, Link, Plus, Send, X } from "lucide-react";
-import { runProfessorMariEntry, type MariMessage } from "../../../../engine/mari/mari-entry";
+import { Activity, AlertTriangle, Check, CheckCircle2, ChevronUp, CircleUser, FileText, Link, Plus, Send, Terminal, X } from "lucide-react";
+import { runProfessorMariEntry, type MariMessage, type MariTraceEvent } from "../../../../engine/mari/mari-entry";
 import { mariApi } from "../../../../shared/api/mari-api";
 import { useConnections } from "../../../catalog/connections/index";
 import { usePersonas } from "../../../catalog/characters/index";
@@ -107,6 +107,7 @@ export function ProfessorMariSurface() {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendErrorDetails, setSendErrorDetails] = useState<string | null>(null);
+  const [liveTrace, setLiveTrace] = useState<MariTraceEvent[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -215,6 +216,7 @@ export function ProfessorMariSurface() {
     setAttachments([]);
     setSendError(null);
     setSendErrorDetails(null);
+    setLiveTrace([]);
     setSending(true);
     requestAnimationFrame(() => inputRef.current?.focus());
     let response;
@@ -244,7 +246,14 @@ export function ProfessorMariSurface() {
             content: attachment.content,
           })),
         },
-        mariApi,
+        {
+          prompt: (request) =>
+            mariApi.prompt(request, (event) => {
+              if (event.type === "trace") {
+                setLiveTrace((current) => [...current, event.event]);
+              }
+            }),
+        },
       );
     } catch (error) {
       console.error("Professor Mari failed to respond", error);
@@ -258,8 +267,10 @@ export function ProfessorMariSurface() {
       role: "assistant",
       content: response.content,
       createdAt: response.createdAt,
+      trace: response.trace,
     };
     setMessages((current) => [...current, assistant]);
+    setLiveTrace([]);
     setSending(false);
     requestAnimationFrame(() => inputRef.current?.focus());
   };
@@ -320,13 +331,14 @@ export function ProfessorMariSurface() {
                     messageIndex={index + 1}
                     messageOrderIndex={index}
                   />
+                  {messages[index]?.role === "assistant" && messages[index]?.trace?.length ? (
+                    <MariTracePanel events={messages[index].trace ?? []} />
+                  ) : null}
                 </div>
               );
             })
           )}
-          {sending && (
-            <div className="px-4 py-2 text-xs text-[var(--muted-foreground)]">Professor Mari is thinking...</div>
-          )}
+          {sending && <MariWorkingTrace events={liveTrace} />}
           {sendError && (
             <div className="px-4 py-2 text-xs text-red-500">
               <div>{sendError}</div>
@@ -505,6 +517,108 @@ export function ProfessorMariSurface() {
       </div>
     </section>
   );
+}
+
+function MariWorkingTrace({ events }: { events: MariTraceEvent[] }) {
+  const latest = events.at(-1);
+  return (
+    <div className="mx-4 my-3 max-w-3xl rounded-xl border border-[var(--border)] bg-[var(--card)]/85 p-3 text-xs shadow-sm backdrop-blur-sm md:mx-[12%]">
+      <div className="flex items-center gap-2 text-[var(--foreground)]/85">
+        <Activity size="0.875rem" className="animate-pulse text-blue-400" />
+        <span className="font-semibold">Professor Mari is working</span>
+        {events.length > 0 && (
+          <span className="rounded-full bg-[var(--secondary)] px-2 py-0.5 text-[0.625rem] text-[var(--muted-foreground)]">
+            {events.length} live {events.length === 1 ? "event" : "events"}
+          </span>
+        )}
+      </div>
+      {latest ? (
+        <div className="mt-2">
+          <MariTraceEventItem event={latest} />
+          {events.length > 1 && (
+            <details className="mt-2 rounded-lg border border-[var(--border)]/70 bg-[var(--secondary)]/20">
+              <summary className="cursor-pointer px-2.5 py-1.5 text-[0.6875rem] font-semibold text-[var(--muted-foreground)]">
+                Show previous live steps
+              </summary>
+              <div className="space-y-2 p-2">
+                {events.slice(0, -1).map((event, index) => (
+                  <MariTraceEventItem key={`${event.type}-live-${index}`} event={event} />
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      ) : (
+        <p className="mt-1 text-[0.6875rem] text-[var(--muted-foreground)]">
+          Building the virtual workspace, asking the model, and waiting for the first tool step.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function MariTracePanel({ events }: { events: MariTraceEvent[] }) {
+  if (!events.length) return null;
+  return (
+    <details className="mx-4 mb-3 mt-1 max-w-3xl rounded-xl border border-[var(--border)] bg-[var(--card)]/75 text-xs shadow-sm backdrop-blur-sm open:bg-[var(--card)]/90 md:mx-[12%]">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-[var(--foreground)]/85 marker:hidden">
+        <Activity size="0.875rem" className="text-blue-400" />
+        <span className="font-semibold">Agent activity</span>
+        <span className="rounded-full bg-[var(--secondary)] px-2 py-0.5 text-[0.625rem] text-[var(--muted-foreground)]">
+          {events.length} {events.length === 1 ? "event" : "events"}
+        </span>
+      </summary>
+      <div className="space-y-2 border-t border-[var(--border)]/70 p-3">
+        {events.map((event, index) => (
+          <MariTraceEventItem key={`${event.type}-${index}`} event={event} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function MariTraceEventItem({ event }: { event: MariTraceEvent }) {
+  const isError = event.status === "error";
+  const Icon = event.type === "tool_result" ? Terminal : isError ? AlertTriangle : CheckCircle2;
+  const details = traceDetails(event);
+  return (
+    <div className="rounded-lg border border-[var(--border)]/70 bg-[var(--secondary)]/35 p-2.5">
+      <div className="flex items-start gap-2">
+        <Icon size="0.875rem" className={cn("mt-0.5 shrink-0", isError ? "text-red-400" : "text-emerald-400")} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-[var(--foreground)]/90">{event.label || event.tool || event.type}</span>
+            {event.status && (
+              <span className={cn("rounded-full px-1.5 py-0.5 text-[0.625rem]", isError ? "bg-red-500/10 text-red-400" : "bg-emerald-500/10 text-emerald-400")}>
+                {event.status}
+              </span>
+            )}
+          </div>
+          {event.summary && <p className="mt-0.5 text-[0.6875rem] text-[var(--muted-foreground)]">{event.summary}</p>}
+          {details && (
+            <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-black/20 p-2 text-[0.6875rem] text-[var(--foreground)]/75">
+              {details}
+            </pre>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function traceDetails(event: MariTraceEvent) {
+  const payload: Record<string, unknown> = {};
+  if (event.content?.trim()) payload.content = event.content;
+  if (event.toolCalls?.length) payload.toolCalls = event.toolCalls;
+  if (event.arguments !== undefined) payload.arguments = event.arguments;
+  if (event.result !== undefined) payload.result = event.result;
+  if (event.error) payload.error = event.error;
+  if (Object.keys(payload).length === 0) return null;
+  try {
+    return JSON.stringify(payload, null, 2);
+  } catch {
+    return String(payload);
+  }
 }
 
 function MariContextMenu({

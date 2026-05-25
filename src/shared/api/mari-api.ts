@@ -1,9 +1,15 @@
-import type { MariEntryRequest, MariGatewayResponse } from "../../engine/mari/mari-entry";
+import type { MariEntryRequest, MariGatewayResponse, MariTraceEvent } from "../../engine/mari/mari-entry";
+import { Channel } from "@tauri-apps/api/core";
 import { invokeTauri } from "./tauri-client";
 
+export type MariStreamEvent = { type: "trace"; event: MariTraceEvent };
+
 export const mariApi = {
-  prompt: (request: MariEntryRequest) =>
-    invokeTauri<MariGatewayResponse>("professor_mari_prompt", {
+  prompt: (request: MariEntryRequest, onEvent: (event: MariStreamEvent) => void = () => undefined) => {
+    const channel = new Channel<MariStreamEvent>(onEvent);
+    return invokeTauri<MariGatewayResponse>("professor_mari_prompt", {
       request,
-    }),
+      onEvent: channel,
+    });
+  },
 };
