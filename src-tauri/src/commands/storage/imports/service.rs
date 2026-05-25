@@ -63,11 +63,7 @@ fn patch_imported_character_lorebook_pointer(
     entries_imported: usize,
 ) -> AppResult<()> {
     let character = get_required(state, "characters", character_id)?;
-    let mut data = character
-        .get("data")
-        .and_then(Value::as_str)
-        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
-        .unwrap_or_else(|| json!({}));
+    let mut data = character.get("data").cloned().unwrap_or_else(|| json!({}));
     let Some(data_object) = data.as_object_mut() else {
         return Ok(());
     };
@@ -94,7 +90,7 @@ fn patch_imported_character_lorebook_pointer(
     state.storage.patch(
         "characters",
         character_id,
-        json!({ "data": serde_json::to_string(&data).unwrap_or_else(|_| "{}".to_string()) }),
+        json!({ "data": data }),
     )?;
     Ok(())
 }
@@ -115,10 +111,8 @@ fn import_st_character_payload(
         .into_iter()
         .flat_map(|row| {
             row.get("data")
-                .and_then(Value::as_str)
-                .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
-                .and_then(|data| data.get("tags").cloned())
-                .map(|tags| string_array(Some(&tags)))
+                .and_then(|data| data.get("tags"))
+                .map(|tags| string_array(Some(tags)))
                 .unwrap_or_default()
         })
         .collect();
@@ -129,7 +123,7 @@ fn import_st_character_payload(
         .unwrap_or("Imported Character")
         .to_string();
     let mut record = json!({
-        "data": serde_json::to_string(&data)?,
+        "data": data,
         "comment": data.get("creator_notes").and_then(Value::as_str).unwrap_or(""),
         "avatarPath": null,
         "format": payload.get("spec").and_then(Value::as_str).unwrap_or("chara_card_v2"),
