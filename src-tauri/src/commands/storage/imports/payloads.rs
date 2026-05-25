@@ -254,6 +254,25 @@ pub(super) fn parse_character_file(filename: &str, bytes: &[u8]) -> AppResult<Va
     })
 }
 
+pub(super) fn parse_character_file_from_path(
+    filename: &str,
+    source_path: &Path,
+    bytes: &[u8],
+) -> AppResult<Value> {
+    if filename.to_ascii_lowercase().ends_with(".png") {
+        let mut payload = extract_chara_from_png(bytes)?;
+        let object = payload.as_object_mut().ok_or_else(|| {
+            AppError::invalid_input("Embedded character data must be a JSON object")
+        })?;
+        object.insert(
+            "_avatarFileCopySourcePath".to_string(),
+            Value::String(source_path.to_string_lossy().to_string()),
+        );
+        return Ok(payload);
+    }
+    parse_character_file(filename, bytes)
+}
+
 pub(super) fn import_payload(body: Value) -> AppResult<Value> {
     if body.get("file").is_some() {
         let (_name, _content_type, bytes) = decode_uploaded_file(&body)?;

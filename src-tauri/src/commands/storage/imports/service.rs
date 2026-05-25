@@ -1,5 +1,6 @@
 use super::super::media_uploads::{
-    decode_image_payload, extension_for_image_mime, safe_filename, unique_file_path,
+    decode_image_payload, extension_for_image_mime, persist_image_bytes, persist_image_file_copy,
+    safe_filename, unique_file_path,
 };
 use super::super::shared::*;
 use super::super::*;
@@ -17,13 +18,13 @@ mod payloads;
 mod st_preset;
 #[path = "timestamps.rs"]
 mod timestamps;
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use access::*;
 use marinara::*;
 use normalization::*;
 use payloads::*;
 use st_preset::*;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use timestamps::{apply_timestamp_overrides, timestamp_overrides_from_value};
 
 fn create_lorebook_from_payload(
@@ -130,13 +131,20 @@ fn import_st_character_payload(
     let mut record = json!({
         "data": serde_json::to_string(&data)?,
         "comment": data.get("creator_notes").and_then(Value::as_str).unwrap_or(""),
-        "avatarPath": payload
-            .get("_avatarDataUrl")
-            .and_then(Value::as_str)
-            .map(|value| Value::String(value.to_string()))
-            .unwrap_or(Value::Null),
+        "avatarPath": null,
         "format": payload.get("spec").and_then(Value::as_str).unwrap_or("chara_card_v2"),
     });
+    if let Some(avatar) = imported_avatar_reference(state, &payload, filename.as_deref())? {
+        let object = record
+            .as_object_mut()
+            .expect("character import record should be an object");
+        object.insert("avatarPath".to_string(), Value::String(avatar.asset_url));
+        object.insert(
+            "avatarFilePath".to_string(),
+            Value::String(avatar.absolute_path),
+        );
+        object.insert("avatarFilename".to_string(), Value::String(avatar.filename));
+    }
     apply_timestamp_overrides(&mut record, body, &payload);
     let character = state.storage.create("characters", record)?;
 
@@ -187,6 +195,64 @@ fn import_st_character_payload(
             "skipped": embedded.is_some() && !import_embedded
         },
         "lorebook": lorebook_result
+    }))
+}
+
+struct ImportedAvatarReference {
+    asset_url: String,
+    absolute_path: String,
+    filename: String,
+}
+
+fn imported_avatar_reference(
+    state: &AppState,
+    payload: &Value,
+    filename: Option<&str>,
+) -> AppResult<Option<ImportedAvatarReference>> {
+    if let Some(path) = payload
+        .get("_avatarSourcePath")
+        .or_else(|| payload.get("_avatarFileCopySourcePath"))
+        .and_then(Value::as_str)
+        .filter(|path| !path.trim().is_empty())
+    {
+        let source = PathBuf::from(path);
+        let filename_hint = source
+            .file_name()
+            .and_then(|value| value.to_str())
+            .or(filename)
+            .unwrap_or("avatar.png");
+        let stored = persist_image_file_copy(state, "avatars/characters", filename_hint, &source)?;
+        return Ok(Some(ImportedAvatarReference {
+            asset_url: stored.asset_url,
+            absolute_path: stored.absolute_path,
+            filename: stored.filename,
+        }));
+    }
+    let Some(value) = payload.get("_avatarDataUrl").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    if !value.starts_with("data:image/") {
+        return Ok(None);
+    }
+    let (mime, bytes) = decode_image_payload(value, "avatar")?;
+    let fallback = payload
+        .get("data")
+        .and_then(|data| data.get("name"))
+        .or_else(|| payload.get("name"))
+        .and_then(Value::as_str)
+        .or(filename)
+        .unwrap_or("avatar");
+    let stored = persist_image_bytes(
+        state,
+        "avatars/characters",
+        &safe_filename(fallback),
+        &bytes,
+        &mime,
+    )?;
+    Ok(Some(ImportedAvatarReference {
+        asset_url: stored.asset_url,
+        absolute_path: stored.absolute_path,
+        filename: stored.filename,
     }))
 }
 
