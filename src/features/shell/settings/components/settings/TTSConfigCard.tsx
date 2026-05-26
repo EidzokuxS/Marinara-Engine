@@ -919,9 +919,15 @@ export function TTSConfigCard() {
                   label="Split quoted dialogue from narration"
                   checked={narratorVoiceEnabled}
                   onChange={(enabled) => {
-                    const nextNarratorVoice = narratorVoice || voice;
+                    const nextNarratorVoice = narratorVoice.trim() || voice.trim();
+                    if (enabled && !nextNarratorVoice) {
+                      setNarratorVoiceEnabled(false);
+                      mark({ narratorVoiceEnabled: false });
+                      return;
+                    }
+
                     setNarratorVoiceEnabled(enabled);
-                    if (enabled && !narratorVoice) setNarratorVoice(nextNarratorVoice);
+                    if (enabled && nextNarratorVoice !== narratorVoice) setNarratorVoice(nextNarratorVoice);
                     mark({
                       narratorVoiceEnabled: enabled,
                       narratorVoice: enabled ? nextNarratorVoice : narratorVoice,
@@ -934,6 +940,7 @@ export function TTSConfigCard() {
                       <input
                         value={narratorVoice}
                         list="pockettts-voices"
+                        aria-label="Narrator voice selection"
                         onChange={(e) => {
                           setNarratorVoice(e.target.value);
                           mark({ narratorVoice: e.target.value });
@@ -945,6 +952,7 @@ export function TTSConfigCard() {
                   ) : (
                     <select
                       value={narratorVoice}
+                      aria-label="Narrator voice selection"
                       onChange={(e) => {
                         setNarratorVoice(e.target.value);
                         mark({ narratorVoice: e.target.value });
@@ -953,7 +961,7 @@ export function TTSConfigCard() {
                       className={cn(INPUT_CLS, "cursor-pointer appearance-none")}
                     >
                       {source === "elevenlabs" && <option value="">Select narrator voice</option>}
-                      {fetchingVoices && <option value="">Loading voicesâ€¦</option>}
+                      {fetchingVoices && <option value="">Loading voices&hellip;</option>}
                       {!fetchingVoices && voiceOptions.length === 0 && <option value="">Save config to load voices</option>}
                       {voiceOptions.map((option) => (
                         <option key={option.id} value={option.id}>

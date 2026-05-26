@@ -24,6 +24,12 @@ export interface TTSVoiceRequest extends TTSUtterance {
   voice?: string;
 }
 
+const TTS_NARRATOR_SPEAKER = "__tts_narrator__";
+
+function isSyntheticTTSNarrator(speaker?: string | null): boolean {
+  return speaker === TTS_NARRATOR_SPEAKER;
+}
+
 export function normalizeTTSCharacterName(value?: string | null): string {
   return (value ?? "").toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -145,7 +151,7 @@ export function resolveTTSVoiceForSpeaker(
   const fallbackVoice = config.voice ?? "";
   if (
     config.narratorVoiceEnabled &&
-    normalizeTTSCharacterName(speaker) === "narrator" &&
+    isSyntheticTTSNarrator(speaker) &&
     (config.voiceMode ?? "single") === "single"
   ) {
     return config.narratorVoice || fallbackVoice;
@@ -285,7 +291,7 @@ export function splitQuotedDialogueAndNarration(text: string, fallbackSpeaker?: 
   while ((match = quoteRe.exec(text)) !== null) {
     const narrationBefore = cleanTTSInputText(text.slice(lastIndex, match.index));
     if (narrationBefore) {
-      utterances.push({ text: narrationBefore, speaker: "Narrator" });
+      utterances.push({ text: narrationBefore, speaker: TTS_NARRATOR_SPEAKER });
     }
 
     const dialogue = cleanTTSInputText(stripSurroundingDialogueQuotes(match[0]));
@@ -298,7 +304,7 @@ export function splitQuotedDialogueAndNarration(text: string, fallbackSpeaker?: 
 
   const narrationAfter = cleanTTSInputText(text.slice(lastIndex));
   if (narrationAfter) {
-    utterances.push({ text: narrationAfter, speaker: "Narrator" });
+    utterances.push({ text: narrationAfter, speaker: TTS_NARRATOR_SPEAKER });
   }
 
   return utterances;
@@ -330,17 +336,21 @@ export function buildTTSVoiceRequests(
   const fallbackSpeakerKey = normalizeTTSCharacterName(fallbackSpeaker);
   return utterances.flatMap((utterance) => {
     const speaker = utterance.speaker || fallbackSpeaker || undefined;
+    const isSyntheticNarrator = isSyntheticTTSNarrator(speaker);
     const speakerKey = normalizeTTSCharacterName(speaker);
-    const resolvedCharacterId = speaker
+    const resolvedCharacterId = isSyntheticNarrator
+      ? undefined
+      : speaker
       ? (resolveCharacterIdForSpeaker?.(speaker) ??
         (speakerKey && speakerKey === fallbackSpeakerKey ? fallbackCharacterId : undefined))
       : fallbackCharacterId;
     const voice = resolveTTSVoiceForSpeaker(config, speaker, resolvedCharacterId);
     if (config.source === "elevenlabs" && !voice) return [];
+    const requestSpeaker = isSyntheticNarrator ? "Narrator" : speaker;
 
     return splitTTSChunks(utterance.text).map((chunk) => ({
       text: chunk,
-      speaker,
+      speaker: requestSpeaker,
       tone: utterance.tone,
       voice,
     }));
@@ -405,7 +415,7 @@ function extractSpeakerTaggedUtterances(
   const addNarration = (value: string) => {
     if (!includeNarration) return;
     const spoken = cleanTTSInputText(value);
-    if (spoken) utterances.push({ text: spoken, speaker: "Narrator" });
+    if (spoken) utterances.push({ text: spoken, speaker: TTS_NARRATOR_SPEAKER });
   };
 
   while ((speakerTagMatch = speakerTagRe.exec(text)) !== null) {

@@ -1,4 +1,4 @@
-const SENTENCE_END_RE = /[.!?\u2026\u3002\uff01\uff1f]+(?:["'\u201d\u2019\u00bb\u300d\u300f)\]}])?(?=\s|$)/gu;
+const SENTENCE_END_RE = /[.!?\u2026\u3002\uff01\uff1f]+(?:["'\u201d\u2019\u00bb\u300d\u300f)\]}]+)?(?=\s|$)/gu;
 
 const OPEN_QUOTES = new Set(['"', "\u201c", "\u00ab", "\u300c", "\u300e"]);
 const CLOSE_QUOTES_FOR: Record<string, string> = {
@@ -78,7 +78,7 @@ function findUnclosedThinkingStart(tail: string): number | null {
 }
 
 function isEllipsisEndCandidate(matchText: string): boolean {
-  return /^\.{2,}["'\u201d\u2019\u00bb\u300d\u300f)\]}]?$/.test(matchText);
+  return /^\.{2,}["'\u201d\u2019\u00bb\u300d\u300f)\]}]*$/.test(matchText);
 }
 
 function lastSentencePunctuationIndex(matchText: string): number {

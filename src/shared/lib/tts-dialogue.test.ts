@@ -75,4 +75,16 @@ describe("TTS dialogue routing", () => {
       expect.objectContaining({ text: "Stay close.", speaker: "Ada", voice: "alloy" }),
     ]);
   });
+
+  it("does not treat a real fallback speaker named Narrator as synthetic narration", () => {
+    const requests = buildTTSVoiceRequests('"Line."', {
+      ...baseConfig,
+      narratorVoiceEnabled: true,
+      narratorVoice: "nova",
+    }, "Narrator");
+
+    expect(requests).toEqual([
+      expect.objectContaining({ text: "Line.", speaker: "Narrator", voice: "alloy" }),
+    ]);
+  });
 });

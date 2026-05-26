@@ -53,6 +53,9 @@ describe("streaming TTS sentence chunker", () => {
     expect(extractNewSentences('She says, ""Hello. How are you."" Then nods.', state)).toBe(
       'She says, ""Hello. How are you."" Then nods.',
     );
+
+    const terminalState = createChunkerState();
+    expect(extractNewSentences('She says, ""Hello.""', terminalState)).toBe('She says, ""Hello.""');
   });
 
   it("emits sentence ends after guillemet and Japanese quote closers", () => {
