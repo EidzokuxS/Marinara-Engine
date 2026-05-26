@@ -104,6 +104,8 @@ export const ttsConfigSchema = z.object({
   /** Plain text on write; masked "••••••" on read when a key is saved */
   apiKey: z.string().default(""),
   voice: z.string().default("alloy"),
+  narratorVoiceEnabled: z.boolean().default(false),
+  narratorVoice: z.string().default(""),
   model: z.string().default("tts-1"),
   /** 0.25 – 4.0 */
   speed: z.number().min(0.25).max(4.0).default(1.0),

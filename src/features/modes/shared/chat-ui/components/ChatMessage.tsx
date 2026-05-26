@@ -51,9 +51,8 @@ import {
   subscribeStreamingTTSActive,
 } from "../hooks/use-streaming-tts";
 import {
-  buildTTSMessageText,
+  buildTTSVoiceRequests,
   clientSidePlaybackRate,
-  resolveTTSVoiceForSpeaker,
 } from "../../../../../shared/lib/tts-dialogue";
 import { DIALOGUE_QUOTE_PATTERN_SOURCE, HTML_SAFE_DIALOGUE_QUOTE_PATTERN_SOURCE } from "../../../../../shared/lib/dialogue-quotes";
 import DOMPurify from "dompurify";
@@ -746,11 +745,16 @@ export const ChatMessage = memo(function ChatMessage({
   const { data: ttsConfig } = useTTSConfig();
   const ttsEnabled = ttsConfig?.enabled ?? false;
   const ttsSpeakerName = message.characterId ? characterMap?.get(message.characterId)?.name : undefined;
-  const ttsVoice = ttsConfig ? resolveTTSVoiceForSpeaker(ttsConfig, ttsSpeakerName, message.characterId) : "";
-  const ttsSpeakText =
-    ttsConfig && (ttsConfig.source !== "elevenlabs" || ttsVoice)
-      ? buildTTSMessageText(message.content, ttsConfig, ttsSpeakerName)
-      : "";
+  const ttsVoiceRequests = useMemo(
+    () =>
+      ttsConfig
+        ? buildTTSVoiceRequests(message.content, ttsConfig, ttsSpeakerName, message.characterId).filter((request) =>
+            request.text.trim(),
+          )
+        : [],
+    [message.characterId, message.content, ttsConfig, ttsSpeakerName],
+  );
+  const hasTTSContent = ttsVoiceRequests.length > 0;
   const [ttsState, setTTSState] = useState(ttsService.getState());
   const [ttsActiveId, setTTSActiveId] = useState<string | null>(ttsService.getActiveId());
   useEffect(
@@ -782,14 +786,12 @@ export const ChatMessage = memo(function ChatMessage({
     if (liveIsThis) {
       ttsService.stop();
     } else {
-      if (!ttsSpeakText) return;
-      void ttsService.speak(ttsSpeakText, message.id, {
-        speaker: ttsSpeakerName,
-        voice: ttsVoice,
+      if (!hasTTSContent) return;
+      void ttsService.speakSequence(ttsVoiceRequests, message.id, {
         playbackRate: clientSidePlaybackRate(ttsConfig),
       });
     }
-  }, [message.id, ttsSpeakText, ttsSpeakerName, ttsVoice, ttsConfig]);
+  }, [hasTTSContent, message.id, ttsConfig, ttsVoiceRequests]);
 
   const handlePauseResumeTTS = useCallback(() => {
     if (ttsService.getActiveId() !== message.id) return;
@@ -1849,7 +1851,7 @@ export const ChatMessage = memo(function ChatMessage({
                     title={
                       streamingTTSActive
                         ? "Stop streaming narration"
-                        : !ttsSpeakText
+                        : !hasTTSContent
                         ? "No dialogue to speak"
                         : isLoadingThis
                           ? "Loading…"
@@ -1858,7 +1860,7 @@ export const ChatMessage = memo(function ChatMessage({
                             : "Speak"
                     }
                     className={isSpeakingThis || streamingTTSActive ? "text-sky-400 hover:text-sky-300" : undefined}
-                    disabled={!streamingTTSActive && (!ttsSpeakText || (ttsBusy && !isSpeakingThis))}
+                    disabled={!streamingTTSActive && (!hasTTSContent || (ttsBusy && !isSpeakingThis))}
                     dark
                   />
                 </>
@@ -2258,7 +2260,7 @@ export const ChatMessage = memo(function ChatMessage({
                   title={
                     streamingTTSActive
                       ? "Stop streaming narration"
-                      : !ttsSpeakText
+                      : !hasTTSContent
                       ? "No dialogue to speak"
                       : isLoadingThis
                         ? "Loading…"
@@ -2267,7 +2269,7 @@ export const ChatMessage = memo(function ChatMessage({
                           : "Speak"
                   }
                   className={isSpeakingThis || streamingTTSActive ? "text-sky-500" : undefined}
-                  disabled={!streamingTTSActive && (!ttsSpeakText || (ttsBusy && !isSpeakingThis))}
+                  disabled={!streamingTTSActive && (!hasTTSContent || (ttsBusy && !isSpeakingThis))}
                 />
               </>
             )}

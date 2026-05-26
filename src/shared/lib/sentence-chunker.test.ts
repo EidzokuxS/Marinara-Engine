@@ -36,4 +36,30 @@ describe("streaming TTS sentence chunker", () => {
     expect(extractNewSentences("Visible. <thought>still thinking. Hidden", unclosedState)).toBe("Visible.");
     expect(extractRemainder("Visible. <thought>still thinking. Hidden", unclosedState)).toBe("");
   });
+
+  it("waits for quoted dialogue to close before emitting mid-quote sentence punctuation", () => {
+    const state = createChunkerState();
+
+    expect(extractNewSentences('She says, "Hello. How are', state)).toBe("");
+    expect(extractNewSentences('She says, "Hello. How are you." Then nods.', state)).toBe(
+      'She says, "Hello. How are you." Then nods.',
+    );
+  });
+
+  it("treats doubled ASCII quotes as balanced dialogue delimiters", () => {
+    const state = createChunkerState();
+
+    expect(extractNewSentences('She says, ""Hello. How are', state)).toBe("");
+    expect(extractNewSentences('She says, ""Hello. How are you."" Then nods.', state)).toBe(
+      'She says, ""Hello. How are you."" Then nods.',
+    );
+  });
+
+  it("emits sentence ends after guillemet and Japanese quote closers", () => {
+    const state = createChunkerState();
+
+    expect(extractNewSentences("\u00abHello. How are you?\u00bb \u300cFine.\u300d", state)).toBe(
+      "\u00abHello. How are you?\u00bb \u300cFine.\u300d",
+    );
+  });
 });
