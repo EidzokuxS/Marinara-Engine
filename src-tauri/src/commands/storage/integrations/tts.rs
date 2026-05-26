@@ -120,6 +120,7 @@ fn default_config() -> Value {
         "autoplayRP": false,
         "autoplayConvo": false,
         "autoplayGame": false,
+        "autoplayStreaming": false,
         "dialogueOnly": false,
         "dialogueScope": "all",
         "dialogueCharacterName": ""
