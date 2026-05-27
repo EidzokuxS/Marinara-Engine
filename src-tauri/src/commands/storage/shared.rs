@@ -576,6 +576,14 @@ mod tests {
     }
 
     #[test]
+    fn lorebook_defaults_include_vectorization_enabled() {
+        let row = with_entity_defaults("lorebooks", json!({ "name": "World Book" }))
+            .expect("lorebook defaults should apply");
+
+        assert_eq!(row["excludeFromVectorization"], json!(false));
+    }
+
+    #[test]
     fn game_state_snapshot_rejects_malformed_persona_stats_string() {
         let mut row = json!({ "personaStats": "{\"not\":\"an array\"}" });
         let object = row.as_object_mut().expect("row should be an object");

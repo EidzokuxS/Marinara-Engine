@@ -117,6 +117,16 @@ type LinkedResourceItem = {
   deleted?: boolean;
 };
 
+function readBoolFlag(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(normalized)) return true;
+  if (["false", "0", "no", "off"].includes(normalized)) return false;
+  return false;
+}
+
 function LinkedResourcePicker({
   label,
   help,
@@ -484,7 +494,7 @@ export function LorebookEditor() {
     setFormCategory(lorebook.category);
     setFormEnabled(lorebook.enabled);
     setFormIsGlobal(lorebook.isGlobal ?? false);
-    setFormExcludeFromVectorization(lorebook.excludeFromVectorization ?? false);
+    setFormExcludeFromVectorization(readBoolFlag(lorebook.excludeFromVectorization));
     setFormScanDepth(lorebook.scanDepth);
     setFormTokenBudget(lorebook.tokenBudget);
     setFormRecursive(lorebook.recursiveScanning);
@@ -1496,6 +1506,9 @@ export function LorebookEditor() {
                   lorebookId={lorebookId!}
                   entries={entries}
                   excludeFromVectorization={formExcludeFromVectorization}
+                  hasUnsavedVectorizationToggle={
+                    formExcludeFromVectorization !== readBoolFlag(lorebook.excludeFromVectorization)
+                  }
                 />
               </div>
             )}
@@ -2029,10 +2042,12 @@ function VectorizeSection({
   lorebookId,
   entries,
   excludeFromVectorization,
+  hasUnsavedVectorizationToggle,
 }: {
   lorebookId: string;
   entries: LorebookEntry[];
   excludeFromVectorization: boolean;
+  hasUnsavedVectorizationToggle: boolean;
 }) {
   const queryClient = useQueryClient();
   const { data: rawConnections } = useConnections();
@@ -2043,10 +2058,10 @@ function VectorizeSection({
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
   const excludedCount = excludeFromVectorization
     ? entries.length
-    : entries.filter((entry) => entry.excludeFromVectorization).length;
+    : entries.filter((entry) => readBoolFlag(entry.excludeFromVectorization)).length;
   const vectorizableEntries = excludeFromVectorization
     ? []
-    : entries.filter((entry) => !entry.excludeFromVectorization);
+    : entries.filter((entry) => !readBoolFlag(entry.excludeFromVectorization));
   const vectorizableEntryCount = vectorizableEntries.length;
   const vectorizedCount = vectorizableEntries.filter(
     (entry) => Array.isArray(entry.embedding) && entry.embedding.length > 0,
@@ -2070,9 +2085,9 @@ function VectorizeSection({
       const res = await invokeTauri("lorebook_vectorize", {
         id: lorebookId,
         body: {
-        connectionId: selectedConnectionId,
-        model: conn?.embeddingModel ?? "",
-        onlyMissing: !allVectorized,
+          connectionId: selectedConnectionId,
+          model: conn?.embeddingModel ?? "",
+          onlyMissing: !allVectorized,
         },
       });
       const data = res as { vectorized: number; total?: number; skipped?: number };
@@ -2113,9 +2128,13 @@ function VectorizeSection({
         {excludeFromVectorization ? <span>This lorebook excludes every entry.</span> : null}
         {!excludeFromVectorization && excludedCount > 0 && <span>{excludedCount} excluded.</span>}
       </div>
-      {excludeFromVectorization ? (
+      {hasUnsavedVectorizationToggle ? (
         <p className="text-[0.625rem] text-[var(--muted-foreground)]">
-          Semantic search is disabled by the lorebook-level No Vector toggle.
+          Save this lorebook before vectorizing so the No Vector setting is applied.
+        </p>
+      ) : excludeFromVectorization ? (
+        <p className="text-[0.625rem] text-[var(--muted-foreground)]">
+          Semantic vectorization is disabled by this lorebook&apos;s No Vector toggle. Keyword matching still works.
         </p>
       ) : embeddingConnections.length === 0 ? (
         <p className="text-[0.625rem] text-[var(--muted-foreground)]">
@@ -2137,15 +2156,17 @@ function VectorizeSection({
             </select>
             <button
               onClick={handleVectorize}
-              disabled={vectorizing || vectorizableEntryCount === 0}
+              disabled={vectorizing || hasUnsavedVectorizationToggle || vectorizableEntryCount === 0}
               className="flex items-center gap-1.5 rounded-xl bg-violet-500/15 px-3 py-1.5 text-xs font-medium text-violet-400 ring-1 ring-violet-500/30 transition-all hover:bg-violet-500/25 active:scale-[0.98] disabled:opacity-50"
             >
               {vectorizing ? <Loader2 size="0.75rem" className="animate-spin" /> : <Sparkles size="0.75rem" />}
               {vectorizing
                 ? "Vectorizing..."
-                : allVectorized
-                  ? `Re-vectorize ${vectorizableEntryCount} entries`
-                  : `Vectorize ${missingCount} missing`}
+                : hasUnsavedVectorizationToggle
+                  ? "Save first"
+                  : allVectorized
+                    ? `Re-vectorize ${vectorizableEntryCount} entries`
+                    : `Vectorize ${missingCount} missing`}
             </button>
           </div>
           {result && (
