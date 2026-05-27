@@ -1,4 +1,10 @@
-import { BUILT_IN_AGENTS, BUILT_IN_TOOLS, type AgentContext, type AgentResult } from "../contracts/types/agent";
+import {
+  BUILT_IN_AGENTS,
+  BUILT_IN_AGENT_RUN_INTERVAL_DEFAULTS,
+  BUILT_IN_TOOLS,
+  type AgentContext,
+  type AgentResult,
+} from "../contracts/types/agent";
 import type { IntegrationGateway } from "../capabilities/integrations";
 import type { LlmGateway, LlmMessage } from "../capabilities/llm";
 import type { StorageGateway } from "../capabilities/storage";
@@ -62,6 +68,8 @@ interface ResolvedAgentsResult {
 }
 
 const BUILT_IN_AGENT_TYPES = new Set(BUILT_IN_AGENTS.map((agent) => agent.id));
+const ILLUSTRATOR_AGENT_TYPE = "illustrator";
+const MAX_ASSISTANT_RUN_INTERVAL = 100;
 
 function llmProvider(llm: LlmGateway, connectionId: string | null): BaseLLMProvider {
   return {
@@ -200,6 +208,92 @@ function activationScanMessages(input: GenerationAgentRuntimeInput): ActivationS
 function isBuiltInAgent(agent: JsonRecord): boolean {
   const type = readString(agent.type || agent.agentType).trim();
   return BUILT_IN_AGENT_TYPES.has(type);
+}
+
+function positiveInteger(value: unknown, fallback: number, max: number): number {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return Math.max(1, Math.min(max, Math.floor(parsed)));
+}
+
+function automaticAssistantIntervalAgentType(input: GenerationAgentRuntimeInput, type: string): string | null {
+  if (input.agentTypes && input.agentTypes.size > 0) return null;
+  return type === ILLUSTRATOR_AGENT_TYPE ? type : null;
+}
+
+function runAgentType(run: JsonRecord): string {
+  return readString(run.agentType || run.type).trim();
+}
+
+function illustratorRunCountsTowardInterval(run: JsonRecord): boolean {
+  const resultType = readString(run.resultType).trim();
+  if (resultType && resultType !== "image_prompt") return false;
+  const data = parseRecord(run.resultData);
+  if (boolish(data.parseError, false)) return false;
+  if (data.shouldGenerate !== true) return false;
+  return readString(data.prompt).trim().length > 0;
+}
+
+function messageIndexById(input: GenerationAgentRuntimeInput): Map<string, number> {
+  const indexes = new Map<string, number>();
+  input.storedMessages.forEach((message, index) => {
+    const id = readString(message.id).trim();
+    if (id) indexes.set(id, index);
+  });
+  return indexes;
+}
+
+function intervalAnchorRun(
+  runs: JsonRecord[],
+  input: GenerationAgentRuntimeInput,
+  chatId: string,
+  agentType: string,
+): JsonRecord | null {
+  const indexes = messageIndexById(input);
+  return (
+    runs
+      .filter((run) => readString(run.chatId).trim() === chatId)
+      .filter((run) => runAgentType(run) === agentType)
+      .filter((run) => boolish(run.success, false))
+      .filter((run) => agentType !== ILLUSTRATOR_AGENT_TYPE || illustratorRunCountsTowardInterval(run))
+      .map((run) => ({ run, messageIndex: indexes.get(readString(run.messageId).trim()) ?? -1 }))
+      .filter((entry) => entry.messageIndex >= 0)
+      .sort((a, b) => b.messageIndex - a.messageIndex || readString(b.run.createdAt).localeCompare(readString(a.run.createdAt)))[0]
+      ?.run ?? null
+  );
+}
+
+function assistantMessagesSinceRun(input: GenerationAgentRuntimeInput, messageId: string): number | null {
+  const index = input.storedMessages.findIndex((message) => readString(message.id).trim() === messageId);
+  if (index < 0) return null;
+  return input.storedMessages
+    .slice(index + 1)
+    .filter((message) => !hiddenFromAi(message))
+    .filter((message) => readString(message.role).trim() === "assistant").length;
+}
+
+async function automaticAssistantIntervalAllowsRun(
+  storage: StorageGateway,
+  input: GenerationAgentRuntimeInput,
+  agentType: string,
+  settings: Record<string, unknown>,
+): Promise<boolean> {
+  const fallback = positiveInteger(
+    BUILT_IN_AGENT_RUN_INTERVAL_DEFAULTS[agentType],
+    agentType === ILLUSTRATOR_AGENT_TYPE ? 5 : 1,
+    MAX_ASSISTANT_RUN_INTERVAL,
+  );
+  const runInterval = positiveInteger(settings.runInterval, fallback, MAX_ASSISTANT_RUN_INTERVAL);
+  if (runInterval <= 1) return true;
+  const chatId = readString(input.chat.id).trim();
+  if (!chatId) return true;
+  const lastRun = intervalAnchorRun(await storage.list<JsonRecord>("agent-runs"), input, chatId, agentType);
+  if (!lastRun) return true;
+  const messageId = readString(lastRun.messageId).trim();
+  if (!messageId) return true;
+  const assistantMessagesSince = assistantMessagesSinceRun(input, messageId);
+  if (assistantMessagesSince === null) return true;
+  return assistantMessagesSince + 1 >= runInterval;
 }
 
 function parseToolParameters(value: unknown): unknown {
@@ -611,10 +705,18 @@ async function resolveAgents(deps: AgentDeps, input: GenerationAgentRuntimeInput
   const resolved: ResolvedAgent[] = [];
   const skippedResults: AgentResult[] = [];
   for (const agent of rows) {
+    const type = readString(agent.type || agent.agentType) || "agent";
     const settings = agentSettings(agent);
     if (!input.bypassCustomAgentActivation && !isBuiltInAgent(agent)) {
       const activation = matchCustomAgentActivation(settings, activationMessages);
       if (activation.configured && !activation.matched) continue;
+    }
+    const assistantIntervalAgentType = automaticAssistantIntervalAgentType(input, type);
+    if (
+      assistantIntervalAgentType &&
+      !(await automaticAssistantIntervalAllowsRun(deps.storage, input, assistantIntervalAgentType, settings))
+    ) {
+      continue;
     }
     const requestedConnectionId = readString(agent.connectionId).trim();
     const fallbackConnectionId = readString(input.connection.id).trim() || null;
@@ -635,7 +737,7 @@ async function resolveAgents(deps: AgentDeps, input: GenerationAgentRuntimeInput
     customTools ??= await loadCustomTools(deps.storage);
     resolved.push({
       id: readString(agent.id) || readString(agent.type) || "agent",
-      type: readString(agent.type || agent.agentType) || "agent",
+      type,
       name: readString(agent.name) || readString(agent.type) || "Agent",
       phase: normalizePhase(agent),
       promptTemplate: readString(agent.promptTemplate),
