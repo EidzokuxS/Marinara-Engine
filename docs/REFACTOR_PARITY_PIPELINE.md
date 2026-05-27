@@ -46,7 +46,7 @@ Work proceeds in these lanes, one slice at a time. A lane only moves to complete
 | Profile/data migration | Import v1.6.1 chats, messages, characters, settings, presets, personas, agents, memories, assets | In progress | Legacy connected conversation notes and OOC influences now import into target chat notes. Rust checks can now run locally. |
 | Chat/generation performance | Lazy chat open, deletion, list summaries, focus/refetch behavior, generation message loading | In progress | Normal generation now loads a bounded recent history window instead of the full chat; regeneration still loads broadly so old targets remain addressable. |
 | Generation spine | Streaming, cancellation, prompt assembly, history roles, preset formatting, summaries, regex | In progress | Connected conversation prompt injection ported; stored chat/game generation parameters now merge into LLM requests; selected prompt preset params, wrap format, and choice variables now apply. Focused tests pass. |
-| Agents | Agent enablement, prompt injection, tool calls, custom tools, agent memory/runs, UI state | In progress | Custom script tools restored; chat-scoped built-in fallback agents now resolve without DB rows and per-chat selection overrides disabled global rows; empty agent responses now surface as failures. Focused tests pass. |
+| Agents | Agent enablement, prompt injection, tool calls, custom tools, agent memory/runs, UI state | In progress | Custom script tools restored; chat-scoped built-in fallback agents now resolve without DB rows and per-chat selection overrides disabled global rows; empty agent responses now surface as failures; preset `agent_data` markers receive runtime output; parallel agent results are not double-counted. Focused tests pass. |
 | Roleplay | Roleplay prompt assembly, typewriter streaming, character roles, scene/encounter/tracker hooks | In progress | Expression avatars restored; streaming views now read per-chat buffers. Need app/browser pass. |
 | Game mode | Game services, start path, turn generation, repair flow, UI state, assets | In progress | Start guard restored and game turns now inherit stored generation parameters. Focused generation tests pass. |
 | Autonomous conversation | Client polling, background cadence, idle behavior, schedules, error display | Not started | Need focused tests and app run. |
@@ -68,7 +68,6 @@ This was the first completed parity slice because it crossed migration, prompt a
 Next target: prove and fill the remaining agent path after the preset fix:
 
 - Verify built-in and custom agents trigger from normal roleplay generation, manual retry, and configured run intervals.
-- Check that agent prompt injection sections receive runtime output in preset-driven prompts.
 - Confirm custom script/static/webhook tools can be advertised and executed from agents.
 - Audit persisted agent runs/memory-like outputs against v1.6.1.
 - Check app-level visibility for agent failures, debug entries, and retry affordances.
@@ -106,6 +105,8 @@ The Tauri runtime now matches the important v1.6.1 agent behavior for chat-scope
 - Manual agent retries can resolve built-in fallback configs when only an agent type is requested.
 - Synthetic fallback configs use the built-in default settings and default tool list, then fall back to the chat connection/model just like v1.6.1.
 - Empty agent LLM responses are reported as failed agent results instead of successful no-op outputs.
+- Preset `agent_data` markers receive pre-generation runtime output before the main model call.
+- Parallel/post agent results are de-duplicated across callback and return paths before UI emission and generation metadata counting.
 
 ## Completed Slice: Prompt Preset Parameters And Variables
 

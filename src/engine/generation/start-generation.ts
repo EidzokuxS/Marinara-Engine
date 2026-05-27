@@ -468,6 +468,14 @@ function resultKey(result: AgentResult): string {
   return `${result.agentId}:${result.agentType}:${result.type}:${JSON.stringify(result.data)}`;
 }
 
+function uniqueAgentResults(results: AgentResult[]): AgentResult[] {
+  const unique = new Map<string, AgentResult>();
+  for (const result of results) {
+    unique.set(resultKey(result), result);
+  }
+  return [...unique.values()];
+}
+
 async function persistAgentResults(
   storage: StorageGateway,
   chatId: string,
@@ -988,10 +996,12 @@ export async function* startGeneration(
 
     const parallelResults = await parallelAgents;
     const postResults = runtime ? await runtime.runPost(content) : [];
-    for (const result of [...parallelResults, ...postResults, ...agentEvents]) {
+    const emittedAgentResults = uniqueAgentResults([...parallelResults, ...postResults, ...agentEvents]);
+    for (const result of emittedAgentResults) {
       yield { type: "agent_result", data: result };
     }
-    const allAgentResults = [...(runtime?.preResults ?? []), ...parallelResults, ...postResults, ...agentEvents];
+    agentEvents.length = 0;
+    const allAgentResults = uniqueAgentResults([...(runtime?.preResults ?? []), ...emittedAgentResults]);
     content = await applyRuntimeRegexScripts(deps.storage, "ai_output", content);
     const connected = await persistConnectedCommandTags(
       deps.storage,

@@ -711,6 +711,89 @@ describe("startGeneration automatic custom agent cadence", () => {
   });
 });
 
+describe("startGeneration agent runtime parity", () => {
+  it("injects pre-generation agent data into preset agent_data markers before the main call", async () => {
+    const { deps, streamedRequests } = generationDepsForChat({
+      chatPatch: { mode: "roleplay", promptPresetId: "preset-1" },
+      chatMetadata: { enableAgents: true, activeAgentIds: ["agent-a"] },
+      agents: [
+        {
+          id: "agent-a",
+          type: "prose-guardian",
+          name: "Prose Guardian",
+          enabled: true,
+          phase: "pre_generation",
+          connectionId: null,
+          model: "agent-model",
+          promptTemplate: "Add a concise style note.",
+        },
+      ],
+      prompts: [{ id: "preset-1", parameters: {} }],
+      promptSections: [
+        {
+          id: "main",
+          presetId: "preset-1",
+          name: "Main",
+          role: "system",
+          content: "Main prompt.",
+          enabled: true,
+          sortOrder: 0,
+        },
+        {
+          id: "agent-data",
+          presetId: "preset-1",
+          name: "Agent Data",
+          role: "system",
+          enabled: true,
+          markerConfig: { type: "agent_data", agentType: "prose-guardian" },
+          sortOrder: 1,
+        },
+      ],
+    });
+
+    await drainGeneration(startGeneration(deps, { chatId: "chat-1", userMessage: "hello" }));
+
+    expect(streamedRequests).toHaveLength(2);
+    const mainRequest = streamedRequests[1] as { messages: Array<{ content: string }> };
+    const mainPrompt = mainRequest.messages.map((message) => message.content).join("\n\n");
+    expect(mainPrompt).toContain("Main prompt.");
+    expect(mainPrompt).toContain("Done.");
+  });
+
+  it("does not duplicate parallel agent results from callback and return paths", async () => {
+    const events: unknown[] = [];
+    const { deps, createChatMessage } = generationDepsForChat({
+      chatMetadata: { enableAgents: true },
+      agents: [
+        {
+          id: "agent-a",
+          type: "custom-scene-scout",
+          name: "Scene Scout",
+          enabled: true,
+          phase: "parallel",
+          connectionId: null,
+          model: "agent-model",
+          promptTemplate: "Watch the scene.",
+          settings: { resultType: "context_injection" },
+        },
+      ],
+    });
+
+    for await (const event of startGeneration(deps, { chatId: "chat-1", userMessage: "hello" })) {
+      events.push(event);
+    }
+
+    const agentEvents = events.filter((event) => (event as { type?: string }).type === "agent_result");
+    expect(agentEvents).toHaveLength(1);
+    const assistantCreate = createChatMessage.mock.calls.find(
+      (call) => (call[1] as { role?: unknown }).role === "assistant",
+    );
+    expect(assistantCreate?.[1]).toMatchObject({
+      generationInfo: { agentResults: 1 },
+    });
+  });
+});
+
 describe("startGeneration Discord mirror", () => {
   it("mirrors saved user and assistant messages when a chat has a Discord webhook", async () => {
     const mirrorMessage = mockDiscordMirror();
