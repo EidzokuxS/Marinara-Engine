@@ -46,7 +46,7 @@ Work proceeds in these lanes, one slice at a time. A lane only moves to complete
 | Profile/data migration | Import v1.6.1 chats, messages, characters, settings, presets, personas, agents, memories, assets | In progress | Legacy connected conversation notes and OOC influences now import into target chat notes. Rust checks can now run locally. |
 | Chat/generation performance | Lazy chat open, deletion, list summaries, focus/refetch behavior, generation message loading | In progress | Normal generation now loads a bounded recent history window instead of the full chat; regeneration still loads broadly so old targets remain addressable. |
 | Generation spine | Streaming, cancellation, prompt assembly, history roles, preset formatting, summaries, regex | In progress | Connected conversation prompt injection ported; stored chat/game generation parameters now merge into LLM requests; selected prompt preset params, wrap format, and choice variables now apply. Focused tests pass. |
-| Agents | Agent enablement, prompt injection, tool calls, custom tools, agent memory/runs, UI state | In progress | Custom script tools restored and agent tool loops now prove script execution plus native custom-tool dispatch; Secret Plot memory now loads into agent prompts and persists fresh arc/direction output; chat-scoped built-in fallback agents now resolve without DB rows and per-chat selection overrides disabled global rows; empty agent responses now surface as failures; preset `agent_data` markers receive runtime output; parallel agent results are not double-counted. Focused tests pass. |
+| Agents | Agent enablement, prompt injection, tool calls, custom tools, agent memory/runs, UI state | In progress | Custom script tools restored and agent tool loops now prove script execution plus native custom-tool dispatch; Secret Plot memory now loads into agent prompts and persists fresh arc/direction output; saved agent runs include config IDs and display names for UI parity; chat-scoped built-in fallback agents now resolve without DB rows and per-chat selection overrides disabled global rows; empty agent responses now surface as failures; preset `agent_data` markers receive runtime output; parallel agent results are not double-counted. Focused tests pass. |
 | Roleplay | Roleplay prompt assembly, typewriter streaming, character roles, scene/encounter/tracker hooks | In progress | Expression avatars restored; streaming views now read per-chat buffers. Need app/browser pass. |
 | Game mode | Game services, start path, turn generation, repair flow, UI state, assets | In progress | Start guard restored and game turns now inherit stored generation parameters. Focused generation tests pass. |
 | Autonomous conversation | Client polling, background cadence, idle behavior, schedules, error display | Not started | Need focused tests and app run. |
@@ -69,7 +69,7 @@ Next target: prove and fill the remaining agent path after the preset fix:
 
 - Verify built-in and custom agents trigger from normal roleplay generation, manual retry, and configured run intervals.
 - Confirm remaining webhook app pass after script and native custom-tool dispatch proof.
-- Audit remaining persisted agent run UI fields and non-Secret-Plot memory-like outputs against v1.6.1.
+- Audit remaining non-Secret-Plot memory-like outputs against v1.6.1.
 - Check app-level visibility for agent failures, debug entries, and retry affordances.
 
 ## Completed Slice: Bounded Generation History Load
@@ -126,6 +126,7 @@ The Secret Plot Driver now carries its v1.6.1 long-running state through the Tau
 - Successful `secret_plot` results persist fresh arc and direction state back to `agent-memory`.
 - Fulfilled directions roll into the last-ten `recentlyFulfilled` memory list so the agent has anti-repetition context.
 - Missing directions clear stale active directions, matching the old server behavior.
+- Saved agent run rows now carry both `agentConfigId` and `agentName`, restoring the joined run/config shape expected by the roleplay agents UI.
 
 ## Completed Slice: Prompt Preset Parameters And Variables
 

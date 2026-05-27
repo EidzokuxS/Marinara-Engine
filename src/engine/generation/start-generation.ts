@@ -477,6 +477,19 @@ function uniqueAgentResults(results: AgentResult[]): AgentResult[] {
   return [...unique.values()];
 }
 
+async function agentNameLookup(storage: StorageGateway): Promise<Map<string, string>> {
+  const lookup = new Map<string, string>();
+  for (const agent of await storage.list<JsonRecord>("agents").catch(() => [])) {
+    const name = readString(agent.name).trim();
+    if (!name) continue;
+    const id = readString(agent.id).trim();
+    const type = readString(agent.type || agent.agentType).trim();
+    if (id) lookup.set(id, name);
+    if (type) lookup.set(type, name);
+  }
+  return lookup;
+}
+
 async function persistAgentResults(
   storage: StorageGateway,
   chatId: string,
@@ -484,6 +497,7 @@ async function persistAgentResults(
   results: AgentResult[],
 ): Promise<void> {
   const seen = new Set<string>();
+  const agentNames = await agentNameLookup(storage);
   for (const result of results) {
     const key = resultKey(result);
     if (seen.has(key)) continue;
@@ -491,8 +505,10 @@ async function persistAgentResults(
     await storage.create("agent-runs", {
       chatId,
       messageId,
+      agentConfigId: result.agentId,
       agentId: result.agentId,
       agentType: result.agentType,
+      agentName: agentNames.get(result.agentId) ?? agentNames.get(result.agentType) ?? result.agentType,
       resultType: result.type,
       resultData: result.data as never,
       success: result.success,

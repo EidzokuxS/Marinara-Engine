@@ -848,6 +848,15 @@ describe("startGeneration agent runtime parity", () => {
     expect(assistantCreate?.[1]).toMatchObject({
       generationInfo: { agentResults: 1 },
     });
+    expect(deps.storage.create).toHaveBeenCalledWith(
+      "agent-runs",
+      expect.objectContaining({
+        agentConfigId: "agent-a",
+        agentId: "agent-a",
+        agentType: "custom-scene-scout",
+        agentName: "Scene Scout",
+      }),
+    );
   });
 });
 
