@@ -191,4 +191,49 @@ describe("forkRoleplayScene folderId inheritance", () => {
     expect(payloads).toHaveLength(1);
     expect(payloads[0]?.folderId).toBe("folder-xyz");
   });
+
+  it("inherits folderId from the scene chat when converting", async () => {
+    const storage = recordingStorage({
+      "origin-x": {
+        id: "origin-x",
+        name: "Origin",
+        mode: "conversation",
+        characterIds: ["char-a"],
+        folderId: "folder-xyz",
+        groupId: null,
+        personaId: null,
+        promptPresetId: null,
+        connectionId: null,
+        metadata: {},
+      },
+      "scene-1": {
+        id: "scene-1",
+        name: "Scene: Converted",
+        mode: "roleplay",
+        characterIds: ["char-a"],
+        folderId: "folder-xyz",
+        groupId: null,
+        personaId: null,
+        promptPresetId: null,
+        connectionId: null,
+        metadata: {
+          sceneOriginChatId: "origin-x",
+          sceneStatus: "active",
+        },
+      },
+    });
+
+    const input: SceneForkRequest = {
+      sceneChatId: "scene-1",
+      mode: "convert",
+      includePreSceneSummary: false,
+      includeParticipationGuide: false,
+    };
+
+    await forkRoleplayScene(storage.gateway, input);
+
+    const payloads = createdChatPayloads(storage);
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.folderId).toBe("folder-xyz");
+  });
 });
