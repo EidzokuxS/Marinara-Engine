@@ -1652,6 +1652,7 @@ export function GameSurface({
   const gameTutorialDisabled = useUIStore((s) => s.gameTutorialDisabled);
   const setGameTutorialDisabled = useUIStore((s) => s.setGameTutorialDisabled);
   const gameFullBodySpriteScale = useUIStore((s) => s.gameFullBodySpriteScale);
+  const chatBackgroundBlur = useUIStore((s) => s.chatBackgroundBlur);
   const gameMiddleMouseNav = useUIStore((s) => s.gameMiddleMouseNav);
   const messagesPerPage = useUIStore((s) => s.messagesPerPage);
   const openGameAssetsBrowser = useUIStore((s) => s.openGameAssetsBrowser);
@@ -7499,6 +7500,7 @@ export function GameSurface({
         <DirectionEngine
           directions={activeDirections}
           backgroundUrl={displayedBackground ?? undefined}
+          backgroundBlurPx={chatBackgroundBlur}
           onPlayingChange={(playing) => {
             setDirectionsPlaying(playing);
             // When intro cinematic finishes, clear the flag

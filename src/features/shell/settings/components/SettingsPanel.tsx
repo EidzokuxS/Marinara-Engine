@@ -3,6 +3,8 @@
 // ──────────────────────────────────────────────
 import {
   APP_LANGUAGE_OPTIONS,
+  CHAT_BACKGROUND_BLUR_MAX,
+  CHAT_BACKGROUND_BLUR_MIN,
   TRACKER_DATA_PANEL_SECTIONS,
   getTrackerPanelWidthForProfile,
   useUIStore,
@@ -154,7 +156,7 @@ const ROLEPLAY_AVATAR_STYLE_OPTIONS: Array<{ id: RoleplayAvatarStyle; label: str
   {
     id: "none",
     label: "None",
-    desc: "Hide roleplay message avatars for the cleanest reading layout.",
+    desc: "Hide message avatars and remove the reserved avatar gutter.",
   },
   {
     id: "circles",
@@ -1240,8 +1242,8 @@ function AppearanceSettings() {
   const visualTheme = useUIStore((s) => s.visualTheme);
   const setVisualTheme = useUIStore((s) => s.setVisualTheme);
   const chatBackground = useUIStore((s) => s.chatBackground);
-  const setChatBackgroundRaw = useUIStore((s) => s.setChatBackground);
   const chatBackgroundBlur = useUIStore((s) => s.chatBackgroundBlur);
+  const setChatBackgroundRaw = useUIStore((s) => s.setChatBackground);
   const setChatBackgroundBlur = useUIStore((s) => s.setChatBackgroundBlur);
   const activeChatId = useChatStore((s) => s.activeChatId);
   const updateMeta = useUpdateChatMetadata();
@@ -1674,8 +1676,8 @@ function AppearanceSettings() {
                 {opt.id === "none" ? (
                   <div className="flex h-14 items-center px-3">
                     <div className="flex-1 rounded-2xl bg-black/25 px-3 py-2">
-                      <div className="h-1.5 w-16 rounded-full bg-white/20" />
-                      <div className="mt-1.5 h-1.5 w-24 rounded-full bg-white/12" />
+                      <div className="h-1.5 w-14 rounded-full bg-white/20" />
+                      <div className="mt-1.5 h-1.5 w-20 rounded-full bg-white/12" />
                     </div>
                   </div>
                 ) : opt.id === "circles" ? (
@@ -1717,7 +1719,11 @@ function AppearanceSettings() {
         <div className="rounded-lg border border-[var(--border)] bg-[var(--secondary)]/45 p-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="flex h-20 w-full shrink-0 items-end justify-center gap-3 overflow-hidden rounded-md bg-black/30 ring-1 ring-[var(--border)]/70 sm:w-28">
-              {roleplayAvatarStyle !== "none" && (
+              {roleplayAvatarStyle === "none" ? (
+                <div className="mb-4 rounded-full bg-white/10 px-2 py-1 text-[0.5625rem] uppercase tracking-wide text-white/45">
+                  No avatars
+                </div>
+              ) : (
                 <div
                   className={cn(
                     "mb-2 border border-white/20 bg-gradient-to-b from-rose-300/85 via-fuchsia-300/65 to-slate-900/90 shadow-lg transition-all",
@@ -2031,23 +2037,23 @@ function AppearanceSettings() {
           )}
         </div>
         <BackgroundPicker selected={chatBackground} onSelect={setChatBackground} />
-        <label className="flex flex-col gap-1 rounded-lg border border-[var(--border)] bg-[var(--secondary)]/35 p-3">
+        <label className="flex flex-col gap-1 rounded-lg bg-[var(--secondary)]/35 p-3 ring-1 ring-[var(--border)]">
           <span className="text-[0.6875rem] font-medium inline-flex items-center gap-1">
             Background Blur
-            <HelpTooltip text="Softens the selected roleplay background image behind the chat. Set to 0px for a sharp background." />
+            <HelpTooltip text="Blurs Roleplay and Game background images. Set to Off for a sharp background." />
           </span>
           <div className="flex items-center gap-3">
             <input
               type="range"
-              min={0}
-              max={24}
+              min={CHAT_BACKGROUND_BLUR_MIN}
+              max={CHAT_BACKGROUND_BLUR_MAX}
               step={1}
               value={chatBackgroundBlur}
               onChange={(e) => setChatBackgroundBlur(Number(e.target.value))}
               className="flex-1 accent-[var(--primary)]"
             />
-            <span className="w-10 text-right text-xs tabular-nums text-[var(--muted-foreground)]">
-              {chatBackgroundBlur}px
+            <span className="w-12 text-right text-xs tabular-nums text-[var(--muted-foreground)]">
+              {chatBackgroundBlur === 0 ? "Off" : `${chatBackgroundBlur}px`}
             </span>
           </div>
         </label>

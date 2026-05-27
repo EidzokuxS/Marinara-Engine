@@ -1,6 +1,8 @@
 import { createJSONStorage } from "zustand/middleware";
 import { normalizeQuoteFormat } from "../../lib/dialogue-quotes";
 import {
+  clampChatBackgroundBlur,
+  normalizeRoleplayAvatarStyle,
   normalizeTrackerPanelSectionOrder,
   normalizeTrackerPanelSizeProfile,
   normalizeSummaryPopoverSettings,
@@ -10,7 +12,7 @@ import {
 import type { UIState } from "./model";
 
 export const UI_STORE_NAME = "marinara-engine-ui-tauri";
-export const UI_STORE_VERSION = 4;
+export const UI_STORE_VERSION = 5;
 
 type PersistedUiState = Partial<UIState> & {
   trackerPanelWidth?: unknown;
@@ -177,6 +179,8 @@ export function migrateUiState(persistedState: unknown): Partial<UIState> {
   persisted.trackerPanelSectionOrder = normalizeTrackerPanelSectionOrder(persisted.trackerPanelSectionOrder);
   persisted.summaryPopoverSettings = normalizeSummaryPopoverSettings(persisted.summaryPopoverSettings);
   persisted.quoteFormat = normalizeQuoteFormat(persisted.quoteFormat);
+  persisted.chatBackgroundBlur = clampChatBackgroundBlur(persisted.chatBackgroundBlur);
+  persisted.roleplayAvatarStyle = normalizeRoleplayAvatarStyle(persisted.roleplayAvatarStyle);
   persisted.userStatusManual = persisted.userStatusManual === "dnd" ? "dnd" : "active";
   persisted.userStatus = persisted.userStatusManual === "dnd" ? "dnd" : "active";
   delete persisted.trackerPanelWidth;

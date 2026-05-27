@@ -7,8 +7,8 @@ import {
   useRef,
   useState,
   useMemo,
-  type ComponentProps,
   type CSSProperties,
+  type ComponentProps,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -104,6 +104,15 @@ function WeatherEffectsConnected() {
   );
 }
 
+function getBackgroundBlurStyle(blurPx: number): Pick<CSSProperties, "filter" | "transform"> {
+  const safeBlurPx = Math.max(0, Math.min(24, Number.isFinite(blurPx) ? blurPx : 0));
+  if (safeBlurPx <= 0) return {};
+  return {
+    filter: `blur(${safeBlurPx}px)`,
+    transform: `scale(${1 + safeBlurPx / 120})`,
+  };
+}
+
 function CrossfadeBackground({
   url,
   className,
@@ -118,14 +127,7 @@ function CrossfadeBackground({
   const [bgB, setBgB] = useState<string | null>(null);
   const [aActive, setAActive] = useState(true);
   const activeSlot = useRef<"a" | "b">("a");
-  const safeBlurPx = Math.max(0, Math.min(24, Number.isFinite(blurPx) ? blurPx : 0));
-  const blurStyle: CSSProperties =
-    safeBlurPx > 0
-      ? {
-          filter: `blur(${safeBlurPx}px)`,
-          transform: `scale(${1 + safeBlurPx / 120})`,
-        }
-      : {};
+  const backgroundBlurStyle = getBackgroundBlurStyle(blurPx);
 
   useEffect(() => {
     let cancelled = false;
@@ -167,14 +169,24 @@ function CrossfadeBackground({
           "mari-background absolute inset-0 bg-cover bg-center bg-no-repeat transition-opacity duration-700 ease-in-out",
           className,
         )}
-        style={{ ...blurStyle, backgroundImage: bgA ? `url(${bgA})` : "none", opacity: aActive ? 1 : 0 }}
+        style={{
+          backgroundImage: bgA ? `url(${bgA})` : "none",
+          opacity: aActive ? 1 : 0,
+          transition: "opacity 700ms ease-in-out, filter 180ms ease-out, transform 180ms ease-out",
+          ...backgroundBlurStyle,
+        }}
       />
       <div
         className={cn(
           "mari-background absolute inset-0 bg-cover bg-center bg-no-repeat transition-opacity duration-700 ease-in-out",
           className,
         )}
-        style={{ ...blurStyle, backgroundImage: bgB ? `url(${bgB})` : "none", opacity: aActive ? 0 : 1 }}
+        style={{
+          backgroundImage: bgB ? `url(${bgB})` : "none",
+          opacity: aActive ? 0 : 1,
+          transition: "opacity 700ms ease-in-out, filter 180ms ease-out, transform 180ms ease-out",
+          ...backgroundBlurStyle,
+        }}
       />
     </>
   );

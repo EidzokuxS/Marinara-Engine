@@ -85,6 +85,8 @@ export const ROLEPLAY_AVATAR_SCALE_MIN = 0.75;
 export const ROLEPLAY_AVATAR_SCALE_MAX = 2.5;
 export const ROLEPLAY_SPRITE_SCALE_MIN = 0.5;
 export const ROLEPLAY_SPRITE_SCALE_MAX = 1.75;
+export const CHAT_BACKGROUND_BLUR_MIN = 0;
+export const CHAT_BACKGROUND_BLUR_MAX = 24;
 
 export const DEFAULT_GAME_SETUP_LEARNED_OPTIONS: GameSetupLearnedOptions = {
   genres: [],
@@ -110,6 +112,15 @@ export const DEFAULT_SUMMARY_POPOVER_SETTINGS: SummaryPopoverSettings = {
 export function clampImageDimension(value: number) {
   const rounded = Number.isFinite(value) ? Math.round(value) : 0;
   return Math.max(IMAGE_DIMENSION_MIN, Math.min(IMAGE_DIMENSION_MAX, rounded));
+}
+
+export function clampChatBackgroundBlur(value: unknown) {
+  const rounded = typeof value === "number" && Number.isFinite(value) ? Math.round(value) : CHAT_BACKGROUND_BLUR_MIN;
+  return Math.max(CHAT_BACKGROUND_BLUR_MIN, Math.min(CHAT_BACKGROUND_BLUR_MAX, rounded));
+}
+
+export function normalizeRoleplayAvatarStyle(value: unknown): RoleplayAvatarStyle {
+  return value === "none" || value === "circles" || value === "rectangles" || value === "panel" ? value : "circles";
 }
 
 export function clampTrackerPanelWidth(value: unknown) {

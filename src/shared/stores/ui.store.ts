@@ -18,11 +18,13 @@ import {
   SIDEBAR_WIDTH_MIN,
   TRACKER_DATA_PANEL_SECTIONS,
   CLEARED_DETAIL_IDS,
+  clampChatBackgroundBlur,
   clampImageDimension,
   mergeLearnedGameSetupOptions,
   mobilePanelClosePatch,
   normalizeLearnedGameSetupOption,
   normalizeRememberedGameSetupText,
+  normalizeRoleplayAvatarStyle,
   normalizeSummaryPopoverSettings,
   normalizeTrackerPanelSizeProfile,
   normalizeTrackerPanelSectionOrder,
@@ -68,6 +70,8 @@ export {
   TRACKER_PANEL_WIDTH_MAX,
   TRACKER_PANEL_WIDTH_MIN,
   TRACKER_TEMPERATURE_UNITS,
+  CHAT_BACKGROUND_BLUR_MAX,
+  CHAT_BACKGROUND_BLUR_MIN,
   getTrackerPanelWidthForProfile,
 } from "./ui/model";
 export type {
@@ -290,8 +294,7 @@ export const useUIStore = create<UIState>()(
       closeModal: () => set({ modal: null }),
       setTheme: (theme) => set({ theme }),
       setChatBackground: (url) => set({ chatBackground: url }),
-      setChatBackgroundBlur: (v) =>
-        set({ chatBackgroundBlur: Math.max(0, Math.min(24, Math.round(Number.isFinite(v) ? v : 0))) }),
+      setChatBackgroundBlur: (v) => set({ chatBackgroundBlur: clampChatBackgroundBlur(v) }),
       openCharacterDetail: (id) =>
         set(openDetailRouteState({ characterDetailId: id })),
       closeCharacterDetail: () => set({ characterDetailId: null, editorDirty: false }),
@@ -448,7 +451,7 @@ export const useUIStore = create<UIState>()(
       setNarrationOpacity: (v) => set({ narrationOpacity: Math.max(0, Math.min(100, v)) }),
       setChatFontColor: (v) => set({ chatFontColor: v }),
       setChatFontOpacity: (v) => set({ chatFontOpacity: Math.max(0, Math.min(100, v)) }),
-      setRoleplayAvatarStyle: (v) => set({ roleplayAvatarStyle: v }),
+      setRoleplayAvatarStyle: (v) => set({ roleplayAvatarStyle: normalizeRoleplayAvatarStyle(v) }),
       setRoleplayAvatarScale: (v) =>
         set({ roleplayAvatarScale: Math.max(ROLEPLAY_AVATAR_SCALE_MIN, Math.min(ROLEPLAY_AVATAR_SCALE_MAX, v)) }),
       setRoleplaySpriteScale: (v) =>

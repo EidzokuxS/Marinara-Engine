@@ -1337,6 +1337,8 @@ export const ChatMessage = memo(function ChatMessage({
   const hideRoleplayAvatar = isRoleplay && roleplayAvatarStyle === "none";
   const showRoleplayAvatarPanel = isRoleplay && roleplayAvatarStyle === "panel" && !isGrouped;
   const showCompactAvatar = !isGrouped && !showRoleplayAvatarPanel && !hideRoleplayAvatar;
+  const showMessageNumberInNameRow =
+    (showRoleplayAvatarPanel || hideRoleplayAvatar) && (showActions || showMessageNumbers) && messageIndex != null;
   const roleplayAvatarPanelTail = showRoleplayAvatarPanel ? (
     isMergedGroup && mergedAvatars.length > 0 ? (
       <div className="rpg-avatar-panel-tail absolute inset-0 pointer-events-none overflow-hidden">
@@ -1656,7 +1658,7 @@ export const ChatMessage = memo(function ChatMessage({
                     {genLabel}
                   </span>
                 )}
-                {showRoleplayAvatarPanel && (showActions || showMessageNumbers) && messageIndex != null && (
+                {showMessageNumberInNameRow && (
                   <span className="text-[0.5625rem] font-medium text-white/25 select-none">#{messageIndex}</span>
                 )}
               </div>

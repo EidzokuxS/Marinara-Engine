@@ -5,12 +5,20 @@
 // Each direction maps to a CSS-driven effect applied as a layer
 // over the game viewport.
 // ──────────────────────────────────────────────
-import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, type CSSProperties } from "react";
 import type { DirectionCommand } from "../../../../engine/contracts/types/game";
 import { resolveManagedLocalAssetUrl } from "../../../../shared/api/local-file-api";
 
 /** Cross-fading background layer — renders two stacked layers and transitions between them. */
-function CrossfadeBackground({ url }: { url?: string }) {
+function getBackgroundBlurStyle(blurPx: number): Pick<CSSProperties, "filter" | "transform"> {
+  if (blurPx <= 0) return {};
+  return {
+    filter: `blur(${blurPx}px)`,
+    transform: `scale(${Math.min(1.08, 1 + blurPx * 0.0025)})`,
+  };
+}
+
+function CrossfadeBackground({ url, blurPx = 0 }: { url?: string; blurPx?: number }) {
   const [resolvedUrl, setResolvedUrl] = useState<string | null>(url ?? null);
   const [layers, setLayers] = useState<{ front: string | null; back: string | null; fading: boolean }>({
     front: url ?? null,
@@ -18,6 +26,7 @@ function CrossfadeBackground({ url }: { url?: string }) {
     fading: false,
   });
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const backgroundBlurStyle = getBackgroundBlurStyle(blurPx);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,7 +66,8 @@ function CrossfadeBackground({ url }: { url?: string }) {
           style={{
             backgroundImage: `url(${layers.back})`,
             opacity: layers.fading ? 0 : 1,
-            transition: "opacity 700ms ease-in-out",
+            transition: "opacity 700ms ease-in-out, filter 180ms ease-out, transform 180ms ease-out",
+            ...backgroundBlurStyle,
           }}
         />
       )}
@@ -68,7 +78,8 @@ function CrossfadeBackground({ url }: { url?: string }) {
           style={{
             backgroundImage: `url(${layers.front})`,
             opacity: layers.fading ? 1 : 1,
-            transition: "opacity 700ms ease-in-out",
+            transition: "opacity 700ms ease-in-out, filter 180ms ease-out, transform 180ms ease-out",
+            ...backgroundBlurStyle,
           }}
         />
       )}
@@ -82,6 +93,8 @@ interface DirectionEngineProps {
   directions: DirectionCommand[];
   /** Background image URL — rendered inside the effect scope so shake/blur affects it. */
   backgroundUrl?: string;
+  /** Persistent user-configured background blur, in px. */
+  backgroundBlurPx?: number;
   /** Called when active effects start or all finish playing. */
   onPlayingChange?: (playing: boolean) => void;
   children: React.ReactNode;
@@ -100,7 +113,13 @@ const FADE_OUT_MS = 600;
 
 let effectCounter = 0;
 
-export function DirectionEngine({ directions, backgroundUrl, onPlayingChange, children }: DirectionEngineProps) {
+export function DirectionEngine({
+  directions,
+  backgroundUrl,
+  backgroundBlurPx = 0,
+  onPlayingChange,
+  children,
+}: DirectionEngineProps) {
   const [activeEffects, setActiveEffects] = useState<ActiveEffect[]>([]);
   const processedRef = useRef<string>("");
 
@@ -178,7 +197,7 @@ export function DirectionEngine({ directions, backgroundUrl, onPlayingChange, ch
     <div className="relative h-full w-full overflow-hidden">
       {/* Scene visual layer. Transform/filter effects live here so HUD widgets remain stable. */}
       <div className="absolute inset-0 z-0 h-full w-full" style={buildVisualStyle(bgEffects)}>
-        <CrossfadeBackground url={backgroundUrl} />
+        <CrossfadeBackground url={backgroundUrl} blurPx={backgroundBlurPx} />
       </div>
 
       {/* Background/all overlay effects */}
