@@ -505,8 +505,11 @@ export interface ExecuteMainToolCallArgs {
  *
  * The synthetic main-agent record matters only for Spotify tools, which are
  * filtered out of `buildMainToolDefinitions` by default. If a future change
- * lifts that exclusion, `spotifyAgentId` falls back to the string `"main"`,
- * which the Spotify gateway treats as "use default credentials".
+ * lifts that exclusion, the caller MUST also supply a real Spotify-agent id
+ * (or refactor `spotifyAgentId` to fall back to `""`); the synthetic `"main"`
+ * literal here will NOT resolve to default credentials — the Spotify gateway
+ * calls `get_required(state, "agents", "main")`, which returns 404 unless an
+ * agent with that literal id exists.
  */
 export async function executeMainToolCall(args: ExecuteMainToolCallArgs): Promise<string> {
   const name = args.call.function?.name || args.call.name;
