@@ -25,7 +25,7 @@ import {
   normalizeGenerationReplay,
 } from "./generation-replay";
 import { assembleGenerationPrompt } from "./prompt-assembly";
-import type { GenerationCharacterContext } from "./prompt-assembly";
+import type { GenerationCharacterContext, GenerationPersonaContext } from "./prompt-assembly";
 import { applyRuntimeRegexScripts } from "./regex-runtime";
 import { boolish, hiddenFromAi, isRecord, nowIso, parseRecord, readString, stringArray, type JsonRecord } from "./runtime-records";
 import {
@@ -173,6 +173,119 @@ function savedUserMessageForTimeline(saved: unknown, chatId: string): JsonRecord
   if (readString(saved.role).trim() !== "user") return null;
   if (!readString(saved.content).trim()) return null;
   return saved;
+}
+
+function discordWebhookUrl(chat: JsonRecord): string {
+  return readString(parseRecord(chat.metadata).discordWebhookUrl).trim();
+}
+
+function limitedDiscordName(value: string | null | undefined, fallback: string): string {
+  const trimmed = readString(value).trim() || fallback;
+  return [...trimmed].slice(0, 80).join("");
+}
+
+async function characterNameById(
+  storage: StorageGateway,
+  characters: GenerationCharacterContext[],
+  characterId: string,
+): Promise<string | null> {
+  const known = characters.find((character) => character.id === characterId);
+  if (known?.name) return known.name;
+  const row = await storage.get<JsonRecord>("characters", characterId).catch(() => null);
+  if (!isRecord(row)) return null;
+  return readString(parseRecord(row.data).name).trim() || readString(row.name).trim() || null;
+}
+
+async function assistantDiscordName(args: {
+  storage: StorageGateway;
+  chat: JsonRecord;
+  saved: unknown;
+  characters: GenerationCharacterContext[];
+}): Promise<string> {
+  const mode = readString(args.chat.mode || args.chat.chatMode).trim();
+  const metadata = parseRecord(args.chat.metadata);
+  if (mode === "game") {
+    const gmCharacterId = readString(metadata.gameGmCharacterId).trim();
+    if (readString(metadata.gameGmMode).trim() === "character" && gmCharacterId) {
+      return limitedDiscordName(await characterNameById(args.storage, args.characters, gmCharacterId), "Narrator");
+    }
+    return "Narrator";
+  }
+
+  const characterId = isRecord(args.saved) ? readString(args.saved.characterId).trim() : "";
+  if (characterId) {
+    return limitedDiscordName(await characterNameById(args.storage, args.characters, characterId), "Character");
+  }
+  return limitedDiscordName(args.characters.length === 1 ? args.characters[0]?.name : null, "Assistant");
+}
+
+function mirrorDiscordMessage(args: {
+  integrations: IntegrationGateway;
+  chat: JsonRecord;
+  content: string;
+  username: string;
+  avatarUrl?: string | null;
+}): void {
+  const webhookUrl = discordWebhookUrl(args.chat);
+  const content = args.content.trim();
+  if (!webhookUrl || !content) return;
+  if (!args.integrations.discord) {
+    console.warn("[generation] Discord mirror skipped: integration gateway unavailable");
+    return;
+  }
+  const payload: {
+    webhookUrl: string;
+    content: string;
+    username: string;
+    avatarUrl?: string;
+  } = {
+    webhookUrl,
+    content,
+    username: limitedDiscordName(args.username, "Marinara"),
+  };
+  if (args.avatarUrl) payload.avatarUrl = args.avatarUrl;
+  void args.integrations.discord.mirrorMessage(payload).catch((error) => {
+    console.warn("[generation] Discord mirror failed", error);
+  });
+}
+
+function mirrorSavedUserMessageToDiscord(args: {
+  deps: GenerationEngineDeps;
+  chat: JsonRecord;
+  input: StartGenerationInput;
+  prepared: PreparedUserInput;
+  persona: GenerationPersonaContext | null;
+}): void {
+  if (!shouldSaveUserMessage(args.input, args.prepared)) return;
+  mirrorDiscordMessage({
+    integrations: args.deps.integrations,
+    chat: args.chat,
+    content: args.prepared.content || inputUserMessage(args.input),
+    username: limitedDiscordName(args.persona?.name, "User"),
+  });
+}
+
+async function mirrorSavedAssistantMessageToDiscord(args: {
+  deps: GenerationEngineDeps;
+  chat: JsonRecord;
+  input: StartGenerationInput;
+  saved: unknown;
+  content: string;
+  characters: GenerationCharacterContext[];
+}): Promise<void> {
+  if (args.input.impersonate === true || readString(args.input.regenerateMessageId).trim()) return;
+  const username = await assistantDiscordName({
+    storage: args.deps.storage,
+    chat: args.chat,
+    saved: args.saved,
+    characters: args.characters,
+  });
+  mirrorDiscordMessage({
+    integrations: args.deps.integrations,
+    chat: args.chat,
+    content: args.content,
+    username,
+  });
 }
 
 async function inputWithStoredGenerationReplay(
@@ -753,6 +866,7 @@ export async function* startGeneration(
     request: input,
     latestUserInput: preparedUserInput.content || inputUserMessage(input),
   });
+  mirrorSavedUserMessageToDiscord({ deps, chat, input, prepared: preparedUserInput, persona: assembly.persona });
 
   if (!directMessages) {
     const agentsEnabled = input.impersonateBlockAgents !== true;
@@ -848,6 +962,16 @@ export async function* startGeneration(
           attachments: connected.assistantAttachments,
           usage,
         });
+    if (saved) {
+      await mirrorSavedAssistantMessageToDiscord({
+        deps,
+        chat,
+        input,
+        saved,
+        content: connected.displayContent,
+        characters: assembly.characters,
+      });
+    }
     if (saved) await persistTrackerSnapshotSafely(deps.storage, chatId, saved, allAgentResults, generationTrackerBaseline);
     await persistAgentResults(deps.storage, chatId, messageId(saved), allAgentResults);
     if (saved) {
@@ -918,6 +1042,16 @@ export async function* startGeneration(
         attachments: connected.assistantAttachments,
         usage,
       });
+  if (saved) {
+    await mirrorSavedAssistantMessageToDiscord({
+      deps,
+      chat,
+      input,
+      saved,
+      content: connected.displayContent,
+      characters: assembly.characters,
+    });
+  }
   if (saved) {
     const autoLorebookResults = await runLorebookKeeperBackfill(
       deps,
