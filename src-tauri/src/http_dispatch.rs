@@ -1,6 +1,7 @@
 use crate::state::AppState;
 use crate::storage_commands::{
-    backgrounds, chats, entity_commands, generation, images, imports, llm, profile, shared, sprites,
+    backgrounds, backup, chats, entity_commands, generation, images, imports, llm, profile, shared,
+    sprites,
 };
 use marinara_core::{AppError, AppResult};
 use serde::Deserialize;
@@ -77,6 +78,12 @@ pub async fn dispatch(state: &AppState, request: InvokeRequest) -> AppResult<Val
         "profile_import_file" => {
             let path = required_string(&args, "path")?;
             profile::import_profile_file_path(state, path)
+        }
+        "backup_create" => backup::create_backup(state),
+        "backup_list" => backup::list_backups(state),
+        "backup_delete" => backup::delete_backup(state, required_string(&args, "name")?),
+        "backup_download" => {
+            backup::download_backup(state, optional_string(&args, "name").as_deref())
         }
         "import_marinara" => import_call(state, &args, &["marinara"], "envelope"),
         "import_marinara_file" => import_call(state, &args, &["marinara-file"], "body"),

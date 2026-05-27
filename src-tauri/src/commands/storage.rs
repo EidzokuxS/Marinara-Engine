@@ -14,6 +14,8 @@ mod agents;
 pub(crate) mod avatars;
 #[path = "storage/backgrounds.rs"]
 pub(crate) mod backgrounds;
+#[path = "storage/backup.rs"]
+pub(crate) mod backup;
 #[path = "storage/bot_browser.rs"]
 mod bot_browser;
 #[path = "storage/characters.rs"]
@@ -65,6 +67,8 @@ mod translation;
 pub mod agent_commands;
 #[path = "storage/commands/assets.rs"]
 pub mod asset_commands;
+#[path = "storage/commands/backup.rs"]
+pub mod backup_commands;
 #[path = "storage/commands/bot_browser.rs"]
 pub mod bot_browser_commands;
 #[path = "storage/commands/chats.rs"]
