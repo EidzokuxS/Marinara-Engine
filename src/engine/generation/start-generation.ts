@@ -33,8 +33,9 @@ import {
   buildGenerationReplay,
   normalizeGenerationReplay,
 } from "./generation-replay";
-import { assembleGenerationPrompt } from "./prompt-assembly";
+import { assembleGenerationPrompt, chatSummaryForGeneration } from "./prompt-assembly";
 import type { GenerationCharacterContext, GenerationPersonaContext } from "./prompt-assembly";
+import { chatSummaryFingerprintMatches, fingerprintChatSummary } from "../shared/text/chat-summary-fingerprint";
 import { applyRuntimeRegexScripts } from "./regex-runtime";
 import { boolish, hiddenFromAi, isRecord, nowIso, parseRecord, readString, stringArray, type JsonRecord } from "./runtime-records";
 import {
@@ -301,6 +302,7 @@ async function mirrorSavedAssistantMessageToDiscord(args: {
 
 async function inputWithStoredGenerationReplay(
   storage: StorageGateway,
+  chat: JsonRecord,
   chatId: string,
   input: StartGenerationInput,
 ): Promise<StartGenerationInput> {
@@ -310,8 +312,11 @@ async function inputWithStoredGenerationReplay(
   const target = await storage.get("messages", regenerateMessageId).catch(() => null);
   if (!isRecord(target) || readString(target.chatId).trim() !== chatId) return input;
 
-  const replay = normalizeGenerationReplay(parseRecord(target.extra).generationReplay);
+  const targetExtra = parseRecord(target.extra);
+  const replay = normalizeGenerationReplay(targetExtra.generationReplay);
   if (!replay) return input;
+  const currentFingerprint = fingerprintChatSummary(chatSummaryForGeneration(chat));
+  if (!chatSummaryFingerprintMatches(targetExtra, currentFingerprint)) return input;
 
   const nextInput = { ...input };
   applyGenerationReplayToRegenerateInput(nextInput, replay);
@@ -498,6 +503,7 @@ async function saveAssistantMessage(args: {
   content: string;
   agentResults: AgentResult[];
   noteCount: number;
+  chatSummaryFingerprint: string | null;
   attachments?: JsonRecord[];
   usage?: unknown;
 }): Promise<unknown | null> {
@@ -506,9 +512,11 @@ async function saveAssistantMessage(args: {
   const regenerateMessageId = readString(args.input.regenerateMessageId).trim();
   const generationReplay = buildGenerationReplay(args.input);
   if (regenerateMessageId) {
-    const saved = await args.storage.addChatMessageSwipe(args.input.chatId, regenerateMessageId, args.content);
-    if (!generationReplay) return saved;
-    return args.storage.patchChatMessageExtra(regenerateMessageId, { generationReplay });
+    await args.storage.addChatMessageSwipe(args.input.chatId, regenerateMessageId, args.content);
+    const extraPatch: Record<string, unknown> = {};
+    if (generationReplay) extraPatch.generationReplay = generationReplay;
+    extraPatch.chatSummaryFingerprint = args.chatSummaryFingerprint;
+    return args.storage.patchChatMessageExtra(regenerateMessageId, extraPatch);
   }
 
   const requestedCharacterId = readString(args.input.forCharacterId).trim();
@@ -528,6 +536,7 @@ async function saveAssistantMessage(args: {
     extra: {
       ...(args.attachments?.length ? { attachments: args.attachments } : {}),
       ...(generationReplay ? { generationReplay } : {}),
+      chatSummaryFingerprint: args.chatSummaryFingerprint,
     },
     generationInfo: {
       connectionId: readString(args.connection.id) || null,
@@ -841,7 +850,7 @@ export async function* startGeneration(
   const chatId = readString(input.chatId).trim();
   if (!chatId) throw new Error("chatId is required");
   const chat = requireRecord(await deps.storage.get("chats", chatId), "Chat");
-  input = await inputWithStoredGenerationReplay(deps.storage, chatId, input);
+  input = await inputWithStoredGenerationReplay(deps.storage, chat, chatId, input);
   assertChatCanGenerate(chat, input);
 
   yield { type: "phase", data: "Saving message..." };
@@ -981,6 +990,7 @@ export async function* startGeneration(
           content: connected.displayContent,
           agentResults: allAgentResults,
           noteCount: connected.createdNotes.length + connected.executedCommands.length,
+          chatSummaryFingerprint: assembly.chatSummaryFingerprint,
           attachments: connected.assistantAttachments,
           usage,
         });
@@ -1064,6 +1074,7 @@ export async function* startGeneration(
         content: connected.displayContent,
         agentResults: [],
         noteCount: connected.createdNotes.length + connected.executedCommands.length,
+        chatSummaryFingerprint: assembly.chatSummaryFingerprint,
         attachments: connected.assistantAttachments,
         usage,
       });

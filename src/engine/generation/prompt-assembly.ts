@@ -10,6 +10,7 @@ import { resolveMacros, type MacroContext } from "../shared/macros/macro-engine"
 import { normalizeUserTimeZone } from "../shared/time/timezone";
 import type { GameActiveState, GameCampaignPlan, GameMap, GameNpc, HudWidget, SessionSummary } from "../contracts/types/game";
 import { buildGmFormatReminder, buildGmSystemPrompt, type GmPromptContext } from "../modes/game/prompts/gm-prompts";
+import { fingerprintChatSummary } from "../shared/text/chat-summary-fingerprint";
 import { activeCharacterIds } from "./active-characters";
 import { buildGenerationPromptPresetCandidates } from "./prompt-preset-selection";
 import {
@@ -70,6 +71,7 @@ export interface PromptAssemblyResult {
     constant: boolean;
   }>;
   chatSummary: string | null;
+  chatSummaryFingerprint: string | null;
 }
 
 export interface PromptAssemblyInput {
@@ -711,7 +713,7 @@ function buildRoleplayScenePromptBlock(
   return parts.join("\n\n");
 }
 
-function chatSummary(chat: JsonRecord): string | null {
+export function chatSummaryForGeneration(chat: JsonRecord): string | null {
   const meta = parseRecord(chat.metadata);
   const mode = readString(chat.mode || chat.chatMode, "conversation");
   const includeSceneSummary = mode !== "conversation" || meta.crossChatAwareness !== false;
@@ -1137,7 +1139,7 @@ export async function assembleGenerationPrompt(
   const persona = await loadPersona(storage, input.chat);
   const activated = await loadActivatedLore(storage, input.chat, characters, persona, input.storedMessages);
   const processedLore = processActivatedEntries(activated, readNumber(input.request.lorebookTokenBudget, 0));
-  const summary = chatSummary(input.chat);
+  const summary = chatSummaryForGeneration(input.chat);
   const memoryRecallBlock = await buildMemoryRecallBlock(
     storage,
     input.chat,
@@ -1260,6 +1262,7 @@ export async function assembleGenerationPrompt(
   if (!strictRoleFormatting && boolish(input.request.squashSystemMessages, false)) {
     messages = squashLeadingSystemMessages(messages);
   }
+  const summaryFingerprint = fingerprintChatSummary(summary);
 
   return {
     messages,
@@ -1267,5 +1270,6 @@ export async function assembleGenerationPrompt(
     persona,
     activatedLorebookEntries: activated.map(loreForEvent),
     chatSummary: summary,
+    chatSummaryFingerprint: summaryFingerprint,
   };
 }
