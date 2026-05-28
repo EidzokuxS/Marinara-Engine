@@ -43,6 +43,16 @@ pipx install graphifyy
 pip install graphifyy
 ```
 
+Then apply Marinara's portability patch for Graphify `0.8.21` installs:
+
+```sh
+pnpm graphify:patch
+```
+
+Run the patch again after reinstalling or upgrading `graphifyy`. It prevents
+generated cache files and node IDs from embedding local absolute workspace
+paths.
+
 For any further installation instructions, please follow the relevant segment of the installation guide via [this repo](https://github.com/safishamsi/graphify)
 
 ## Required Workflow
@@ -50,6 +60,7 @@ For any further installation instructions, please follow the relevant segment of
 - This repository has a persistent `graphify-out/` map. Use it as navigational evidence, not as an authority over current source files.
 - Before broad architecture, unfamiliar-area, dependency, or file-relationship exploration, read `graphify-out/GRAPH_REPORT.md` or use `graphify query "<question>"`.
 - Prefer scoped graph queries over broad raw-file searches when the question is about relationships between areas.
+- After installing, reinstalling, or upgrading Graphify, run `pnpm graphify:patch` before refreshing the map.
 - After every code change, run `graphify update .` from the repository root so the map stays current.
 - For docs, PDFs, images, or other semantic-source changes, run `/graphify . --update` or the equivalent Graphify update path so semantic nodes are refreshed.
 - Do not hand-edit generated `graphify-out/` files.
@@ -114,5 +125,5 @@ Use the report as a navigation map. Verify behavior claims against source files 
 - Code files are processed locally for AST extraction.
 - Docs, PDFs, images, and transcripts may be sent through the configured AI backend for semantic extraction.
 - Do not graph private chat transcripts, secrets, generated dependency/build output, provider caches, or unrelated workspace folders unless the user explicitly asks and the scope is safe.
-- Do not commit local absolute workspace paths in Graphify outputs; use repo-relative paths such as `src/...` and scrub machine-specific prefixes before sharing or committing `graphify-out/`.
+- Do not commit local absolute workspace paths in Graphify outputs; use repo-relative paths such as `src/...`, keep Marinara's Graphify portability patch applied, and verify path hygiene before sharing or committing `graphify-out/`.
 - Use Graphify to decide where to inspect, then cite and trust source files, tests, and project docs for behavior.
