@@ -17,9 +17,10 @@ describe("GenerationParametersEditor parameter overrides", () => {
       temperature: 0.8,
       topP: 0.7,
       assistantPrefill: "<assistant>",
-      customParameters: { provider: { connection: true, preset: true } },
+      customParameters: { provider: { preset: true } },
     });
 
+    expect(promptDefaults.customParameters).toEqual({ provider: { connection: true, preset: true } });
     expect(getEditableGenerationParameterOverrides(promptDefaults, promptDefaults)).toBeNull();
     expect(
       getEditableGenerationParameterOverrides(promptDefaults, {

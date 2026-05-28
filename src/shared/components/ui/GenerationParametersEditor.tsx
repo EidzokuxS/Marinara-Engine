@@ -126,11 +126,41 @@ export function parseEditableGenerationParameters(raw: unknown): EditableGenerat
   return Object.keys(next).length > 0 ? next : null;
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function mergeCustomParameterRecords(
+  base: Record<string, unknown> | null | undefined,
+  next: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...(base ?? {}) };
+  if (!next) return merged;
+  for (const [key, value] of Object.entries(next)) {
+    if (value === undefined) continue;
+    const current = merged[key];
+    if (isPlainRecord(current) && isPlainRecord(value)) {
+      merged[key] = mergeCustomParameterRecords(current, value);
+    } else {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
 export function getEditableGenerationParameters(
   defaults: EditableGenerationParameters,
   overrides: unknown,
 ): EditableGenerationParameters {
-  return { ...defaults, ...(parseEditableGenerationParameters(overrides) ?? {}) };
+  const parsed = parseEditableGenerationParameters(overrides);
+  if (!parsed) return defaults;
+  return {
+    ...defaults,
+    ...parsed,
+    customParameters: parsed.customParameters
+      ? mergeCustomParameterRecords(defaults.customParameters, parsed.customParameters)
+      : defaults.customParameters,
+  };
 }
 
 function normalizeComparableJson(value: unknown): unknown {

@@ -910,8 +910,8 @@
     "semantic_hash": ""
   },
   "src/features/modes/shared/chat-ui/components/ChatSettingsDrawer.tsx": {
-    "mtime": 1779987873.3618054,
-    "ast_hash": "890661486136c4335efd1c62486ef5e1",
+    "mtime": 1779988310.7851849,
+    "ast_hash": "7dca6d5cb26f6ba9fa487bb9d9090a7b",
     "semantic_hash": ""
   },
   "src/features/modes/shared/chat-ui/components/input-button-styles.ts": {
@@ -2565,8 +2565,8 @@
     "semantic_hash": ""
   },
   "src/shared/components/ui/GenerationParametersEditor.tsx": {
-    "mtime": 1779987873.3628056,
-    "ast_hash": "5270e817791f652c5bc317ce6c5a9c93",
+    "mtime": 1779988179.3176079,
+    "ast_hash": "c308e17206760aaf5371d4f6aea8d3d3",
     "semantic_hash": ""
   },
   "src/shared/components/ui/AvatarGenerationModal.tsx": {
@@ -5775,8 +5775,8 @@
     "semantic_hash": ""
   },
   "src/shared/components/ui/GenerationParametersEditor.test.ts": {
-    "mtime": 1779987873.3628056,
-    "ast_hash": "fc8e5a8a82c88b5af5b46312bd32cac1",
+    "mtime": 1779988179.3186085,
+    "ast_hash": "8e05b383f999edba9df30432d82ad1c7",
     "semantic_hash": ""
   }
 }

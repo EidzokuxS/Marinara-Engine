@@ -1,16 +1,16 @@
 # Graph Report - MarinaraEngine-Refactor  (2026-05-29)
 
 ## Corpus Check
-- 850 files · ~2,815,799 words
+- 850 files · ~2,816,031 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 10343 nodes · 22406 edges · 456 communities (420 shown, 36 thin omitted)
+- 10346 nodes · 22412 edges · 456 communities (420 shown, 36 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 269 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `779009aa`
+- Built from commit: `9f61077b`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -475,7 +475,7 @@ Nodes (129): ELEMENT_COLORS, ELEMENT_EMOJI, GameElementReaction(), GameElementRe
 
 ### Community 3 - "Community 3"
 Cohesion: 0.02
-Nodes (110): CreateGameResponse, PartyCardResponse, StartSessionResponse, UpdateCampaignProgressionResponse, chatPresetKeys, ChatFilesDrawerProps, ActiveLorebookView, AgentAddPreview (+102 more)
+Nodes (111): CreateGameResponse, PartyCardResponse, StartSessionResponse, UpdateCampaignProgressionResponse, chatPresetKeys, ChatFilesDrawerProps, ActiveLorebookView, AgentAddPreview (+103 more)
 
 ### Community 4 - "Community 4"
 Cohesion: 0.15
@@ -930,8 +930,8 @@ Cohesion: 0.08
 Nodes (15): storageCommandsApi, createPromptNested(), listPromptNested(), PRESET_SUMMARY_OPTIONS, presetOrderQueues, promptNestedEntity, PromptNestedKind, promptOrderField (+7 more)
 
 ### Community 119 - "Community 119"
-Cohesion: 0.13
-Nodes (16): create_marinara_extension(), CreateMarinaraCustomAgentTool, CreateMarinaraExtensionTool, edit_marinara_code_file(), EditMarinaraCodeFileTool, is_code_text_path(), is_skipped_relative_path(), mari_tool_error() (+8 more)
+Cohesion: 0.11
+Nodes (18): create_marinara_extension(), CreateMarinaraCustomAgentTool, CreateMarinaraExtensionTool, edit_marinara_code_file(), EditMarinaraCodeFileTool, is_code_text_path(), is_skipped_relative_path(), mari_tool_error() (+10 more)
 
 ### Community 120 - "Community 120"
 Cohesion: 0.04
@@ -2002,9 +2002,9 @@ Nodes (6): estimatedMessageTokens(), estimatedTokens(), firstHistoryIndex(), fit
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `cn()` connect `Community 12` to `Community 128`, `Community 1`, `Community 2`, `Community 3`, `Community 132`, `Community 133`, `Community 5`, `Community 9`, `Community 10`, `Community 11`, `Community 142`, `Community 143`, `Community 400`, `Community 19`, `Community 150`, `Community 24`, `Community 26`, `Community 154`, `Community 29`, `Community 33`, `Community 163`, `Community 36`, `Community 42`, `Community 46`, `Community 48`, `Community 176`, `Community 51`, `Community 53`, `Community 182`, `Community 56`, `Community 61`, `Community 64`, `Community 68`, `Community 197`, `Community 198`, `Community 196`, `Community 72`, `Community 73`, `Community 205`, `Community 206`, `Community 79`, `Community 209`, `Community 82`, `Community 83`, `Community 84`, `Community 218`, `Community 93`, `Community 95`, `Community 224`, `Community 100`, `Community 102`, `Community 108`, `Community 368`, `Community 114`, `Community 243`, `Community 372`, `Community 248`, `Community 250`, `Community 127`?**
-  _High betweenness centrality (0.052) - this node is a cross-community bridge._
+  _High betweenness centrality (0.049) - this node is a cross-community bridge._
 - **Why does `useUIStore` connect `Community 19` to `Community 1`, `Community 2`, `Community 3`, `Community 132`, `Community 133`, `Community 6`, `Community 9`, `Community 10`, `Community 11`, `Community 20`, `Community 24`, `Community 26`, `Community 154`, `Community 29`, `Community 31`, `Community 33`, `Community 39`, `Community 46`, `Community 47`, `Community 178`, `Community 51`, `Community 53`, `Community 182`, `Community 196`, `Community 198`, `Community 79`, `Community 209`, `Community 82`, `Community 84`, `Community 89`, `Community 218`, `Community 94`, `Community 223`, `Community 224`, `Community 100`, `Community 102`, `Community 361`, `Community 112`, `Community 114`, `Community 120`, `Community 250`?**
-  _High betweenness centrality (0.019) - this node is a cross-community bridge._
+  _High betweenness centrality (0.021) - this node is a cross-community bridge._
 - **Why does `readString()` connect `Community 13` to `Community 129`, `Community 34`, `Community 7`, `Community 8`, `Community 107`, `Community 44`, `Community 78`, `Community 15`, `Community 18`, `Community 179`, `Community 149`, `Community 278`, `Community 23`, `Community 121`, `Community 61`?**
   _High betweenness centrality (0.012) - this node is a cross-community bridge._
 - **What connects `arrowParens`, `endOfLine`, `printWidth` to the rest of the system?**

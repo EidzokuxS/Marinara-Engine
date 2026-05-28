@@ -307,14 +307,38 @@ export function ChatSettingsDrawer({
   const { data: characterGroups } = useCharacterGroups();
   const { data: lorebooks } = useLorebooks();
   const { data: presets } = usePresetSummaries();
+  const { data: connections } = useConnections();
   const chatMode: ChatMode =
     chat.mode === "conversation" || chat.mode === "roleplay" || chat.mode === "game" ? chat.mode : "roleplay";
   const isConversation = chatMode === "conversation";
   const isGame = chatMode === "game";
   const isRoleplayMode = chatMode === "roleplay";
-  const { data: currentPromptPresetFull } = usePresetFull(isConversation ? null : (chat.promptPresetId ?? null));
-  const promptPresetParametersPending = !isConversation && !!chat.promptPresetId && currentPromptPresetFull === undefined;
-  const { data: connections } = useConnections();
+  const chatPromptPresetId = nonEmptyString(chat.promptPresetId);
+  const activeTextConnection = useMemo(() => {
+    if (!chat.connectionId || chat.connectionId === "random") return null;
+    return connections?.find((connection) => connection.id === chat.connectionId) ?? null;
+  }, [chat.connectionId, connections]);
+  const connectionPromptPresetId = isRoleplayMode ? nonEmptyString(activeTextConnection?.promptPresetId) : null;
+  const defaultPromptPresetId = useMemo(
+    () =>
+      isRoleplayMode
+        ? (presets?.find((preset) => isEnabledFlag(preset.isDefault ?? preset.default, false))?.id ?? null)
+        : null,
+    [isRoleplayMode, presets],
+  );
+  const advancedPromptPresetId = isRoleplayMode
+    ? (connectionPromptPresetId ?? chatPromptPresetId ?? defaultPromptPresetId)
+    : null;
+  const { data: currentPromptPresetFull } = usePresetFull(isConversation ? null : chatPromptPresetId);
+  const { data: advancedPromptPresetFull } = usePresetFull(advancedPromptPresetId);
+  const connectionInheritancePending =
+    !isConversation && !!chat.connectionId && chat.connectionId !== "random" && connections === undefined;
+  const defaultPromptPresetPending =
+    isRoleplayMode && !connectionPromptPresetId && !chatPromptPresetId && presets === undefined;
+  const inheritedGenerationParametersPending =
+    connectionInheritancePending ||
+    defaultPromptPresetPending ||
+    (isRoleplayMode && !!advancedPromptPresetId && advancedPromptPresetFull === undefined);
   const imageConnectionsList = useMemo(
     () =>
       ((connections as Array<{ id: string; name: string; model?: string; provider?: string }>) ?? []).filter(
@@ -5455,8 +5479,8 @@ export function ChatSettingsDrawer({
             isConversation={isConversation}
             connectionId={chat.connectionId ?? null}
             connections={connections ?? []}
-            promptPresetParameters={currentPromptPresetFull?.preset?.parameters ?? null}
-            promptPresetParametersPending={promptPresetParametersPending}
+            promptPresetParameters={advancedPromptPresetFull?.preset?.parameters ?? null}
+            inheritedGenerationParametersPending={inheritedGenerationParametersPending}
           />
 
           {/* Context Message Limit */}
@@ -6114,6 +6138,10 @@ Here are some important rules for the interaction:
 
 const EDITABLE_GENERATION_PARAMETER_KEY_SET = new Set<string>(EDITABLE_GENERATION_PARAMETER_KEYS);
 
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 function generationParameterRecord(value: unknown): Record<string, unknown> {
   return parseGenerationParameterRecord(value) ?? {};
 }
@@ -6133,7 +6161,7 @@ function AdvancedParametersSection({
   connectionId,
   connections,
   promptPresetParameters,
-  promptPresetParametersPending,
+  inheritedGenerationParametersPending,
 }: {
   chat: Chat;
   metadata: Record<string, unknown>;
@@ -6142,7 +6170,7 @@ function AdvancedParametersSection({
   connectionId: string | null;
   connections: unknown[];
   promptPresetParameters?: unknown;
-  promptPresetParametersPending?: boolean;
+  inheritedGenerationParametersPending?: boolean;
 }) {
   const modeDefaults = isConversation ? CHAT_PARAMETER_DEFAULTS : ROLEPLAY_PARAMETER_DEFAULTS;
   // Use connection-saved defaults if available, otherwise fall back to mode defaults
@@ -6191,9 +6219,9 @@ function AdvancedParametersSection({
       </div>
       {expanded && (
         <div className="px-4 pb-3 space-y-3">
-          {promptPresetParametersPending ? (
+          {inheritedGenerationParametersPending ? (
             <div className="rounded-lg bg-[var(--secondary)] px-3 py-2 text-[0.625rem] text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
-              Loading inherited prompt parameters...
+              Loading inherited generation parameters...
             </div>
           ) : (
             <>
