@@ -306,8 +306,8 @@ export function ChatSettingsDrawer({
   const { data: allCharacters } = useCharacters();
   const { data: characterGroups } = useCharacterGroups();
   const { data: lorebooks } = useLorebooks();
-  const { data: presets } = usePresetSummaries();
-  const { data: connections } = useConnections();
+  const { data: presets, isLoading: presetsLoading } = usePresetSummaries();
+  const { data: connections, isLoading: connectionsLoading } = useConnections();
   const chatMode: ChatMode =
     chat.mode === "conversation" || chat.mode === "roleplay" || chat.mode === "game" ? chat.mode : "roleplay";
   const isConversation = chatMode === "conversation";
@@ -326,19 +326,21 @@ export function ChatSettingsDrawer({
         : null,
     [isRoleplayMode, presets],
   );
+  // Roleplay connection prompt presets intentionally override chat prompt presets, matching generation assembly.
   const advancedPromptPresetId = isRoleplayMode
     ? (connectionPromptPresetId ?? chatPromptPresetId ?? defaultPromptPresetId)
     : null;
   const { data: currentPromptPresetFull } = usePresetFull(isConversation ? null : chatPromptPresetId);
-  const { data: advancedPromptPresetFull } = usePresetFull(advancedPromptPresetId);
+  const { data: advancedPromptPresetFull, isLoading: advancedPromptPresetLoading } =
+    usePresetFull(advancedPromptPresetId);
   const connectionInheritancePending =
-    !isConversation && !!chat.connectionId && chat.connectionId !== "random" && connections === undefined;
+    !isConversation && !!chat.connectionId && chat.connectionId !== "random" && connectionsLoading;
   const defaultPromptPresetPending =
-    isRoleplayMode && !connectionPromptPresetId && !chatPromptPresetId && presets === undefined;
+    isRoleplayMode && !connectionPromptPresetId && !chatPromptPresetId && presetsLoading;
   const inheritedGenerationParametersPending =
     connectionInheritancePending ||
     defaultPromptPresetPending ||
-    (isRoleplayMode && !!advancedPromptPresetId && advancedPromptPresetFull === undefined);
+    (isRoleplayMode && !!advancedPromptPresetId && advancedPromptPresetLoading);
   const imageConnectionsList = useMemo(
     () =>
       ((connections as Array<{ id: string; name: string; model?: string; provider?: string }>) ?? []).filter(

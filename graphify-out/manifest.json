@@ -910,8 +910,8 @@
     "semantic_hash": ""
   },
   "src/features/modes/shared/chat-ui/components/ChatSettingsDrawer.tsx": {
-    "mtime": 1779988310.7851849,
-    "ast_hash": "7dca6d5cb26f6ba9fa487bb9d9090a7b",
+    "mtime": 1779989365.802839,
+    "ast_hash": "d6e1f6e368646c996d5195243daa46a5",
     "semantic_hash": ""
   },
   "src/features/modes/shared/chat-ui/components/input-button-styles.ts": {
@@ -5777,6 +5777,11 @@
   "src/shared/components/ui/GenerationParametersEditor.test.ts": {
     "mtime": 1779988179.3186085,
     "ast_hash": "8e05b383f999edba9df30432d82ad1c7",
+    "semantic_hash": ""
+  },
+  ".coderabbit.yaml": {
+    "mtime": 1779988412.5371366,
+    "ast_hash": "2de322cc682fc6485973dab182c7e981",
     "semantic_hash": ""
   }
 }
