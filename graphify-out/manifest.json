@@ -3725,8 +3725,8 @@
     "semantic_hash": ""
   },
   "src-tauri/src/state.rs": {
-    "mtime": 1779990319.9232793,
-    "ast_hash": "3ff8ace9cce5129d62ce1124819f52dc",
+    "mtime": 1779991251.5395043,
+    "ast_hash": "251fa5345c5c8e0e52df5144934a3c06",
     "semantic_hash": ""
   },
   "src-tauri/src/bin/marinara-server.rs": {
