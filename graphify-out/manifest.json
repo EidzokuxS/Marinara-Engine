@@ -910,8 +910,8 @@
     "semantic_hash": ""
   },
   "src/features/modes/shared/chat-ui/components/ChatSettingsDrawer.tsx": {
-    "mtime": 1779978430.8082008,
-    "ast_hash": "d4fd31762b503f10d50040c59775cfb0",
+    "mtime": 1779987873.3618054,
+    "ast_hash": "890661486136c4335efd1c62486ef5e1",
     "semantic_hash": ""
   },
   "src/features/modes/shared/chat-ui/components/input-button-styles.ts": {
@@ -2565,8 +2565,8 @@
     "semantic_hash": ""
   },
   "src/shared/components/ui/GenerationParametersEditor.tsx": {
-    "mtime": 1779924805.75831,
-    "ast_hash": "ba15ef15919ad3b2dcc67914d21a4316",
+    "mtime": 1779987873.3628056,
+    "ast_hash": "5270e817791f652c5bc317ce6c5a9c93",
     "semantic_hash": ""
   },
   "src/shared/components/ui/AvatarGenerationModal.tsx": {
@@ -5774,14 +5774,9 @@
     "ast_hash": "eb2ab6b9534540be620788d3e09aff93",
     "semantic_hash": ""
   },
-  "local/ltm-architecture-workflow.html": {
-    "mtime": 1779807020.9258566,
-    "ast_hash": "d58e01a3b88bfd9ab37480a29d7a05e3",
-    "semantic_hash": ""
-  },
-  "local/LTM.md": {
-    "mtime": 1779753022.1409717,
-    "ast_hash": "a7b233037312e82c0b0f855ea1de1f4d",
+  "src/shared/components/ui/GenerationParametersEditor.test.ts": {
+    "mtime": 1779987873.3628056,
+    "ast_hash": "fc8e5a8a82c88b5af5b46312bd32cac1",
     "semantic_hash": ""
   }
 }

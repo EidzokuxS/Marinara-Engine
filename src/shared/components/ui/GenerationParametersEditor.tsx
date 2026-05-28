@@ -18,12 +18,25 @@ export type EditableGenerationParameters = Pick<
   | "customParameters"
 >;
 
-type EditableGenerationParameterOverrides = Partial<EditableGenerationParameters>;
+export type EditableGenerationParameterOverrides = Partial<EditableGenerationParameters>;
 
 const REASONING_LEVELS = [null, "low", "medium", "high", "maximum"] as const;
 const VERBOSITY_LEVELS = [null, "low", "medium", "high"] as const;
 const OPENROUTER_SERVICE_TIERS = [null, "flex", "priority"] as const;
 const MAX_GENERATION_OUTPUT_TOKENS = 128000;
+export const EDITABLE_GENERATION_PARAMETER_KEYS = [
+  "temperature",
+  "maxTokens",
+  "topP",
+  "topK",
+  "frequencyPenalty",
+  "presencePenalty",
+  "reasoningEffort",
+  "verbosity",
+  "serviceTier",
+  "assistantPrefill",
+  "customParameters",
+] as const satisfies ReadonlyArray<keyof EditableGenerationParameters>;
 
 export const CHAT_PARAMETER_DEFAULTS: EditableGenerationParameters = {
   temperature: 1,
@@ -53,7 +66,7 @@ export const ROLEPLAY_PARAMETER_DEFAULTS: EditableGenerationParameters = {
   customParameters: {},
 };
 
-export function parseEditableGenerationParameters(raw: unknown): EditableGenerationParameterOverrides | null {
+export function parseGenerationParameterRecord(raw: unknown): Record<string, unknown> | null {
   let parsed = raw;
   if (typeof parsed === "string") {
     try {
@@ -63,9 +76,13 @@ export function parseEditableGenerationParameters(raw: unknown): EditableGenerat
     }
   }
 
-  if (!parsed || typeof parsed !== "object") return null;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  return parsed as Record<string, unknown>;
+}
 
-  const source = parsed as Record<string, unknown>;
+export function parseEditableGenerationParameters(raw: unknown): EditableGenerationParameterOverrides | null {
+  const source = parseGenerationParameterRecord(raw);
+  if (!source) return null;
   const next: EditableGenerationParameterOverrides = {};
 
   if (typeof source.temperature === "number") next.temperature = source.temperature;
@@ -114,6 +131,45 @@ export function getEditableGenerationParameters(
   overrides: unknown,
 ): EditableGenerationParameters {
   return { ...defaults, ...(parseEditableGenerationParameters(overrides) ?? {}) };
+}
+
+function normalizeComparableJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(normalizeComparableJson);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, normalizeComparableJson(entry)]),
+  );
+}
+
+function generationParameterValuesEqual<K extends keyof EditableGenerationParameters>(
+  key: K,
+  left: EditableGenerationParameters[K],
+  right: EditableGenerationParameters[K],
+): boolean {
+  if (key === "customParameters") {
+    return JSON.stringify(normalizeComparableJson(left)) === JSON.stringify(normalizeComparableJson(right));
+  }
+  return left === right;
+}
+
+export function getEditableGenerationParameterOverrides(
+  defaults: EditableGenerationParameters,
+  value: EditableGenerationParameters,
+): EditableGenerationParameterOverrides | null {
+  const overrides: EditableGenerationParameterOverrides = {};
+  const writable = overrides as Partial<
+    Record<keyof EditableGenerationParameters, EditableGenerationParameters[keyof EditableGenerationParameters]>
+  >;
+
+  for (const key of EDITABLE_GENERATION_PARAMETER_KEYS) {
+    if (!generationParameterValuesEqual(key, defaults[key], value[key])) {
+      writable[key] = value[key];
+    }
+  }
+
+  return Object.keys(overrides).length > 0 ? overrides : null;
 }
 
 export function GenerationParametersFields({
