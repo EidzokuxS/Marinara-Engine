@@ -68,9 +68,14 @@ import {
 } from "../../../../../shared/components/ui/GenerationParametersEditor";
 import { ChoiceSelectionModal } from "../../../../catalog/presets/index";
 import { SummariesEditorModal } from "./SummariesEditorModal";
-import { useCharacters, usePersonas, useCharacterGroups, type SpriteInfo } from "../../../../catalog/characters/index";
+import {
+  useCharacters,
+  usePersonaSummaries,
+  useCharacterGroups,
+  type SpriteInfo,
+} from "../../../../catalog/characters/index";
 import { useLorebooks } from "../../../../catalog/lorebooks/index";
-import { usePresetFull, usePresets } from "../../../../catalog/presets/index";
+import { usePresetFull, usePresetSummaries } from "../../../../catalog/presets/index";
 import { useConnections, useSaveConnectionDefaults } from "../../../../catalog/connections/index";
 import { useGenerate } from "../../../../runtime/generation/index";
 import {
@@ -297,7 +302,7 @@ export function ChatSettingsDrawer({
   const { data: allCharacters } = useCharacters();
   const { data: characterGroups } = useCharacterGroups();
   const { data: lorebooks } = useLorebooks();
-  const { data: presets } = usePresets();
+  const { data: presets } = usePresetSummaries();
   const chatMode: ChatMode =
     chat.mode === "conversation" || chat.mode === "roleplay" || chat.mode === "game" ? chat.mode : "roleplay";
   const isConversation = chatMode === "conversation";
@@ -319,7 +324,7 @@ export function ChatSettingsDrawer({
       ),
     [connections],
   );
-  const { data: allPersonas } = usePersonas();
+  const { data: allPersonas } = usePersonaSummaries();
   const { data: agentConfigs } = useAgentConfigs();
   const { data: customTools } = useCustomTools();
   const { data: customToolCapabilities } = useCustomToolCapabilities();
@@ -6129,25 +6134,29 @@ function AdvancedParametersSection({
 
   return (
     <div className="border-b border-[var(--border)]">
-      <button
-        onClick={() => setExpanded((o) => !o)}
-        className="flex w-full items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-[var(--accent)]/50"
-      >
-        <span className="text-[var(--muted-foreground)]">
-          <Settings2 size="0.875rem" />
-        </span>
-        <span className="flex-1 text-xs font-semibold">Advanced Parameters</span>
-        <span onClick={(e) => e.stopPropagation()}>
+      <div className="flex w-full items-center gap-2 px-4 py-3 transition-colors hover:bg-[var(--accent)]/50">
+        <button
+          type="button"
+          onClick={() => setExpanded((o) => !o)}
+          aria-expanded={expanded}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          <span className="text-[var(--muted-foreground)]">
+            <Settings2 size="0.875rem" />
+          </span>
+          <span className="flex-1 text-xs font-semibold">Advanced Parameters</span>
+          <ChevronDown
+            size="0.75rem"
+            className={cn("text-[var(--muted-foreground)] transition-transform", expanded && "rotate-180")}
+          />
+        </button>
+        <span className="shrink-0">
           <HelpTooltip
             text="Override generation parameters for this chat. Only change these if you know what you're doing."
             side="left"
           />
         </span>
-        <ChevronDown
-          size="0.75rem"
-          className={cn("text-[var(--muted-foreground)] transition-transform", expanded && "rotate-180")}
-        />
-      </button>
+      </div>
       {expanded && (
         <div className="px-4 pb-3 space-y-3">
           <GenerationParametersFields

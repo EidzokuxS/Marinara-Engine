@@ -18,7 +18,7 @@ import { showConfirmDialog } from "../../../../../shared/lib/app-dialogs";
 import { useAgentStore } from "../../../../../shared/stores/agent.store";
 import { useChatStore } from "../../../../../shared/stores/chat.store";
 import { useUIStore } from "../../../../../shared/stores/ui.store";
-import type { MessageSelectionToggle, MessageWithSwipes, PeekPromptData } from "../types";
+import type { MessageSelectionToggle, MessageWithSwipes, PeekPromptData, PeekPromptOptions } from "../types";
 
 const TRACKER_AGENT_IDS = new Set(BUILT_IN_AGENTS.filter((agent) => agent.category === "tracker").map((agent) => agent.id));
 
@@ -47,7 +47,6 @@ export function useChatTimelineActions({
   enabledAgentTypes = new Set<string>(),
   refreshWorldStateOnTimelineChange = false,
 }: UseChatTimelineActionsOptions) {
-  const currentInput = useChatStore((state) => state.currentInput);
   const guideGenerations = useUIStore((state) => state.guideGenerations);
   const isStreamingGlobal = useChatStore((state) => state.isStreaming);
   const streamingChatId = useChatStore((state) => state.streamingChatId);
@@ -67,6 +66,7 @@ export function useChatTimelineActions({
   const { generate, retryAgents } = useGenerate();
 
   const swipeActionSeq = useRef(0);
+  const peekPromptActionSeq = useRef(0);
   const pendingSwipeMutationsRef = useRef(new Map<string, Promise<void>>());
   const [deleteDialogMessageId, setDeleteDialogMessageId] = useState<string | null>(null);
   const [multiSelectMode, setMultiSelectMode] = useState(false);
@@ -350,14 +350,16 @@ export function useChatTimelineActions({
         return;
       }
       try {
-        const hasInput = currentInput ? currentInput.trim().length > 0 : false;
+        const currentInput = useChatStore.getState().currentInput;
+        const generationGuide = currentInput.trim();
+        const hasInput = generationGuide.length > 0;
         await generate(
           guideGenerations && hasInput
             ? {
                 chatId: activeChatId,
                 connectionId: null,
                 regenerateMessageId: messageId,
-                generationGuide: buildGuidedGenerationInstructionMessage(currentInput.toString()),
+                generationGuide: buildGuidedGenerationInstructionMessage(generationGuide),
                 generationGuideSource: "guide",
               }
             : { chatId: activeChatId, connectionId: null, regenerateMessageId: messageId },
@@ -366,7 +368,7 @@ export function useChatTimelineActions({
         /* Error toast is shown by the generate hook. */
       }
     },
-    [activeChatId, currentInput, generate, guideGenerations, isStreaming],
+    [activeChatId, generate, guideGenerations, isStreaming],
   );
 
   const handleRetryFailedAgents = useCallback(async () => {
@@ -451,9 +453,7 @@ export function useChatTimelineActions({
   );
 
   const handleEdit = useCallback(
-    (messageId: string, content: string) => {
-      updateMessage.mutate({ messageId, content });
-    },
+    (messageId: string, content: string) => updateMessage.mutateAsync({ messageId, content }).then(() => undefined),
     [updateMessage],
   );
 
@@ -485,11 +485,32 @@ export function useChatTimelineActions({
     [activeChatId, branchChat],
   );
 
-  const handlePeekPrompt = useCallback(() => {
-    peekPrompt.mutate(activeChatId, {
-      onSuccess: (data) => setPeekPromptData(data),
-    });
+  const handlePeekPrompt = useCallback((options?: PeekPromptOptions) => {
+    const actionId = ++peekPromptActionSeq.current;
+    setPeekPromptData({ messages: [], parameters: null, generationInfo: null, loading: true });
+    peekPrompt.mutate(
+      { chatId: activeChatId, forCharacterId: options?.forCharacterId ?? null },
+      {
+        onSuccess: (data) => {
+          if (peekPromptActionSeq.current === actionId) setPeekPromptData(data);
+        },
+        onError: (error) => {
+          if (peekPromptActionSeq.current !== actionId) return;
+          setPeekPromptData({
+            messages: [],
+            parameters: null,
+            generationInfo: null,
+            error: error instanceof Error ? error.message : "Could not assemble prompt.",
+          });
+        },
+      },
+    );
   }, [activeChatId, peekPrompt]);
+
+  const closePeekPrompt = useCallback(() => {
+    peekPromptActionSeq.current++;
+    setPeekPromptData(null);
+  }, []);
 
   const lastAssistantMessageId = useMemo(() => {
     if (!messages) return null;
@@ -574,7 +595,7 @@ export function useChatTimelineActions({
     handleToggleHiddenFromAI,
     handleBranch,
     handlePeekPrompt,
-    closePeekPrompt: () => setPeekPromptData(null),
+    closePeekPrompt,
     closeDeleteDialog: () => setDeleteDialogMessageId(null),
   };
 }

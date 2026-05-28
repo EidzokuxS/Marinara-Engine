@@ -20,7 +20,6 @@ import {
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import type { Message, MessageExtra } from "../../../../engine/contracts/types/chat";
 import { useUIStore } from "../../../../shared/stores/ui.store";
-import { useChatStore } from "../../../../shared/stores/chat.store";
 import { cn, copyToClipboard, getAvatarCropStyle, parseAvatarCropJson } from "../../../../shared/lib/utils";
 import { applyInlineMarkdown, renderMarkdownBlocks } from "../../../../shared/lib/markdown";
 import { chatKeys } from "../../../catalog/chats/index";
@@ -284,7 +283,7 @@ interface ConversationMessageProps {
   forceShowActions?: boolean;
   onDelete?: (messageId: string) => void;
   onRegenerate?: (messageId: string) => void;
-  onEdit?: (messageId: string, content: string) => void;
+  onEdit?: (messageId: string, content: string) => void | Promise<void>;
   onSetActiveSwipe?: (messageId: string, index: number) => void;
   onPeekPrompt?: () => void;
   onToggleHiddenFromAI?: (messageId: string, current: boolean) => void;
@@ -329,6 +328,8 @@ export const ConversationMessage = memo(function ConversationMessage({
 }: ConversationMessageProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(message.content);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const [showActions, setShowActions] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
@@ -337,14 +338,13 @@ export const ConversationMessage = memo(function ConversationMessage({
   const [imageLightbox, setImageLightbox] = useState<{ url: string; prompt?: string | null } | null>(null);
   const editRef = useRef<HTMLTextAreaElement>(null);
   const lastMessageTapAtRef = useRef(0);
-  const hasInput = useChatStore((s) => s.currentInput.trim().length > 0);
   const guideGenerations = useUIStore((s) => s.guideGenerations);
   const chatFontSize = useUIStore((s) => s.chatFontSize);
   const showMessageNumbers = useUIStore((s) => s.showMessageNumbers);
   const collapseHiddenMessages = useUIStore((s) => s.summaryPopoverSettings.collapseHiddenMessages);
   const editMessagesOnDoubleClick = useUIStore((s) => s.editMessagesOnDoubleClick);
   const messageTextStyle = useMemo<CSSProperties>(() => ({ fontSize: `${chatFontSize}px` }), [chatFontSize]);
-  const isGuided = guideGenerations && hasInput;
+  const isGuided = guideGenerations;
   const regenerateButtonTitle = isGuided ? "Regenerate (guided)" : "Regenerate";
   const regenerateGuidedClass = isGuided
     ? "text-[var(--primary)] bg-[var(--primary)]/15 ring-1 ring-[var(--primary)]/30 hover:text-[var(--primary)] hover:bg-[var(--primary)]/20"
@@ -579,6 +579,8 @@ export const ConversationMessage = memo(function ConversationMessage({
   }, [renderedContent]);
 
   const startEditing = useCallback(() => {
+    setEditError(null);
+    setEditSaving(false);
     setEditing(true);
     setEditValue(message.content);
     requestAnimationFrame(() => {
@@ -663,13 +665,22 @@ export const ConversationMessage = memo(function ConversationMessage({
   const editValueRef = useRef(editValue);
   editValueRef.current = editValue;
 
-  const handleSaveEdit = useCallback(() => {
+  const handleSaveEdit = useCallback(async () => {
+    if (editSaving) return;
     const val = editValueRef.current.trim();
-    if (val !== message.content) {
-      onEdit?.(message.id, val);
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      if (val !== message.content) {
+        await onEdit?.(message.id, val);
+      }
+      setEditing(false);
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : "Could not save edit.");
+    } finally {
+      setEditSaving(false);
     }
-    setEditing(false);
-  }, [message.content, message.id, onEdit]);
+  }, [editSaving, message.content, message.id, onEdit]);
 
   // System messages — minimal display
   if (isSystem) {
@@ -1107,20 +1118,29 @@ export const ConversationMessage = memo(function ConversationMessage({
               onKeyDown={(e) => {
                 if (e.key === "Escape") {
                   e.preventDefault();
-                  setEditing(false);
+                  if (!editSaving) setEditing(false);
                 }
               }}
+              disabled={editSaving}
             />
+            {editError && <div className="text-[0.6875rem] text-red-300/90">{editError}</div>}
             <div className="flex items-center gap-2 text-[0.6875rem] text-[var(--muted-foreground)]">
               <button
-                onClick={() => setEditing(false)}
+                onClick={() => {
+                  if (!editSaving) setEditing(false);
+                }}
+                disabled={editSaving}
                 className="text-foreground/70 hover:underline hover:text-foreground"
               >
                 cancel
               </button>
               <span>·</span>
-              <button onClick={handleSaveEdit} className="text-foreground/70 hover:underline hover:text-foreground">
-                save
+              <button
+                onClick={() => void handleSaveEdit()}
+                disabled={editSaving}
+                className="text-foreground/70 hover:underline hover:text-foreground"
+              >
+                {editSaving ? "saving" : "save"}
               </button>
             </div>
           </div>

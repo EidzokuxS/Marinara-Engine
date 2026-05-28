@@ -19,6 +19,7 @@
     "check:rust:deny": "cargo deny --manifest-path src-tauri/Cargo.toml check --config deny.toml",
     "check:rust:deps": "cargo machete src-tauri",
     "check:docs": "node scripts/check-docs.mjs",
+    "graphify:patch": "node scripts/patch-graphify-portable-paths.mjs",
     "check:unused": "knip",
     "check": "pnpm check:architecture && pnpm check:frontend && pnpm check:rust && pnpm check:docs",
     "test": "vitest run",
