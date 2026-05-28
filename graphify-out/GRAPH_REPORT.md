@@ -1,16 +1,16 @@
 # Graph Report - MarinaraEngine-Refactor  (2026-05-29)
 
 ## Corpus Check
-- 850 files · ~2,816,048 words
+- 850 files · ~2,816,131 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 10346 nodes · 22412 edges · 456 communities (420 shown, 36 thin omitted)
+- 10348 nodes · 22415 edges · 456 communities (420 shown, 36 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 269 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `e7a12079`
+- Built from commit: `fabec9b0`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -567,7 +567,7 @@ Nodes (49): resolveLiveTestMacros(), CharacterFieldMacroName, CharacterMacroProf
 
 ### Community 26 - "Community 26"
 Cohesion: 0.04
-Nodes (53): ALL_STEPS, CharacterAvatarImage(), CharacterSetupOption, ConnectionSetupOption, formatPersonaLabel(), getCharacterAvatarCrop(), getPersonaTitle(), PersonaDisplayInfo (+45 more)
+Nodes (55): ALL_STEPS, CharacterAvatarImage(), CharacterSetupOption, ConnectionSetupOption, formatPersonaLabel(), getCharacterAvatarCrop(), getPersonaTitle(), PersonaDisplayInfo (+47 more)
 
 ### Community 27 - "Community 27"
 Cohesion: 0.08
@@ -1994,7 +1994,7 @@ Cohesion: 0.46
 Nodes (6): estimatedMessageTokens(), estimatedTokens(), firstHistoryIndex(), fitMessagesToContextWindow(), historyCount(), truncateOldestHistory()
 
 ## Knowledge Gaps
-- **3214 isolated node(s):** `arrowParens`, `endOfLine`, `printWidth`, `semi`, `singleQuote` (+3209 more)
+- **3216 isolated node(s):** `arrowParens`, `endOfLine`, `printWidth`, `semi`, `singleQuote` (+3211 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **36 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -2008,7 +2008,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Why does `readString()` connect `Community 13` to `Community 129`, `Community 34`, `Community 7`, `Community 8`, `Community 107`, `Community 44`, `Community 78`, `Community 15`, `Community 18`, `Community 179`, `Community 149`, `Community 278`, `Community 23`, `Community 121`, `Community 61`?**
   _High betweenness centrality (0.012) - this node is a cross-community bridge._
 - **What connects `arrowParens`, `endOfLine`, `printWidth` to the rest of the system?**
-  _3247 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _3249 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Community 0` be split into smaller, more focused modules?**
   _Cohesion score 0.004395604395604396 - nodes in this community are weakly interconnected._
 - **Should `Community 1` be split into smaller, more focused modules?**

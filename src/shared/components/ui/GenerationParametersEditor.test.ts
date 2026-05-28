@@ -30,6 +30,28 @@ describe("GenerationParametersEditor parameter overrides", () => {
     ).toEqual({ maxTokens: 1200 });
   });
 
+  it("projects chat overrides onto connection defaults without prompt preset values", () => {
+    const connectionDefaults = getEditableGenerationParameters(ROLEPLAY_PARAMETER_DEFAULTS, {
+      temperature: 0.2,
+      maxTokens: 4096,
+    });
+    const promptDefaults = getEditableGenerationParameters(connectionDefaults, {
+      temperature: 0.8,
+      topP: 0.7,
+    });
+    const chatEffectiveParams = getEditableGenerationParameters(promptDefaults, {
+      maxTokens: 1200,
+    });
+    const chatOverrides = getEditableGenerationParameterOverrides(promptDefaults, chatEffectiveParams);
+
+    expect(chatOverrides).toEqual({ maxTokens: 1200 });
+    expect(getEditableGenerationParameters(connectionDefaults, chatOverrides)).toMatchObject({
+      temperature: 0.2,
+      topP: ROLEPLAY_PARAMETER_DEFAULTS.topP,
+      maxTokens: 1200,
+    });
+  });
+
   it("compares custom parameters by value instead of object key order", () => {
     const defaults = getEditableGenerationParameters(ROLEPLAY_PARAMETER_DEFAULTS, {
       customParameters: { provider: { b: 2, a: 1 } },

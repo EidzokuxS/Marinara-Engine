@@ -6184,6 +6184,9 @@ function AdvancedParametersSection({
   const params = generationParameterRecord(metadata.chatParameters);
   const retainedNonEditableParams = retainNonEditableGenerationParameters(params);
   const effectiveParams = getEditableGenerationParameters(defaults, params);
+  const currentEditableOverrides = getEditableGenerationParameterOverrides(defaults, effectiveParams);
+  // Save connection defaults from connection-scoped values only; prompt presets are chat/runtime inheritance.
+  const connectionScopedParams = getEditableGenerationParameters(connectionDefaults, currentEditableOverrides);
 
   const setParameters = (next: EditableGenerationParameters) => {
     const editableOverrides = getEditableGenerationParameterOverrides(defaults, next) ?? {};
@@ -6238,7 +6241,7 @@ function AdvancedParametersSection({
                   onClick={() => {
                     saveDefaults.mutate({
                       id: connectionId,
-                      params: effectiveParams as unknown as Record<string, unknown>,
+                      params: connectionScopedParams as unknown as Record<string, unknown>,
                     });
                   }}
                   className="w-full rounded-lg bg-[var(--primary)]/10 px-3 py-1.5 text-[0.625rem] font-medium text-[var(--primary)] ring-1 ring-[var(--primary)]/20 transition-colors hover:bg-[var(--primary)]/20"
