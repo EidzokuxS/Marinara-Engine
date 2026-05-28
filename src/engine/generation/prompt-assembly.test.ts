@@ -21,42 +21,42 @@ function section(overrides: Row & Pick<Row, "id" | "name" | "role">): Row {
 
 function storageWithSections(sections: Row[]): StorageGateway {
   return {
-    list: async <T,>(entity: string, options?: { filters?: Record<string, unknown> }) => {
+    list: async <T>(entity: string, options?: { filters?: Record<string, unknown> }) => {
       if (entity === "prompts") return [{ id: "preset", isDefault: false }] as T[];
       if (entity === "prompt-sections") {
         return sections.filter((row) => row.presetId === options?.filters?.presetId) as T[];
       }
       return [] as T[];
     },
-    get: async <T,>() => null as T | null,
-    create: async <T,>() => ({}) as T,
-    update: async <T,>() => ({}) as T,
+    get: async <T>() => null as T | null,
+    create: async <T>() => ({}) as T,
+    update: async <T>() => ({}) as T,
     delete: async () => ({ deleted: true }),
     listChatMessages: async () => [],
-    createChatMessage: async <T,>() => ({}) as T,
-    updateChatMessage: async <T,>() => ({}) as T,
+    createChatMessage: async <T>() => ({}) as T,
+    updateChatMessage: async <T>() => ({}) as T,
     deleteChatMessage: async () => ({ deleted: true }),
-    patchChatMessageExtra: async <T,>() => ({}) as T,
-    addChatMessageSwipe: async <T,>() => ({}) as T,
-    patchChatMetadata: async <T,>() => ({}) as T,
-    patchChatSummaries: async <T,>() => ({}) as T,
+    patchChatMessageExtra: async <T>() => ({}) as T,
+    addChatMessageSwipe: async <T>() => ({}) as T,
+    patchChatMetadata: async <T>() => ({}) as T,
+    patchChatSummaries: async <T>() => ({}) as T,
     listChatMemories: async () => [],
-    getWorldState: async <T,>() => null as T | null,
-    saveTrackerSnapshot: async <T,>() => ({}) as T,
+    getWorldState: async <T>() => null as T | null,
+    saveTrackerSnapshot: async <T>() => ({}) as T,
     listLorebookEntries: async () => [],
     createLorebookEntries: async () => [],
-    promptFull: async <T,>() => null as T | null,
+    promptFull: async <T>() => null as T | null,
   };
 }
 
 function storageWithPreset(preset: Row, sections: Row[], variables: Row[] = []): StorageGateway {
   return {
     ...storageWithSections(sections),
-    get: async <T,>(entity: string, id: string) => {
+    get: async <T>(entity: string, id: string) => {
       if (entity === "prompts" && id === preset.id) return preset as T;
       return null;
     },
-    list: async <T,>(entity: string, options?: { filters?: Record<string, unknown> }) => {
+    list: async <T>(entity: string, options?: { filters?: Record<string, unknown> }) => {
       if (entity === "prompts") return [preset] as T[];
       if (entity === "prompt-sections") {
         return sections.filter((row) => row.presetId === options?.filters?.presetId) as T[];
@@ -72,11 +72,11 @@ function storageWithPreset(preset: Row, sections: Row[], variables: Row[] = []):
 function storageWithPrompts(prompts: Row[], sections: Row[], variables: Row[] = []): StorageGateway {
   return {
     ...storageWithSections(sections),
-    get: async <T,>(entity: string, id: string) => {
+    get: async <T>(entity: string, id: string) => {
       if (entity === "prompts") return (prompts.find((prompt) => prompt.id === id) as T) ?? null;
       return null;
     },
-    list: async <T,>(entity: string, options?: { filters?: Record<string, unknown> }) => {
+    list: async <T>(entity: string, options?: { filters?: Record<string, unknown> }) => {
       if (entity === "prompts") return prompts as T[];
       if (entity === "prompt-sections") {
         return sections.filter((row) => row.presetId === options?.filters?.presetId) as T[];
@@ -93,7 +93,7 @@ function storageWithSectionsAndRegex(sections: Row[], regexScripts: Row[]): Stor
   const base = storageWithSections(sections);
   return {
     ...base,
-    list: async <T,>(entity: string, options?: { filters?: Record<string, unknown> }) => {
+    list: async <T>(entity: string, options?: { filters?: Record<string, unknown> }) => {
       if (entity === "regex-scripts") return regexScripts as T[];
       return base.list<T>(entity, options);
     },
@@ -103,7 +103,7 @@ function storageWithSectionsAndRegex(sections: Row[], regexScripts: Row[]): Stor
 function storageWithCharacters(characters: Row[]): StorageGateway {
   return {
     ...storageWithSections([]),
-    list: async <T,>(entity: string) => {
+    list: async <T>(entity: string) => {
       if (entity === "characters") return characters as T[];
       if (entity === "personas") return [] as T[];
       if (entity === "prompts") return [] as T[];
@@ -111,7 +111,7 @@ function storageWithCharacters(characters: Row[]): StorageGateway {
       if (entity === "regex-scripts") return [] as T[];
       return [] as T[];
     },
-    get: async <T,>(entity: string, id: string) => {
+    get: async <T>(entity: string, id: string) => {
       if (entity === "characters") return (characters.find((character) => character.id === id) as T) ?? null;
       return null;
     },
@@ -122,11 +122,11 @@ function storageWithPersonas(sections: Row[], personas: Row[]): StorageGateway {
   const base = storageWithSections(sections);
   return {
     ...base,
-    list: async <T,>(entity: string, options?: { filters?: Record<string, unknown> }) => {
+    list: async <T>(entity: string, options?: { filters?: Record<string, unknown> }) => {
       if (entity === "personas") return personas as T[];
       return base.list<T>(entity, options);
     },
-    get: async <T,>(entity: string, id: string) => {
+    get: async <T>(entity: string, id: string) => {
       if (entity === "personas") return (personas.find((persona) => persona.id === id) as T) ?? null;
       return base.get<T>(entity, id);
     },
@@ -137,11 +137,11 @@ function storageWithSectionsAndCharacters(sections: Row[], characters: Row[]): S
   const base = storageWithSections(sections);
   return {
     ...base,
-    list: async <T,>(entity: string, options?: { filters?: Record<string, unknown> }) => {
+    list: async <T>(entity: string, options?: { filters?: Record<string, unknown> }) => {
       if (entity === "characters") return characters as T[];
       return base.list<T>(entity, options);
     },
-    get: async <T,>(entity: string, id: string) => {
+    get: async <T>(entity: string, id: string) => {
       if (entity === "characters") return (characters.find((character) => character.id === id) as T) ?? null;
       return base.get<T>(entity, id);
     },
@@ -151,14 +151,14 @@ function storageWithSectionsAndCharacters(sections: Row[], characters: Row[]): S
 function storageWithLore(entries: Row[]): StorageGateway {
   return {
     ...storageWithSections([]),
-    list: async <T,>(entity: string) => {
+    list: async <T>(entity: string) => {
       if (entity === "lorebooks") return [{ id: "lorebook", enabled: true, isGlobal: true }] as T[];
       if (entity === "regex-scripts") return [] as T[];
       if (entity === "personas") return [] as T[];
       if (entity === "prompts") return [] as T[];
       return [] as T[];
     },
-    listLorebookEntries: async <T,>() => entries as T[],
+    listLorebookEntries: async <T>() => entries as T[],
   };
 }
 
@@ -260,19 +260,16 @@ describe("assembleGenerationPrompt macro parity", () => {
   it("loads extension fields and dialogue examples into wrapped character markers", async () => {
     const assembly = await assembleGenerationPrompt(
       {
-        ...storageWithPreset(
-          { id: "preset", wrapFormat: "xml" },
-          [
-            section({
-              id: "character",
-              name: "Character Definitions",
-              role: "system",
-              markerConfig: { type: "character" },
-              sortOrder: 0,
-            }),
-          ],
-        ),
-        get: async <T,>(entity: string, id: string) => {
+        ...storageWithPreset({ id: "preset", wrapFormat: "xml" }, [
+          section({
+            id: "character",
+            name: "Character Definitions",
+            role: "system",
+            markerConfig: { type: "character" },
+            sortOrder: 0,
+          }),
+        ]),
+        get: async <T>(entity: string, id: string) => {
           if (entity === "prompts" && id === "preset") return { id: "preset", wrapFormat: "xml" } as T;
           if (entity === "characters" && id === "char-a") {
             return {
@@ -320,19 +317,16 @@ describe("assembleGenerationPrompt macro parity", () => {
 
   it("sends only the responding character card for individual roleplay groups", async () => {
     const storage = {
-      ...storageWithPreset(
-        { id: "preset", wrapFormat: "xml" },
-        [
-          section({
-            id: "character",
-            name: "Character Definitions",
-            role: "system",
-            markerConfig: { type: "character" },
-            sortOrder: 0,
-          }),
-        ],
-      ),
-      get: async <T,>(entity: string, id: string) => {
+      ...storageWithPreset({ id: "preset", wrapFormat: "xml" }, [
+        section({
+          id: "character",
+          name: "Character Definitions",
+          role: "system",
+          markerConfig: { type: "character" },
+          sortOrder: 0,
+        }),
+      ]),
+      get: async <T>(entity: string, id: string) => {
         if (entity === "prompts" && id === "preset") return { id: "preset", wrapFormat: "xml" } as T;
         if (entity === "characters" && id === "char-a") {
           return { id: "char-a", data: { name: "Aster", description: "ASTER CARD" } } as T;
@@ -434,6 +428,47 @@ describe("assembleGenerationPrompt macro parity", () => {
     expect(assembly.promptPresetId).toBe("chat-preset");
     expect(assembly.messages[0]?.content).toContain("<main_prompt>");
     expect(assembly.messages[0]?.content).toContain("Use the Dottore XML format.");
+  });
+
+  it("uses the chat preset before an existing connection preset", async () => {
+    const assembly = await assembleGenerationPrompt(
+      storageWithPrompts(
+        [
+          { id: "chat-preset", isDefault: false, wrapFormat: "xml", parameters: {} },
+          { id: "connection-preset", isDefault: false, wrapFormat: "xml", parameters: {} },
+        ],
+        [
+          section({
+            id: "chat-main",
+            presetId: "chat-preset",
+            name: "Main Prompt",
+            role: "system",
+            content: "Use the selected Dottore chat preset.",
+            sortOrder: 0,
+          }),
+          section({
+            id: "connection-main",
+            presetId: "connection-preset",
+            name: "Main Prompt",
+            role: "system",
+            content: "Use the generic connection preset.",
+            sortOrder: 0,
+          }),
+        ],
+      ),
+      {
+        chat: { id: "chat", mode: "roleplay", promptPresetId: "chat-preset" },
+        storedMessages: [],
+        connection: { promptPresetId: "connection-preset" },
+        request: { ...request, promptPresetId: "" },
+        latestUserInput: "",
+      },
+    );
+
+    const prompt = assembly.messages.map((message) => message.content).join("\n\n");
+    expect(assembly.promptPresetId).toBe("chat-preset");
+    expect(prompt).toContain("Use the selected Dottore chat preset.");
+    expect(prompt).not.toContain("Use the generic connection preset.");
   });
 
   it("collapses excessive blank lines in preset sections and history messages", async () => {
@@ -844,15 +879,18 @@ describe("assembleGenerationPrompt connected conversation notes", () => {
 describe("assembleGenerationPrompt game character sheets", () => {
   it("includes RPG stats from game character cards in the GM context", async () => {
     const assembly = await assembleGenerationPrompt(
-      storageWithSectionsAndCharacters([], [
-        {
-          id: "char-a",
-          data: {
-            name: "Aster",
-            description: "A careful scout.",
+      storageWithSectionsAndCharacters(
+        [],
+        [
+          {
+            id: "char-a",
+            data: {
+              name: "Aster",
+              description: "A careful scout.",
+            },
           },
-        },
-      ]),
+        ],
+      ),
       {
         chat: {
           id: "game-chat",
@@ -1119,7 +1157,7 @@ describe("assembleGenerationPrompt conversation scene awareness gates", () => {
     const base = storageWithSections([]);
     const storage: StorageGateway = {
       ...base,
-      listChatMemories: async <T,>() =>
+      listChatMemories: async <T>() =>
         [
           {
             id: "provider-hit",

@@ -378,6 +378,93 @@ describe("createGenerationAgentRuntime", () => {
     ]);
   });
 
+  it("groups same-connection post-processing agents into one batch request", async () => {
+    const calls: LlmRequest[] = [];
+    const llm: LlmGateway = {
+      async *stream(request) {
+        calls.push(request);
+        yield {
+          type: "token",
+          text: [
+            '<result agent="world-state">{ "updates": [] }</result>',
+            '<result agent="expression">{ "expressions": [] }</result>',
+            '<result agent="background">{ "chosen": "lab.png" }</result>',
+          ].join("\n"),
+        };
+      },
+      async complete() {
+        return "";
+      },
+      async listModels() {
+        return [];
+      },
+    };
+    const runtime = await createGenerationAgentRuntime(
+      {
+        storage: storage([
+          {
+            id: "world",
+            type: "world-state",
+            name: "World State",
+            enabled: true,
+            phase: "post_processing",
+            connectionId: null,
+            model: "agent-model",
+            promptTemplate: "Track world state.",
+            settings: { includeParallelResults: false },
+          },
+          {
+            id: "expression",
+            type: "expression",
+            name: "Expression Engine",
+            enabled: true,
+            phase: "post_processing",
+            connectionId: null,
+            model: "agent-model",
+            promptTemplate: "Pick expressions.",
+            settings: { includeParallelResults: true },
+          },
+          {
+            id: "background",
+            type: "background",
+            name: "Background",
+            enabled: true,
+            phase: "post_processing",
+            connectionId: null,
+            model: "agent-model",
+            promptTemplate: "Pick a background.",
+            settings: { includePreGenInjections: true },
+          },
+        ]),
+        llm,
+        integrations,
+      },
+      {
+        chat: { id: "chat-a", metadata: { activeAgentIds: ["world", "expression", "background"] } },
+        connection: { id: "chat-connection", model: "chat-model" },
+        storedMessages: [{ role: "user", content: "The lab door opens." }],
+        characters: [],
+        persona: null,
+        activatedLorebookEntries: [],
+        chatSummary: null,
+      },
+    );
+
+    const results = await runtime.runPost("Dottore gestures to the room.");
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.parameters).toMatchObject({ maxTokens: 12288 });
+    const systemPrompt = calls[0]?.messages[0]?.content ?? "";
+    expect(systemPrompt).toContain('<agent_task id="world-state" name="World State">');
+    expect(systemPrompt).toContain('<agent_task id="expression" name="Expression Engine">');
+    expect(systemPrompt).toContain('<agent_task id="background" name="Background">');
+    expect(results).toEqual([
+      expect.objectContaining({ agentType: "world-state", success: true }),
+      expect.objectContaining({ agentType: "expression", success: true }),
+      expect.objectContaining({ agentType: "background", success: true }),
+    ]);
+  });
+
   it("passes roleplay Spotify DJ source constraints to the Spotify agent", async () => {
     const calls: LlmRequest[] = [];
     const runtime = await createGenerationAgentRuntime(

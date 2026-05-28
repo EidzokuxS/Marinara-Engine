@@ -58,7 +58,7 @@ type StreamEvent = { type: string; data?: unknown };
 type QueryClient = ReturnType<typeof useQueryClient>;
 type GenerationStreamFactory = (args: GenerateArgs, signal: AbortSignal) => AsyncGenerator<StreamEvent>;
 const HAPTIC_COMMAND_INTERVAL_MS = 225;
-const STREAM_REVEAL_INTERVAL_MS = 24;
+const TYPEWRITER_MAX_FRAME_MS = 120;
 const scheduledChatRefreshTimers = new Map<string, number>();
 
 function errorMessage(error: unknown): string {
@@ -96,14 +96,6 @@ function resolveUserTimeZone(): string {
   // Kept so non-default callers (e.g. remote runtime in future) can override
   // via the `userTimeZone` input field.
   return Intl.DateTimeFormat().resolvedOptions().timeZone;
-}
-
-function streamRevealChunkLength(speed: number, pendingLength: number): number {
-  if (pendingLength <= 0) return 0;
-  if (speed >= 100) return pendingLength;
-  const normalized = Math.max(1, Math.min(100, Math.trunc(speed)));
-  const eased = Math.pow(normalized / 100, 1.3);
-  return Math.max(1, Math.min(pendingLength, Math.round(1 + eased * 18)));
 }
 
 function sortMessagesByCreatedAt(messages: Message[]): Message[] {
@@ -914,19 +906,22 @@ export async function runGenerationWithUi(
 
   let received = "";
   let receivedThinking = false;
-  let revealedLength = 0;
+  let visibleStreamText = "";
   let pendingReveal = "";
-  let revealTimer: ReturnType<typeof setTimeout> | null = null;
+  let typewriterFrame: number | null = null;
+  let typewriterActive = false;
+  let lastTypewriterPaintAt = 0;
+  let typewriterRemainder = 0;
   const revealWaiters = new Set<() => void>();
 
-  const clearRevealTimer = () => {
-    if (!revealTimer) return;
-    clearTimeout(revealTimer);
-    revealTimer = null;
+  const cancelTypewriterFrame = () => {
+    if (typewriterFrame === null) return;
+    window.cancelAnimationFrame(typewriterFrame);
+    typewriterFrame = null;
   };
 
   const resolveRevealWaiters = () => {
-    if (pendingReveal.length > 0) return;
+    if (pendingReveal.length > 0 || typewriterActive) return;
     for (const resolve of revealWaiters) resolve();
     revealWaiters.clear();
   };
@@ -938,36 +933,66 @@ export async function runGenerationWithUi(
 
   const appendVisibleStreamText = (text: string) => {
     if (!text) return;
-    revealedLength += text.length;
-    useChatStore.getState().appendStreamBuffer(text, chatId);
+    visibleStreamText += text;
+    useChatStore.getState().setStreamBuffer(visibleStreamText, chatId);
     useChatStore.getState().setMariPhase(chatId, "thinking");
   };
 
-  const revealNextStreamSlice = () => {
-    revealTimer = null;
+  const typewriterCharsPerSecond = () => {
+    const speed = useUIStore.getState().streamingSpeed;
+    if (speed >= 100) return Infinity;
+    const normalized = Math.max(0, Math.min(1, (speed - 1) / 98));
+    return 12 + Math.pow(normalized, 1.65) * 248;
+  };
+
+  const revealNextStreamSlice = (now = performance.now()) => {
+    typewriterFrame = null;
     if (pendingReveal.length === 0) {
+      typewriterActive = false;
+      lastTypewriterPaintAt = 0;
+      typewriterRemainder = 0;
       resolveRevealWaiters();
       return;
     }
-    const { streamingSpeed } = useUIStore.getState();
-    const size = streamRevealChunkLength(streamingSpeed, pendingReveal.length);
+
+    if (!lastTypewriterPaintAt) lastTypewriterPaintAt = now;
+    const elapsedMs = Math.min(TYPEWRITER_MAX_FRAME_MS, Math.max(0, now - lastTypewriterPaintAt));
+    lastTypewriterPaintAt = now;
+
+    const charsPerSecond = typewriterCharsPerSecond();
+    const size =
+      charsPerSecond === Infinity
+        ? pendingReveal.length
+        : (() => {
+            typewriterRemainder += (charsPerSecond * elapsedMs) / 1000;
+            const count = Math.min(Math.floor(typewriterRemainder), pendingReveal.length);
+            if (count < 1) return 0;
+            typewriterRemainder -= count;
+            return count;
+          })();
+
+    if (size < 1) {
+      typewriterFrame = window.requestAnimationFrame(revealNextStreamSlice);
+      return;
+    }
+
     const next = pendingReveal.slice(0, size);
     pendingReveal = pendingReveal.slice(size);
     appendVisibleStreamText(next);
     if (pendingReveal.length > 0) {
-      revealTimer = setTimeout(revealNextStreamSlice, STREAM_REVEAL_INTERVAL_MS);
+      typewriterFrame = window.requestAnimationFrame(revealNextStreamSlice);
       return;
     }
+    typewriterActive = false;
+    lastTypewriterPaintAt = 0;
+    typewriterRemainder = 0;
     resolveRevealWaiters();
   };
 
   const scheduleStreamReveal = () => {
-    if (revealTimer || pendingReveal.length === 0) return;
-    if (useUIStore.getState().streamingSpeed >= 100) {
-      revealNextStreamSlice();
-      return;
-    }
-    revealTimer = setTimeout(revealNextStreamSlice, STREAM_REVEAL_INTERVAL_MS);
+    if (typewriterActive || pendingReveal.length === 0) return;
+    typewriterActive = true;
+    typewriterFrame = window.requestAnimationFrame(revealNextStreamSlice);
   };
 
   const enqueueVisibleStreamText = (text: string) => {
@@ -978,19 +1003,23 @@ export async function runGenerationWithUi(
 
   const flushVisibleStreamText = async () => {
     if (controller.signal.aborted) {
-      clearRevealTimer();
+      cancelTypewriterFrame();
       pendingReveal = "";
+      typewriterActive = false;
       resolveAllRevealWaiters();
       return;
     }
     if (!useUIStore.getState().enableStreaming) {
-      clearRevealTimer();
+      cancelTypewriterFrame();
       pendingReveal = "";
-      appendVisibleStreamText(received.slice(revealedLength));
-      resolveRevealWaiters();
+      typewriterActive = false;
+      visibleStreamText = received;
+      useChatStore.getState().setStreamBuffer(visibleStreamText, chatId);
+      if (visibleStreamText) useChatStore.getState().setMariPhase(chatId, "thinking");
+      resolveAllRevealWaiters();
       return;
     }
-    if (pendingReveal.length === 0) return;
+    if (pendingReveal.length === 0 && !typewriterActive) return;
     await new Promise<void>((resolve) => {
       revealWaiters.add(resolve);
       scheduleStreamReveal();
@@ -1000,8 +1029,9 @@ export async function runGenerationWithUi(
   const ownsChatController = () => useChatStore.getState().abortControllers.get(chatId) === controller;
 
   const stopGenerationUi = () => {
-    clearRevealTimer();
+    cancelTypewriterFrame();
     pendingReveal = "";
+    typewriterActive = false;
     resolveAllRevealWaiters();
     const state = useChatStore.getState();
     if (!ownsChatController()) return;

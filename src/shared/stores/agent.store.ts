@@ -5,6 +5,58 @@ import { create } from "zustand";
 import type { AgentDebugEntry, AgentResult, CharacterCardFieldUpdate } from "../../engine/contracts/types/agent";
 import type { AgentFailure } from "../lib/agent-failures";
 
+const MAX_DEBUG_STRING_LENGTH = 4_000;
+const MAX_DEBUG_ARRAY_ITEMS = 20;
+const MAX_DEBUG_OBJECT_KEYS = 40;
+
+function truncateDebugString(value: string): string {
+  if (value.length <= MAX_DEBUG_STRING_LENGTH) return value;
+  return `${value.slice(0, MAX_DEBUG_STRING_LENGTH)}\n\n[debug output truncated: ${value.length - MAX_DEBUG_STRING_LENGTH} more characters]`;
+}
+
+function compactDebugValue(value: unknown, depth = 0): unknown {
+  if (typeof value === "string") return truncateDebugString(value);
+  if (typeof value !== "object" || value === null) return value;
+  if (depth >= 3) return "[debug output truncated: nested value]";
+  if (Array.isArray(value)) {
+    const compacted = value.slice(0, MAX_DEBUG_ARRAY_ITEMS).map((item) => compactDebugValue(item, depth + 1));
+    if (value.length > MAX_DEBUG_ARRAY_ITEMS) {
+      compacted.push(`[debug output truncated: ${value.length - MAX_DEBUG_ARRAY_ITEMS} more items]`);
+    }
+    return compacted;
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  const compacted: Record<string, unknown> = {};
+  for (const [key, item] of entries.slice(0, MAX_DEBUG_OBJECT_KEYS)) {
+    compacted[key] = compactDebugValue(item, depth + 1);
+  }
+  if (entries.length > MAX_DEBUG_OBJECT_KEYS) {
+    compacted.__truncated = `${entries.length - MAX_DEBUG_OBJECT_KEYS} more keys`;
+  }
+  return compacted;
+}
+
+function compactDebugEntry(entry: Omit<AgentDebugEntry, "timestamp"> & { timestamp?: number }): AgentDebugEntry {
+  return {
+    ...entry,
+    timestamp: entry.timestamp ?? Date.now(),
+    args: entry.args?.map((arg) => compactDebugValue(arg)),
+    results: entry.results?.map((result) => compactDebugValue(result) as AgentResult),
+    toolCall: entry.toolCall
+      ? {
+          ...entry.toolCall,
+          arguments: truncateDebugString(entry.toolCall.arguments),
+        }
+      : undefined,
+    toolResult: entry.toolResult
+      ? {
+          ...entry.toolResult,
+          result: truncateDebugString(entry.toolResult.result),
+        }
+      : undefined,
+  };
+}
+
 /**
  * A character_card_update result awaiting user confirmation.
  *
@@ -127,7 +179,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   addResult: (agentId, result) =>
     set((s) => {
       const results = new Map(s.lastResults);
-      results.set(agentId, result);
+      results.set(agentId, compactDebugValue(result) as AgentResult);
       // Cap at 50 entries — evict oldest
       if (results.size > 50) {
         const first = results.keys().next().value;
@@ -138,7 +190,7 @@ export const useAgentStore = create<AgentState>((set) => ({
 
   addDebugEntry: (entry) =>
     set((s) => ({
-      debugLog: [...s.debugLog, { ...entry, timestamp: entry.timestamp ?? Date.now() }].slice(-100),
+      debugLog: [...s.debugLog, compactDebugEntry(entry)].slice(-100),
     })),
 
   clearDebugLog: () => set({ debugLog: [], lastResults: new Map() }),

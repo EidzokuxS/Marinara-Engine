@@ -54,10 +54,10 @@ export function buildGenerationPromptPresetCandidates(args: {
   }
   pushUnique(candidates, seen, asNonEmptyString(args.requestPromptPresetId), "request");
 
+  pushUnique(candidates, seen, asNonEmptyString(args.chatPromptPresetId), "chat");
+
   if (supportsConnectionPromptPresetOverride(args.chatMode)) {
     pushUnique(candidates, seen, asNonEmptyString(args.connectionPromptPresetId), "connection");
   }
-
-  pushUnique(candidates, seen, asNonEmptyString(args.chatPromptPresetId), "chat");
   return candidates;
 }

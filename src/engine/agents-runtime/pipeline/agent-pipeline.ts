@@ -40,7 +40,7 @@ function groupByProviderModel(agents: ResolvedAgent[]): AgentGroup[] {
   const groups = new Map<string, AgentGroup>();
 
   for (const agent of agents) {
-    const key = `${agent.connectionId ?? "default"}::${agent.model}::${postProcessingDataKey(agent)}`;
+    const key = `${agent.connectionId ?? "default"}::${agent.model}`;
     let group = groups.get(key);
     if (!group) {
       group = {
@@ -56,16 +56,9 @@ function groupByProviderModel(agents: ResolvedAgent[]): AgentGroup[] {
   return Array.from(groups.values());
 }
 
-function postProcessingDataKey(agent: ResolvedAgent): string {
-  if (agent.phase !== "post_processing") return "default";
-  return [
-    agent.settings.includePreGenInjections === true ? "pre-gen" : "no-pre-gen",
-    agent.settings.includeParallelResults === true ? "parallel" : "no-parallel",
-  ].join(":");
-}
-
-function buildAgentContext(agent: ResolvedAgent, context: AgentContext): AgentContext {
-  if (agent.phase !== "post_processing") {
+function buildAgentContext(agentOrAgents: ResolvedAgent | ResolvedAgent[], context: AgentContext): AgentContext {
+  const agents = Array.isArray(agentOrAgents) ? agentOrAgents : [agentOrAgents];
+  if (!agents.some((agent) => agent.phase === "post_processing")) {
     return {
       ...context,
       preGenInjections: undefined,
@@ -73,10 +66,13 @@ function buildAgentContext(agent: ResolvedAgent, context: AgentContext): AgentCo
     };
   }
 
+  const includePreGenInjections = agents.some((agent) => agent.settings.includePreGenInjections === true);
+  const includeParallelResults = agents.some((agent) => agent.settings.includeParallelResults === true);
+
   return {
     ...context,
-    preGenInjections: agent.settings.includePreGenInjections === true ? (context.preGenInjections ?? []) : undefined,
-    parallelResults: agent.settings.includeParallelResults === true ? (context.parallelResults ?? []) : undefined,
+    preGenInjections: includePreGenInjections ? (context.preGenInjections ?? []) : undefined,
+    parallelResults: includeParallelResults ? (context.parallelResults ?? []) : undefined,
   };
 }
 
@@ -102,7 +98,7 @@ async function executeGroup(
       maxTokens: normalizeAgentMaxTokens(agent.settings.maxTokens),
     })),
   });
-  const groupContext = buildAgentContext(group.agents[0]!, context);
+  const groupContext = buildAgentContext(group.agents, context);
   // Separate tool-using agents (can't be batched) from regular agents
   const toolAgents = group.agents.filter((a) => a.toolContext?.tools.length);
   const batchAgents = group.agents.filter((a) => !a.toolContext?.tools.length);

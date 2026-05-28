@@ -420,9 +420,9 @@ function ChatSettingsDrawerInner({
         : null,
     [isRoleplayMode, presets],
   );
-  // Roleplay connection prompt presets intentionally override chat prompt presets, matching generation assembly.
+  // The chat's selected prompt preset is the user's scene-level choice; connection presets are a fallback.
   const advancedPromptPresetId = isRoleplayMode
-    ? (connectionPromptPresetId ?? chatPromptPresetId ?? defaultPromptPresetId)
+    ? (chatPromptPresetId ?? connectionPromptPresetId ?? defaultPromptPresetId)
     : null;
   const { data: currentPromptPresetFull } = usePresetFull(isConversation ? null : chatPromptPresetId);
   const { data: advancedPromptPresetFull, isLoading: advancedPromptPresetLoading } =
@@ -6237,9 +6237,7 @@ function generationParameterRecord(value: unknown): Record<string, unknown> {
 
 function retainNonEditableGenerationParameters(value: unknown): Record<string, unknown> {
   const record = generationParameterRecord(value);
-  return Object.fromEntries(
-    Object.entries(record).filter(([key]) => !EDITABLE_GENERATION_PARAMETER_KEY_SET.has(key)),
-  );
+  return Object.fromEntries(Object.entries(record).filter(([key]) => !EDITABLE_GENERATION_PARAMETER_KEY_SET.has(key)));
 }
 
 function AdvancedParametersSection({
@@ -6342,7 +6340,8 @@ function AdvancedParametersSection({
                 onClick={() => {
                   updateMeta.mutate({
                     id: chat.id,
-                    chatParameters: Object.keys(retainedNonEditableParams).length > 0 ? retainedNonEditableParams : null,
+                    chatParameters:
+                      Object.keys(retainedNonEditableParams).length > 0 ? retainedNonEditableParams : null,
                   });
                 }}
                 className="w-full rounded-lg bg-[var(--secondary)] px-3 py-1.5 text-[0.625rem] text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)]"

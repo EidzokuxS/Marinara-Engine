@@ -708,6 +708,25 @@ function escapeRegex(str: string): string {
 
 // ── Helpers ──
 
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function xmlText(tag: string, value: unknown): string | null {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text ? `<${tag}>${escapeXml(text)}</${tag}>` : null;
+}
+
+function pushXmlText(parts: string[], tag: string, value: unknown): void {
+  const line = xmlText(tag, value);
+  if (line) parts.push(line);
+}
+
 function makeError(config: AgentExecConfig, error: string, startTime: number): AgentResult {
   return {
     agentId: config.id,
@@ -728,7 +747,7 @@ function formatAgentParseError(config: Pick<AgentExecConfig, "name">, error: str
 function shouldRunAgentIndividually(config: Pick<AgentExecConfig, "type">): boolean {
   // These agents either need compact prompts or carry large private extras that
   // must not be merged into unrelated batched agent requests.
-  return config.type === "expression" || config.type === "lorebook-keeper";
+  return config.type === "lorebook-keeper";
 }
 
 function buildStandardAgentMessages(config: AgentExecConfig, template: string, context: AgentContext): ChatMessage[] {
@@ -1102,35 +1121,52 @@ function buildLoreBlock(context: AgentContext): string {
   if (context.characters.length > 0) {
     parts.push(`<characters>`);
     for (const char of context.characters) {
-      parts.push(`- ${char.name}: ${char.description.slice(0, 2000)}`);
+      parts.push(`<character id="${escapeXml(char.id)}" name="${escapeXml(char.name)}">`);
+      pushXmlText(parts, "name", char.name);
+      pushXmlText(parts, "description", char.description);
+      pushXmlText(parts, "personality", char.personality);
+      pushXmlText(parts, "backstory", char.backstory);
+      pushXmlText(parts, "appearance", char.appearance);
+      pushXmlText(parts, "scenario", char.scenario);
+      pushXmlText(parts, "first_mes", char.firstMes);
+      pushXmlText(parts, "mes_example", char.mesExample);
+      pushXmlText(parts, "creator_notes", char.creatorNotes);
+      pushXmlText(parts, "system_prompt", char.systemPrompt);
+      pushXmlText(parts, "post_history_instructions", char.postHistoryInstructions);
+      parts.push(`</character>`);
     }
     parts.push(`</characters>`);
   }
 
   if (context.persona) {
-    parts.push(`<user_persona>`);
-    parts.push(`Name: ${context.persona.name}`);
-    if (context.persona.description) parts.push(`Description: ${context.persona.description.slice(0, 2000)}`);
-    if (context.persona.personality) parts.push(`Personality: ${context.persona.personality}`);
-    if (context.persona.backstory) parts.push(`Backstory: ${context.persona.backstory}`);
-    if (context.persona.appearance) parts.push(`Appearance: ${context.persona.appearance}`);
-    if (context.persona.scenario) parts.push(`Scenario: ${context.persona.scenario}`);
+    parts.push(`<user_persona name="${escapeXml(context.persona.name)}">`);
+    pushXmlText(parts, "name", context.persona.name);
+    pushXmlText(parts, "description", context.persona.description);
+    pushXmlText(parts, "personality", context.persona.personality);
+    pushXmlText(parts, "backstory", context.persona.backstory);
+    pushXmlText(parts, "appearance", context.persona.appearance);
+    pushXmlText(parts, "scenario", context.persona.scenario);
     if (context.persona.personaStats?.enabled && context.persona.personaStats.bars.length > 0) {
-      parts.push(`Configured persona stat bars:`);
+      parts.push(`<persona_stats>`);
       for (const bar of context.persona.personaStats.bars) {
-        parts.push(`- ${bar.name}: ${bar.value}/${bar.max}`);
+        parts.push(
+          `<stat name="${escapeXml(bar.name)}" value="${bar.value}" max="${bar.max}" color="${escapeXml(bar.color)}" />`,
+        );
       }
+      parts.push(`</persona_stats>`);
     }
     if (context.persona.rpgStats?.enabled) {
       const rpg = context.persona.rpgStats;
-      parts.push(`RPG Stats:`);
-      parts.push(`- Max HP: ${rpg.hp.max}`);
+      parts.push(`<rpg_stats>`);
+      parts.push(`<hp value="${rpg.hp.value}" max="${rpg.hp.max}" />`);
       if (rpg.attributes.length > 0) {
-        parts.push(`Attributes:`);
+        parts.push(`<attributes>`);
         for (const attr of rpg.attributes) {
-          parts.push(`- ${attr.name}: ${attr.value}`);
+          parts.push(`<attribute name="${escapeXml(attr.name)}" value="${attr.value}" />`);
         }
+        parts.push(`</attributes>`);
       }
+      parts.push(`</rpg_stats>`);
     }
     parts.push(`</user_persona>`);
   }
@@ -1164,13 +1200,6 @@ function buildAvailableSpritesBlock(context: AgentContext): string {
 function buildAgentExtras(context: AgentContext, agentTypes: string[] = []): string {
   const parts: string[] = [];
 
-  const escapeXml = (value: string) =>
-    value
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&apos;");
   // Card Evolution Auditor needs the FULL character card (not just description)
   // so it can emit exact-match oldText edits. Gated on agent type because
   // forwarding every field would bloat context for agents that don't need it.

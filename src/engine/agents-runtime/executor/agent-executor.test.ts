@@ -190,6 +190,78 @@ describe("executeAgent result parsing", () => {
 });
 
 describe("executeAgentBatch fallback behavior", () => {
+  it("batches expression agents with other post-processing agents and includes full XML lore", async () => {
+    const calls: Array<{ messages: ChatMessage[]; options: ChatCompleteOptions }> = [];
+    const provider = providerWithResponses(
+      [
+        [
+          '<result agent="world-state">{ "updates": [] }</result>',
+          '<result agent="expression">{ "expressions": [] }</result>',
+          '<result agent="background">{ "chosen": "lab.png" }</result>',
+        ].join("\n"),
+      ],
+      calls,
+    );
+    const configs = [
+      agentConfig({ id: "world", type: "world-state", name: "World State", phase: "post_processing" }),
+      agentConfig({ id: "expression", type: "expression", name: "Expression Engine", phase: "post_processing" }),
+      agentConfig({ id: "background", type: "background", name: "Background", phase: "post_processing" }),
+    ];
+
+    const results = await executeAgentBatch(
+      configs,
+      {
+        ...baseContext,
+        mainResponse: "Dottore smiles.",
+        characters: [
+          {
+            id: "char-dottore",
+            name: "Dottore",
+            description: "Doctor description.",
+            personality: "Sharp and theatrical.",
+            backstory: "Exiled scholar.",
+            appearance: "Masked Harbinger.",
+            mesExample: '"Observe."',
+          },
+        ],
+        persona: {
+          name: "Mari",
+          description: "Engineer in Teyvat.",
+          personality: "Curious and stubborn.",
+          backstory: "Fell from another world.",
+          appearance: "Pink hair.",
+        },
+        memory: {
+          _availableSprites: [{ characterId: "char-dottore", characterName: "Dottore", expressions: ["happy"] }],
+          _availableBackgrounds: [{ filename: "lab.png", tags: ["lab"] }],
+        },
+      },
+      provider,
+      "agent-model",
+    );
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.options).toMatchObject({ maxTokens: 12288 });
+    const systemPrompt = calls[0]?.messages[0]?.content ?? "";
+    expect(systemPrompt).toContain('<agent_task id="world-state" name="World State">');
+    expect(systemPrompt).toContain('<agent_task id="expression" name="Expression Engine">');
+    expect(systemPrompt).toContain('<agent_task id="background" name="Background">');
+    expect(systemPrompt).toContain('<character id="char-dottore" name="Dottore">');
+    expect(systemPrompt).toContain("<description>Doctor description.</description>");
+    expect(systemPrompt).toContain("<personality>Sharp and theatrical.</personality>");
+    expect(systemPrompt).toContain("<backstory>Exiled scholar.</backstory>");
+    expect(systemPrompt).toContain("<appearance>Masked Harbinger.</appearance>");
+    expect(systemPrompt).toContain('<user_persona name="Mari">');
+    expect(systemPrompt).toContain("<personality>Curious and stubborn.</personality>");
+    expect(systemPrompt).toContain("<available_sprites>");
+    expect(systemPrompt).toContain("<available_backgrounds>");
+    expect(results).toEqual([
+      expect.objectContaining({ agentType: "world-state", success: true }),
+      expect.objectContaining({ agentType: "expression", success: true }),
+      expect.objectContaining({ agentType: "background", success: true }),
+    ]);
+  });
+
   it("keeps parsed batch results and retries only missing result blocks individually", async () => {
     const calls: Array<{ messages: ChatMessage[]; options: ChatCompleteOptions }> = [];
     const provider = providerWithResponses(
