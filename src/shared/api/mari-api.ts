@@ -1,5 +1,6 @@
 import type { MariEntryRequest, MariGatewayResponse, MariMessage } from "../../engine/mari/mari-entry";
 import { EMPTY_MARI_COMPACTION, type MariCompactionState } from "../../engine/mari/mari-history";
+import { appSettingsResponseSchema, appSettingsUpdateSchema } from "../../engine/contracts/schemas/app-settings.schema";
 import { storageApi } from "./storage-api";
 import { invokeTauri } from "./tauri-client";
 
@@ -87,7 +88,8 @@ function normalizeMariMessages(value: unknown): MariMessage[] {
 
 async function readSettingsValue(): Promise<Record<string, unknown>> {
   const record = await storageApi.get<ProfessorMariSettingsRecord>("app-settings", PROFESSOR_MARI_SETTINGS_ID);
-  return asRecord(record?.value);
+  const parsed = appSettingsResponseSchema.safeParse(record ?? { value: null });
+  return asRecord(parsed.success ? parsed.data.value : null);
 }
 
 async function saveSettingsPatch(patch: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -95,9 +97,10 @@ async function saveSettingsPatch(patch: Record<string, unknown>): Promise<Record
     ...(await readSettingsValue()),
     ...patch,
   };
+  const payload = appSettingsUpdateSchema.parse({ value });
   await storageApi.create("app-settings", {
     id: PROFESSOR_MARI_SETTINGS_ID,
-    value,
+    ...payload,
   });
   return value;
 }

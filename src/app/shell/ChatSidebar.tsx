@@ -50,6 +50,7 @@ import { showConfirmDialog } from "../../shared/lib/app-dialogs";
 import { useUIStore, type UserStatus } from "../../shared/stores/ui.store";
 import { cn, getAvatarCropStyle, type AvatarCropValue } from "../../shared/lib/utils";
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { CHAT_MODES } from "../../engine/contracts/constants/chat-modes";
 import type { ChatFolder } from "../../engine/contracts/types/chat";
 import { Modal } from "../../shared/components/ui/Modal";
 import { Reorder, useDragControls } from "framer-motion";
@@ -94,24 +95,24 @@ const MODE_CONFIG: Record<
 > = {
   conversation: {
     icon: <MessageSquare size="0.875rem" />,
-    label: "Conversation",
+    label: CHAT_MODES.conversation.name,
     shortLabel: "CONVO",
     bg: "linear-gradient(135deg, #4de5dd, #3ab8b1)",
-    description: "A straightforward AI conversation — no roleplay elements.",
+    description: CHAT_MODES.conversation.description,
   },
   roleplay: {
     icon: <BookOpen size="0.875rem" />,
-    label: "Roleplay",
+    label: CHAT_MODES.roleplay.name,
     shortLabel: "RP",
     bg: "linear-gradient(135deg, #eb8951, #d97530)",
-    description: "Immersive roleplay with characters, game state tracking, and world simulation.",
+    description: CHAT_MODES.roleplay.description,
   },
   game: {
     icon: <Theater size="0.875rem" />,
-    label: "Game",
+    label: CHAT_MODES.game.name,
     shortLabel: "GM",
     bg: "linear-gradient(135deg, #e15c8c, #c94776)",
-    description: "AI-managed singleplayer RPG with a Game Master, party, dice, maps, and quests.",
+    description: CHAT_MODES.game.description,
   },
 };
 

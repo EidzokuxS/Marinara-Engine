@@ -52,6 +52,7 @@ vi.mock("../../../../shared/api/integration-utility-api", () => ({
 }));
 
 import { gameApi } from "./game-api";
+import { llmApi } from "../../../../shared/api/llm-api";
 
 function minimalSetupConfig(overrides: Partial<GameSetupConfig> = {}): GameSetupConfig {
   return {
@@ -264,5 +265,135 @@ describe("gameApi.startSession folderId inheritance", () => {
     const payloads = chatCreateCalls();
     expect(payloads).toHaveLength(1);
     expect(payloads[0]?.folderId).toBe("folder-session-1");
+  });
+});
+
+describe("gameApi.concludeSession summary normalization", () => {
+  beforeEach(() => {
+    Object.values(storageApiMock).forEach((fn) => fn.mockReset());
+  });
+
+  it("dedupes repeated session summary facts across buckets before saving metadata", async () => {
+    let chat = {
+      id: "chat-game",
+      name: "Game Session 1",
+      mode: "game",
+      characterIds: [],
+      metadata: {
+        gameSessionNumber: 1,
+        gameSessionStatus: "active",
+        gameJournal: [],
+        gameNpcs: [],
+        gameMap: null,
+      },
+    } as unknown as Chat;
+
+    storageApiMock.get.mockImplementation(async (entity: string, id: string) => {
+      if (entity === "chats" && id === chat.id) return chat;
+      return null;
+    });
+    storageApiMock.update.mockImplementation(async (entity: string, id: string, patch: Record<string, unknown>) => {
+      if (entity !== "chats" || id !== chat.id) return null;
+      chat = {
+        ...chat,
+        ...patch,
+        metadata: {
+          ...((chat.metadata ?? {}) as Record<string, unknown>),
+          ...((patch.metadata as Record<string, unknown> | undefined) ?? {}),
+        },
+      } as Chat;
+      return chat;
+    });
+
+    const result = await gameApi.concludeSession({
+      chatId: "chat-game",
+      summary: {
+        sessionNumber: 1,
+        summary: "The party found the moon key.",
+        resumePoint: "At the gate.",
+        partyDynamics: "Steady.",
+        partyState: "Ready.",
+        keyDiscoveries: ["Mira apologized.", "Found the moon key.", "Found the moon key!"],
+        characterMoments: ["Mira apologized."],
+        littleDetails: [],
+        npcUpdates: [],
+        statsSnapshot: {},
+        nextSessionRequest: null,
+        timestamp: "2026-05-29T00:00:00.000Z",
+      },
+    });
+
+    expect(result.summary.characterMoments).toEqual(["Mira apologized."]);
+    expect(result.summary.keyDiscoveries).toEqual(["Found the moon key."]);
+    expect((result.sessionChat.metadata as Record<string, unknown>).gamePreviousSessionSummaries).toEqual([
+      result.summary,
+    ]);
+  });
+});
+
+describe("gameApi.partyTurn prompt wiring", () => {
+  beforeEach(() => {
+    Object.values(storageApiMock).forEach((fn) => fn.mockReset());
+    vi.mocked(llmApi.complete).mockReset();
+  });
+
+  it("uses the structured party prompt helper when generating party banter", async () => {
+    storageApiMock.get.mockImplementation(async (entity: string, id: string) => {
+      if (entity === "chats" && id === "chat-game") {
+        return {
+          id,
+          mode: "game",
+          metadata: {
+            gameActiveState: "dialogue",
+            gamePlayerName: "Captain",
+            gameCharacterCards: [
+              {
+                name: "Mira",
+                shortDescription: "Scout with dry humor.",
+                class: "Ranger",
+              },
+            ],
+          },
+        };
+      }
+      return null;
+    });
+    vi.mocked(llmApi.complete).mockResolvedValueOnce(`[Mira] [main] [smirk]: "On it."`);
+    storageApiMock.create.mockResolvedValueOnce({ id: "message-party" });
+
+    const result = await gameApi.partyTurn({
+      chatId: "chat-game",
+      connectionId: "connection-party",
+      narration: "A locked gate blocks the path.",
+      playerAction: "Ask Mira what she sees.",
+    });
+
+    expect(result.raw).toBe(`[Mira] [main] [smirk]: "On it."`);
+    expect(result.messageId).toBe("message-party");
+    expect(vi.mocked(llmApi.complete).mock.calls[0]?.[0]).toMatchObject({
+      connectionId: "connection-party",
+      messages: [
+        expect.objectContaining({
+          role: "system",
+          content: expect.stringContaining("<party_agent_role>"),
+        }),
+        expect.objectContaining({
+          role: "user",
+          content: expect.stringContaining("A locked gate blocks the path."),
+        }),
+      ],
+    });
+    const systemPrompt = vi.mocked(llmApi.complete).mock.calls[0]?.[0]?.messages[0]?.content ?? "";
+    expect(systemPrompt).toContain(`<party_member name="Mira">`);
+    expect(systemPrompt).toContain("Current game state: dialogue");
+    expect(systemPrompt).toContain("NEVER generate dialogue lines for the player (Captain)");
+    expect(storageApiMock.create).toHaveBeenCalledWith(
+      "messages",
+      expect.objectContaining({
+        chatId: "chat-game",
+        role: "assistant",
+        content: `[party-turn]\n[Mira] [main] [smirk]: "On it."`,
+      }),
+    );
   });
 });

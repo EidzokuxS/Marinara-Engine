@@ -15,6 +15,11 @@ import {
   type PromptPreviewInput,
   type PromptPreviewResult,
 } from "../../../../engine/generation/prompt-preview";
+import {
+  createChatSchema,
+  createMessageSchema,
+  summariesPatchSchema,
+} from "../../../../engine/contracts/schemas/chat.schema";
 import { boolish } from "../../../../engine/generation/runtime-records";
 import { backfillConversationSummaries } from "../../../../engine/modes/chat/core/summaries/auto-summary.service";
 import { appendChatSummaryEntryToMetadata } from "../../../../engine/shared/text/chat-summary-entries";
@@ -43,6 +48,9 @@ import type {
   DaySummaryEntry,
   WeekSummaryEntry,
 } from "../../../../engine/contracts/types/chat";
+import type {
+  ChatMemoryRecallImportResult,
+} from "../../../../engine/contracts/types/export";
 
 export { chatKeys } from "../query-keys";
 export type { BulkChatExportFormat, ChatTranscriptExportFormat } from "../lib/chat-transcript-export";
@@ -418,11 +426,6 @@ export function useExportChatMemories(chatId: string | null) {
   });
 }
 
-export type ChatMemoryRecallImportResult = {
-  imported: number;
-  skipped: number;
-};
-
 export function useImportChatMemories(chatId: string | null) {
   const qc = useQueryClient();
   return useMutation({
@@ -496,7 +499,7 @@ export function useCreateChat() {
       connectionId?: string | null;
       personaId?: string | null;
       promptPresetId?: string | null;
-    }) => storageApi.create<Chat>("chats", data),
+    }) => storageApi.create<Chat>("chats", createChatSchema.parse(data)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: chatKeys.list() });
       qc.invalidateQueries({ queryKey: chatKeys.summaries() });
@@ -724,7 +727,7 @@ export function useUpdateChatSummaries() {
       id: string;
       daySummaries?: Record<string, DaySummaryEntry>;
       weekSummaries?: Record<string, WeekSummaryEntry>;
-    }) => storageApi.patchChatSummaries<Chat>(id, body),
+    }) => storageApi.patchChatSummaries<Chat>(id, summariesPatchSchema.parse(body)),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: chatKeys.detail(vars.id) });
     },
@@ -746,8 +749,10 @@ export function useBackfillConversationSummaries() {
 export function useCreateMessage(chatId: string | null) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { role: string; content: string; characterId?: string | null }) =>
-      storageApi.createChatMessage<Message>(chatId!, data),
+    mutationFn: (data: { role: string; content: string; characterId?: string | null }) => {
+      const payload = createMessageSchema.parse({ chatId: chatId!, ...data });
+      return storageApi.createChatMessage<Message>(payload.chatId, payload);
+    },
     onSuccess: () => {
       if (chatId) {
         qc.invalidateQueries({ queryKey: chatKeys.messages(chatId) });

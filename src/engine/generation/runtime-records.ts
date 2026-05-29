@@ -1,3 +1,5 @@
+import { systemClock } from "../core/clock";
+import { createId } from "../core/ids";
 import { readString } from "../shared/value-readers";
 
 export { readString };
@@ -75,12 +77,9 @@ export function hiddenFromAi(message: JsonRecord): boolean {
 }
 
 export function newId(prefix: string): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `${prefix}_${crypto.randomUUID()}`;
-  }
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  return createId(prefix);
 }
 
 export function nowIso(): string {
-  return new Date().toISOString();
+  return systemClock.nowIso();
 }

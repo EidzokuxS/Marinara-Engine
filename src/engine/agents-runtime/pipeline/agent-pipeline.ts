@@ -1,4 +1,5 @@
 import type { AgentContext, AgentResult } from "../../contracts/types/agent";
+import type { LorebookEntry } from "../../contracts/types/lorebook";
 import type { BaseLLMProvider } from "../../generation-core/llm/base-provider.js";
 import { createAgentRuntimeDebug } from "../debug.js";
 import {
@@ -7,6 +8,8 @@ import {
   type AgentExecConfig,
   type AgentToolContext,
 } from "../executor/agent-executor.js";
+import { executeKnowledgeRetrieval } from "../knowledge/knowledge-retrieval.js";
+import { executeKnowledgeRouter, type KnowledgeRouterCandidateOptions } from "../knowledge/knowledge-router.js";
 
 /** A fully resolved agent ready for execution. */
 export interface ResolvedAgent extends AgentExecConfig {
@@ -14,6 +17,12 @@ export interface ResolvedAgent extends AgentExecConfig {
   model: string;
   /** Optional tool context for agents that need function calling (e.g., Spotify). */
   toolContext?: AgentToolContext;
+  /** Source material selected for Knowledge Retrieval. */
+  knowledgeSourceMaterial?: string;
+  /** Candidate lorebook entries selected for Knowledge Router. */
+  knowledgeRouterEntries?: LorebookEntry[];
+  /** Router scan/semantic options derived from the current generation context. */
+  knowledgeRouterOptions?: KnowledgeRouterCandidateOptions;
 }
 
 export interface AgentInjection {
@@ -75,6 +84,32 @@ function buildAgentContext(agentOrAgents: ResolvedAgent | ResolvedAgent[], conte
   };
 }
 
+function shouldExecuteIndividually(agent: ResolvedAgent): boolean {
+  return (
+    agent.type === "knowledge-retrieval" ||
+    agent.type === "knowledge-router" ||
+    Boolean(agent.toolContext?.tools.length)
+  );
+}
+
+async function executeResolvedAgent(agent: ResolvedAgent, context: AgentContext): Promise<AgentResult> {
+  const agentContext = buildAgentContext(agent, context);
+  if (agent.type === "knowledge-retrieval") {
+    return executeKnowledgeRetrieval(agent, agentContext, agent.provider, agent.model, agent.knowledgeSourceMaterial ?? "");
+  }
+  if (agent.type === "knowledge-router") {
+    return executeKnowledgeRouter(
+      agent,
+      agentContext,
+      agent.provider,
+      agent.model,
+      agent.knowledgeRouterEntries ?? [],
+      agent.knowledgeRouterOptions,
+    );
+  }
+  return executeAgent(agent, agentContext, agent.provider, agent.model, agent.toolContext);
+}
+
 /**
  * Execute a group of agents — batch if >1, single if 1.
  * Tool-using agents are extracted from batches and run individually.
@@ -88,12 +123,14 @@ async function executeGroup(
   const logger = createAgentRuntimeDebug(context);
   const groupContext = buildAgentContext(group.agents, context);
   // Separate tool-using agents (can't be batched) from regular agents
-  const toolAgents = group.agents.filter((a) => a.toolContext?.tools.length);
-  const batchAgents = group.agents.filter((a) => !a.toolContext?.tools.length);
+  const individualAgents = group.agents.filter(shouldExecuteIndividually);
+  const batchAgents = group.agents.filter((agent) => !shouldExecuteIndividually(agent));
+  const toolAgentTypes = individualAgents.filter((agent) => agent.toolContext?.tools.length).map((agent) => agent.type);
 
-  logger.debug("[agent-pipeline] executeGroup: %d batchable, %d tool-using %j", batchAgents.length, toolAgents.length, {
+  logger.debug("[agent-pipeline] executeGroup: %d batchable, %d individual %j", batchAgents.length, individualAgents.length, {
     batch: batchAgents.map((a) => a.type),
-    tools: toolAgents.map((a) => a.type),
+    tools: toolAgentTypes,
+    individual: individualAgents.map((a) => a.type),
   });
 
   // Safe callback wrapper — errors in the callback (e.g. writing to a
@@ -117,15 +154,9 @@ async function executeGroup(
     allResults.push(...batchResults);
   }
 
-  // Run tool-using agents individually (they need the tool loop)
-  for (const agent of toolAgents) {
-    const result = await executeAgent(
-      agent,
-      buildAgentContext(agent, context),
-      agent.provider,
-      agent.model,
-      agent.toolContext,
-    );
+  // Run agents that need isolated prompts, source material, or tool loops individually.
+  for (const agent of individualAgents) {
+    const result = await executeResolvedAgent(agent, context);
     safeOnResult(result);
     allResults.push(result);
   }

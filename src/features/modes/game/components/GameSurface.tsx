@@ -85,6 +85,7 @@ import { resolveCombatFullBodyPose, resolveDialogueFullBodyPose } from "../lib/g
 import { characterNamesMatch, findNamedEntry } from "../lib/game-character-name-match";
 import { normalizeGameSegmentEdit, serializeGameSegmentEdit, type GameSegmentEdit } from "../lib/game-segment-edits";
 import { useGameSceneAnalysis } from "../hooks/use-game-scene-analysis";
+import { usePartyTurn } from "../hooks/use-party-turn";
 import { parsePartyDialogue } from "../lib/party-dialogue-parser";
 import { dispatchSpotifySceneTrackChange } from "../../../../shared/lib/spotify-playback-events";
 import { ActiveWorldInfoButton, ActiveWorldInfoModal } from "../../../runtime/visuals/index";
@@ -202,6 +203,9 @@ type SpotifyDevicesSnapshot = {
 
 type GameDirectAddressMode = "party" | "gm";
 
+const PARTY_TURN_MESSAGE_RE = /^\[(?:party-turn|party-chat)]\s*/i;
+const GAME_DIRECT_ADDRESS_RE = /^\[(?:To the party|To the GM)]\s*/i;
+
 function isMobileGameViewport(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
 }
@@ -220,6 +224,21 @@ function getGameDirectAddressMode(content: string | null | undefined): GameDirec
   if (normalized.startsWith("[to the party]")) return "party";
   if (normalized.startsWith("[to the gm]")) return "gm";
   return null;
+}
+
+function isPartyTurnMessage(message: Message): boolean {
+  return (
+    (message.role === "assistant" || message.role === "narrator") &&
+    PARTY_TURN_MESSAGE_RE.test(message.content.trimStart())
+  );
+}
+
+function stripPartyTurnMarker(content: string): string {
+  return content.trimStart().replace(PARTY_TURN_MESSAGE_RE, "").trim();
+}
+
+function stripGameDirectAddressPrefix(content: string): string {
+  return content.replace(GAME_DIRECT_ADDRESS_RE, "").trim();
 }
 
 function getConfiguredGameAssetImageSizes(): NonNullable<GameAssetGenerationPayload["imageSizes"]> {
@@ -1542,7 +1561,7 @@ function formatCombatLogContent(message: Message): string {
   if (message.role === "assistant" || message.role === "narrator") {
     return parseGmTags(content).cleanContent || content;
   }
-  return content.replace(/^\[(?:To the party|To the GM)]\s*/i, "").trim();
+  return stripGameDirectAddressPrefix(content);
 }
 
 function buildSegmentEditMap(chatMeta: Record<string, unknown>): Map<string, GameSegmentEdit> {
@@ -1917,9 +1936,10 @@ export function GameSurface({
   const [combatStartMessageId, setCombatStartMessageId] = useState<string | null>(null);
   const [activeDirections, setActiveDirections] = useState<DirectionCommand[]>([]);
   const [partyDialogue, setPartyDialogue] = useState<PartyDialogueLine[]>([]);
-  // Populated from `[party-chat]` assistant messages so party overlay boxes can
-  // render beside the main narration.
+  // Populated from separate party-turn assistant messages so party overlay boxes can
+  // render beside the main GM narration.
   const [partyChatMessageId, setPartyChatMessageId] = useState<string | null>(null);
+  const [partyChatInput, setPartyChatInput] = useState<string | null>(null);
   // The active assistant message ID whose typewriter is currently complete, or null if
   // either no message is finished typing or it's the *previous* turn's completion.
   // We track the message ID rather than a boolean so a stale completion from the
@@ -2198,8 +2218,10 @@ export function GameSurface({
     prevActiveChatRef.current = activeChatId;
     recentMusicHistoryRef.current = normalizeRecentMusicHistory(chatMeta.gameRecentMusic);
     recentSpotifyTrackHistoryRef.current = normalizeRecentSpotifyTrackHistory(chatMeta.gameRecentSpotifyTracks);
+    partyDialogueRestoredRef.current = false;
     setPartyDialogue([]);
     setPartyChatMessageId(null);
+    setPartyChatInput(null);
     setQueuedQte(null);
     setQueuedEncounter(null);
     setQueuedCombatGeneration(null);
@@ -2688,6 +2710,7 @@ export function GameSurface({
   const _rollEncounter = useRollEncounter();
   const _updateReputation = useUpdateReputation();
   const _journalEntry = useJournalEntry();
+  const partyTurn = usePartyTurn();
   void _rollEncounter;
   void _journalEntry;
   const transitionGameState = useTransitionGameState();
@@ -2697,7 +2720,9 @@ export function GameSurface({
   // Process GM tags from the latest assistant message
   const latestAssistantMsg = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i]!.role === "assistant" || messages[i]!.role === "narrator") return messages[i];
+      const message = messages[i]!;
+      if (isPartyTurnMessage(message)) continue;
+      if (message.role === "assistant" || message.role === "narrator") return message;
     }
     return null;
   }, [messages]);
@@ -3098,19 +3123,26 @@ export function GameSurface({
     useSpotifyGameMusic,
   ]);
 
-  // ── Restore party dialogue from the last [party-chat] message on page load ──
+  // ── Restore party dialogue from the last separate party-turn message on page load ──
   useEffect(() => {
     if (partyDialogueRestoredRef.current || isMessagesLoading) return;
     partyDialogueRestoredRef.current = true;
-    // Find the last assistant message that contains [party-chat] content
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i]!;
-      if ((msg.role === "assistant" || msg.role === "narrator") && msg.content.startsWith("[party-chat]")) {
-        const raw = msg.content.replace(/^\[party-chat\]\n?/, "");
+      if (isPartyTurnMessage(msg)) {
+        const raw = stripPartyTurnMarker(msg.content);
         const lines = parsePartyDialogue(raw);
         if (lines.length > 0) {
           setPartyDialogue(lines);
           setPartyChatMessageId(msg.id);
+        }
+        for (let userIndex = i - 1; userIndex >= 0; userIndex--) {
+          const candidate = messages[userIndex]!;
+          if (candidate.role === "user") {
+            setPartyChatInput(stripGameDirectAddressPrefix(candidate.content));
+            break;
+          }
+          if (candidate.role === "assistant" || candidate.role === "narrator") break;
         }
         break;
       }
@@ -3466,6 +3498,7 @@ export function GameSurface({
     setSceneAnalysisFailed(false);
     setPartyDialogue([]);
     setPartyChatMessageId(null);
+    setPartyChatInput(null);
     setQueuedQte(null);
     setQueuedEncounter(null);
     setQueuedCombatGeneration(null);
@@ -6816,6 +6849,26 @@ export function GameSurface({
         moveOnMap.mutate({ chatId: activeChatId, position: pendingMapMove.position, mapId: activeMapId });
       }
       setActiveChoices(null);
+      if (getGameDirectAddressMode(message) === "party" && !attachments?.length) {
+        const playerAction = stripGameDirectAddressPrefix(message);
+        setPartyDialogue([]);
+        setPartyChatMessageId(null);
+        setPartyChatInput(playerAction);
+        try {
+          await createMessage.mutateAsync({ role: "user", content: message });
+          const result = await partyTurn.mutateAsync({
+            chatId: activeChatId,
+            narration: latestNarrationText,
+            playerAction,
+            connectionId: chat.connectionId ?? undefined,
+          });
+          setPartyDialogue(result.lines);
+          setPartyChatMessageId(result.messageId);
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : "The party did not respond.");
+        }
+        return;
+      }
       sendMessage(message, attachments);
       if (options?.commitPendingMove && pendingMapMove) {
         setPendingMapMove(null);
@@ -6826,9 +6879,12 @@ export function GameSurface({
       activeMapId,
       clearPendingInteractiveCommands,
       createMessage,
+      chat.connectionId,
       moveOnMap,
       pendingInterrupt,
       pendingMapMove,
+      partyTurn,
+      latestNarrationText,
       sendMessage,
       sessionInteractive,
       updateMessage,
@@ -8359,7 +8415,9 @@ export function GameSurface({
                           onSegmentEnter={handleSegmentEnter}
                           showUserMessages
                           partyDialogue={partyDialogue}
+                          partyChatInput={partyChatInput}
                           partyChatMessageId={partyChatMessageId}
+                          partyTurnPending={partyTurn.isPending}
                           scenePreparing={scenePreparing}
                           assetsGenerating={!!pendingAssetGeneration}
                           sceneAnalysisFailed={sceneAnalysisFailed}
@@ -8439,7 +8497,9 @@ export function GameSurface({
                       onSegmentEnter={handleSegmentEnter}
                       showUserMessages
                       partyDialogue={partyDialogue}
+                      partyChatInput={partyChatInput}
                       partyChatMessageId={partyChatMessageId}
+                      partyTurnPending={partyTurn.isPending}
                       scenePreparing={scenePreparing}
                       assetsGenerating={!!pendingAssetGeneration}
                       sceneAnalysisFailed={sceneAnalysisFailed}

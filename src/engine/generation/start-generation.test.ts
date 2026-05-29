@@ -784,14 +784,37 @@ describe("startGeneration generation replay metadata", () => {
       },
     });
     expect(createChatMessage.mock.calls.some(([, value]) => value.role === "assistant")).toBe(false);
-    expect((streamedRequests[0] as { messages: Array<{ role: string; content: string }> }).messages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          role: "user",
-          content: expect.stringContaining("Direction:\na tiny answer"),
-        }),
-      ]),
+    const promptText = (streamedRequests[0] as { messages: Array<{ role: string; content: string }> }).messages
+      .map((message) => message.content)
+      .join("\n");
+    expect(promptText).toContain("You are now writing as Chai");
+    expect(promptText).toContain("Additional direction for this reply: a tiny answer");
+  });
+
+  it("resolves custom impersonate prompt template placeholders before calling the model", async () => {
+    const { deps, streamedRequests } = generationDepsForChat({
+      chatPatch: {
+        personaId: "persona-1",
+      },
+      personas: [{ id: "persona-1", name: "Chai", description: "A brisk captain with clipped wording." }],
+    });
+
+    await drainGeneration(
+      startGeneration(deps, {
+        chatId: "chat-1",
+        userMessage: "give a direct order",
+        impersonate: true,
+        impersonateBlockAgents: true,
+        impersonatePromptTemplate:
+          "Write as {{user}}. Profile: {{persona_description}}. Requested beat: {{impersonate_direction}}",
+      }),
     );
+
+    const promptText = (streamedRequests[0] as { messages: Array<{ content: string }> }).messages
+      .map((message) => message.content)
+      .join("\n");
+    expect(promptText).toContain("Write as Chai. Profile: A brisk captain with clipped wording");
+    expect(promptText).toContain("Requested beat: give a direct order");
   });
 
   it("adds swipes when regenerating an impersonated user message", async () => {

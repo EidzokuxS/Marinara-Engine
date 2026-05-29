@@ -3,6 +3,10 @@
 // ──────────────────────────────────────────────
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { connectionKeys } from "../query-keys";
+import {
+  createConnectionSchema,
+  type CreateConnectionInput,
+} from "../../../../engine/contracts/schemas/connection.schema";
 import { connectionCommandApi } from "../../../../shared/api/connection-command-api";
 import { storageApi } from "../../../../shared/api/storage-api";
 import { storageCommandsApi } from "../../../../shared/api/storage-commands-api";
@@ -20,6 +24,8 @@ export type ClaudeSubscriptionDiagnosis = {
   response: string;
   latencyMs: number;
 };
+
+type CreateConnectionVariables = Partial<CreateConnectionInput> & Pick<CreateConnectionInput, "name" | "provider">;
 
 export function useConnections(enabled = true) {
   return useQuery({
@@ -42,14 +48,7 @@ export function useConnection(id: string | null) {
 export function useCreateConnection() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: {
-      name: string;
-      provider: string;
-      apiKey: string;
-      baseUrl?: string;
-      model?: string;
-      maxContext?: number;
-    }) => storageApi.create("connections", data),
+    mutationFn: (data: CreateConnectionVariables) => storageApi.create("connections", createConnectionSchema.parse(data)),
     onSuccess: () => qc.invalidateQueries({ queryKey: connectionKeys.list() }),
   });
 }

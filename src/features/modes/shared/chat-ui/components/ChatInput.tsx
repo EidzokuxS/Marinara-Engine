@@ -36,6 +36,7 @@ import { createInputMacroResolverForChat, isPromptPreviewMacro } from "../../../
 import { parseChatMetadata } from "../../../../../shared/lib/chat-display";
 import { formatTextQuotes } from "../../../../../shared/lib/dialogue-quotes";
 import { cn, getAvatarCropStyle, type AvatarCropValue } from "../../../../../shared/lib/utils";
+import { prepareImageAttachment } from "../../../../../shared/lib/chat-attachment-images";
 import { translateDraftText } from "../../../../../shared/lib/draft-translation";
 import { EmojiPicker } from "../../../../../shared/components/ui/EmojiPicker";
 import { SpeechToTextButton } from "../../../../../shared/components/ui/SpeechToTextButton";
@@ -369,22 +370,16 @@ export const ChatInput = memo(function ChatInput({
 
       for (const file of acceptedFiles) {
         const displayName = file.name || "pasted-file";
-        // Convert GIFs to PNG (Gemini and some providers don't support image/gif)
-        if (file.type === "image/gif") {
+        if (file.type.startsWith("image/")) {
           try {
-            const bitmap = await createImageBitmap(file);
-            const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-            const ctx = canvas.getContext("2d")!;
-            ctx.drawImage(bitmap, 0, 0);
-            const pngBlob = await canvas.convertToBlob({ type: "image/png" });
-            const data = await readFileAsDataUrl(pngBlob);
+            const prepared = await prepareImageAttachment(file, displayName);
             appendAttachmentForChat(originChatId, {
-              type: "image/png",
-              data,
-              name: displayName.replace(/\.gif$/i, ".png"),
+              type: prepared.type,
+              data: prepared.data,
+              name: prepared.name,
             });
           } catch {
-            toast.error(`Failed to convert ${displayName}`);
+            toast.error(`Failed to prepare ${displayName}`);
           } finally {
             adjustPendingAttachmentReads(originChatId, -1);
           }

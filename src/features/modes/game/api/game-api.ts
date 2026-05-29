@@ -1,6 +1,6 @@
 import type { Chat } from "../../../../engine/contracts/types/chat";
 import type { CombatAttack, CombatEnemy, CombatInitState, CombatMechanic, CombatPartyMember, EncounterSettings } from "../../../../engine/contracts/types/combat-encounter";
-import type { Combatant, CombatPlayerAction, GameActiveState, GameCheckpoint, GameMap, GameNpc, GameSetupConfig, HudWidget, SessionSummary } from "../../../../engine/contracts/types/game";
+import type { Combatant, CombatPlayerAction, GameActiveState, GameCheckpoint, GameMap, GameNpc, GameSetupConfig, HudWidget, PartyArc, SessionSummary } from "../../../../engine/contracts/types/game";
 import type { RPGAttributes } from "../../../../engine/contracts/types/game-state";
 import { ApiError, type JsonRepairRequest } from "../../../../shared/api/api-errors";
 import { gameAssetsApi } from "../../../../shared/api/assets-api";
@@ -17,7 +17,9 @@ import { processReputationActions } from "../../../../engine/modes/game/mechanic
 import { getGoverningAttribute, mapSheetAttributesToRPG, resolveSkillCheck } from "../../../../engine/modes/game/mechanics/skill-check.service";
 import { applyMoraleEvent, getMoraleTier, type MoraleEvent } from "../../../../engine/modes/game/mechanics/morale.service";
 import { getElementPreset, listElementPresets } from "../../../../engine/modes/game/mechanics/element-reactions.service";
+import { buildPartySystemPrompt } from "../../../../engine/modes/game/prompts/party-prompts";
 import { buildSessionConclusionPrompt, buildSetupPrompt } from "../../../../engine/modes/game/prompts/gm-prompts";
+import { dedupeSessionSummaryLists } from "../../../../engine/modes/game/state/session-summary-normalization";
 import { buildRecapPrompt, buildSessionCarryoverContext } from "../../../../engine/modes/game/state/session.service";
 import { validateTransition } from "../../../../engine/modes/game/state/state-machine.service";
 import { addCombatEntry, addEventEntry, addInventoryEntry, addLocationEntry, addNoteEntry, buildDeterministicSummary, buildStructuredRecap, createJournal, type Journal, type JournalEntry } from "../../../../engine/modes/game/world/journal.service";
@@ -485,6 +487,12 @@ function normalizeSessionSummaryPayload(
   nextSessionRequest?: string | null,
 ): SessionSummary {
   const record = asRecord(raw);
+  const factLists = dedupeSessionSummaryLists({
+    keyDiscoveries: normalizeSessionSummaryTextList(record.keyDiscoveries, fallback.keyDiscoveries),
+    characterMoments: normalizeSessionSummaryTextList(record.characterMoments, fallback.characterMoments),
+    littleDetails: normalizeSessionSummaryTextList(record.littleDetails, fallback.littleDetails),
+    npcUpdates: normalizeSessionSummaryTextList(record.npcUpdates, fallback.npcUpdates),
+  });
   return {
     sessionNumber: Number.isFinite(Number(record.sessionNumber)) ? Number(record.sessionNumber) : fallback.sessionNumber,
     summary: typeof record.summary === "string" && record.summary.trim() ? record.summary : fallback.summary,
@@ -496,22 +504,29 @@ function normalizeSessionSummaryPayload(
         : fallback.partyDynamics,
     partyState:
       typeof record.partyState === "string" && record.partyState.trim() ? record.partyState : fallback.partyState,
-    keyDiscoveries: Array.isArray(record.keyDiscoveries)
-      ? record.keyDiscoveries.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-      : fallback.keyDiscoveries,
-    characterMoments: Array.isArray(record.characterMoments)
-      ? record.characterMoments.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-      : fallback.characterMoments,
-    littleDetails: Array.isArray(record.littleDetails)
-      ? record.littleDetails.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-      : fallback.littleDetails,
+    keyDiscoveries: factLists.keyDiscoveries,
+    characterMoments: factLists.characterMoments,
+    littleDetails: factLists.littleDetails,
     statsSnapshot: Object.keys(asRecord(record.statsSnapshot)).length > 0 ? asRecord(record.statsSnapshot) : fallback.statsSnapshot,
-    npcUpdates: Array.isArray(record.npcUpdates)
-      ? record.npcUpdates.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-      : fallback.npcUpdates,
+    npcUpdates: factLists.npcUpdates,
     nextSessionRequest: nextSessionRequest ?? (typeof record.nextSessionRequest === "string" ? record.nextSessionRequest : fallback.nextSessionRequest ?? null),
     timestamp: typeof record.timestamp === "string" ? record.timestamp : nowIso(),
   };
+}
+
+function normalizeSessionSummaryTextList(raw: unknown, fallback: string[]): string[] {
+  return Array.isArray(raw)
+    ? raw.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : fallback;
+}
+
+function gameCardName(card: Record<string, unknown>, fallback: string): string {
+  const value = card.name;
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function gameCardPromptText(card: Record<string, unknown>): string {
+  return JSON.stringify(card, null, 2);
 }
 
 function gameSessionSortValue(chat: Chat): number {
@@ -1503,10 +1518,10 @@ export const gameApi = {
 
   async partyTurn(input: { chatId: string; narration: string; playerAction?: string; connectionId?: string | null; debugMode?: boolean }) {
     const meta = chatMeta(await getChat(input.chatId));
-    const cards = Array.isArray(meta.gameCharacterCards) ? meta.gameCharacterCards : [];
-    const names = cards.map((card) => asRecord(card).name).filter((name): name is string => typeof name === "string" && !!name.trim());
+    const cards = Array.isArray(meta.gameCharacterCards) ? meta.gameCharacterCards.map(asRecord) : [];
+    const names = cards.map((card, index) => gameCardName(card, `Party member ${index + 1}`));
     const partyNames = names.length ? names.join(", ") : "The party";
-    let raw = `[${partyNames}] [dialogue] [neutral]: We take this in and prepare for what comes next.`;
+    let raw = `[${partyNames}] [main] [neutral]: "We take this in and prepare for what comes next."`;
     if (input.connectionId) {
       try {
         raw = await llmApi.complete({
@@ -1514,7 +1529,17 @@ export const gameApi = {
           messages: [
             {
               role: "system",
-              content: `You write short party banter for a game. Reply using lines like [Name] [dialogue] [neutral]: text. Party: ${partyNames}.`,
+              content: buildPartySystemPrompt({
+                partyCards: cards.length
+                  ? cards.map((card, index) => ({
+                      name: gameCardName(card, `Party member ${index + 1}`),
+                      card: gameCardPromptText(card),
+                    }))
+                  : [{ name: partyNames, card: partyNames }],
+                playerName: typeof meta.gamePlayerName === "string" && meta.gamePlayerName.trim() ? meta.gamePlayerName : "Player",
+                gameActiveState: typeof meta.gameActiveState === "string" ? meta.gameActiveState : "exploration",
+                partyArcs: Array.isArray(meta.gamePartyArcs) ? (meta.gamePartyArcs as PartyArc[]) : [],
+              }),
             },
             {
               role: "user",
@@ -1524,11 +1549,11 @@ export const gameApi = {
           parameters: { temperature: 0.9, maxTokens: 1200 },
         });
       } catch {
-        raw = `[${partyNames}] [dialogue] [neutral]: We take this in and prepare for what comes next.`;
+        raw = `[${partyNames}] [main] [neutral]: "We take this in and prepare for what comes next."`;
       }
     }
-    const clean = raw.replace(/\[party-turn\]/gi, "").trim();
-    await createChatMessage(input.chatId, {
+    const clean = raw.replace(/\[(?:party-turn|party-chat)\]/gi, "").trim();
+    const message = await createChatMessage(input.chatId, {
       role: "assistant",
       characterId: null,
       content: `[party-turn]\n${clean}`,
@@ -1537,7 +1562,7 @@ export const gameApi = {
       activeSwipeIndex: 0,
     });
     mirrorGameMessageToDiscord(meta, clean, "Party");
-    return { raw: clean };
+    return { raw: clean, messageId: typeof message.id === "string" ? message.id : null };
   },
 
   async initCombatEncounter(input: {

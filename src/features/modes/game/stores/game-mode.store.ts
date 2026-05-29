@@ -4,6 +4,7 @@
 import { create } from "zustand";
 import { gameApi } from "../api/game-api";
 import type { GameActiveState, GameMap, GameNpc, DiceRollResult, HudWidget, GameBlueprint, WidgetUpdate } from "../../../../engine/contracts/types/game";
+import { sanitizeGameNpcAvatarUrls } from "../../../../engine/modes/game/assets/npc-avatar-utils";
 
 interface GameModeStore {
   /** The active game ID (groupId that links all sessions). */
@@ -280,7 +281,7 @@ export const useGameModeStore = create<GameModeStore>((set) => ({
         const preserved = existingByName.get((npc.name ?? "").toLowerCase());
         return preserved ? { ...npc, avatarUrl: preserved } : npc;
       });
-      return { npcs: merged };
+      return { npcs: sanitizeGameNpcAvatarUrls(merged) };
     }),
   patchNpcAvatars: (avatars) =>
     set((s) => {
@@ -307,7 +308,7 @@ export const useGameModeStore = create<GameModeStore>((set) => ({
       // prevents infinite render loops caused by useEffect → store update →
       // useSyncExternalStore synchronous re-subscription → repeat.
       if (!modified) return s;
-      return { npcs: nextNpcs };
+      return { npcs: sanitizeGameNpcAvatarUrls(nextNpcs) };
     }),
   setSetupActive: (active) => set({ isSetupActive: active }),
   setSetupStep: (step) => set({ setupStep: step }),

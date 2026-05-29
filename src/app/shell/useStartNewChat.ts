@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { CHAT_MODES } from "../../engine/contracts/constants/chat-modes";
 import type { ChatMode } from "../../engine/contracts/types/chat";
 import type { ChatPreset } from "../../engine/contracts/types/chat-preset";
 import { chatPresetKeys, useApplyChatPreset } from "../../features/catalog/chat-presets/index";
@@ -9,12 +10,6 @@ import { storageApi } from "../../shared/api/storage-api";
 import { filterLanguageGenerationConnections } from "../../shared/lib/connection-filters";
 import { useChatStore } from "../../shared/stores/chat.store";
 import { useUIStore } from "../../shared/stores/ui.store";
-
-const CHAT_MODE_LABELS: Partial<Record<ChatMode, string>> = {
-  conversation: "Conversation",
-  roleplay: "Roleplay",
-  game: "Game",
-};
 
 export function useStartNewChat() {
   const queryClient = useQueryClient();
@@ -61,7 +56,7 @@ export function useStartNewChat() {
 
       createChat.mutate(
         {
-          name: `New ${CHAT_MODE_LABELS[mode] ?? mode}`,
+          name: `New ${CHAT_MODES[mode]?.name ?? mode}`,
           mode,
           characterIds: [],
           connectionId: connectionRows[0]!.id,

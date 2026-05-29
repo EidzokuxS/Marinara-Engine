@@ -71,7 +71,7 @@ export const characterDataSchema = z.object({
   alternate_greetings: z.array(z.string()).default([]),
   extensions: characterExtensionsSchema.default({}),
   character_book: characterBookSchema.nullable().default(null),
-});
+}).passthrough();
 
 export const characterCardV2Schema = z.object({
   spec: z.literal("chara_card_v2"),
@@ -81,17 +81,17 @@ export const characterCardV2Schema = z.object({
 
 export const createCharacterSchema = z.object({
   data: characterDataSchema,
-});
+}).passthrough();
 
 export const updateCharacterSchema = z.object({
-  data: characterDataSchema.partial(),
-});
+  data: characterDataSchema.partial().optional(),
+}).passthrough();
 
 export const createGroupSchema = z.object({
   name: z.string().min(1),
   description: z.string().default(""),
   characterIds: z.array(z.string()).default([]),
-});
+}).passthrough();
 
 export const updateGroupSchema = createGroupSchema.partial();
 
@@ -99,7 +99,7 @@ export const createPersonaGroupSchema = z.object({
   name: z.string().min(1),
   description: z.string().default(""),
   personaIds: z.array(z.string()).default([]),
-});
+}).passthrough();
 
 export const updatePersonaGroupSchema = createPersonaGroupSchema.partial();
 

@@ -60,6 +60,15 @@ import type { PartyDialogueLine, GameNpc, SkillCheckResult } from "../../../../e
 import type { TTSConfig } from "../../../../engine/contracts/types/tts";
 import type { CharacterMap, PersonaInfo } from "../../shared/chat-ui/types";
 
+const PARTY_TURN_MESSAGE_RE = /^\[(?:party-turn|party-chat)]\s*/i;
+
+function isPartyTurnMessage(message: { role?: string; content?: string }): boolean {
+  return (
+    (message.role === "assistant" || message.role === "narrator") &&
+    PARTY_TURN_MESSAGE_RE.test((message.content ?? "").trimStart())
+  );
+}
+
 /** Build inline style for a color that may be a plain color or a CSS gradient. */
 function nameColorStyle(color?: string): CSSProperties | undefined {
   if (!color) return undefined;
@@ -1169,10 +1178,12 @@ export function GameNarration({
     // recent turn" — segment edits, voice resolution, log builders, etc.
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i]!;
+      if (partyChatMessageId && msg.id === partyChatMessageId) continue;
+      if (isPartyTurnMessage(msg)) continue;
       if (msg.role === "assistant" || msg.role === "narrator") return msg;
     }
     return null;
-  }, [messages]);
+  }, [messages, partyChatMessageId]);
 
   // Wheel-nav builds a flat chronological list of log entries — one per visible
   // segment (parsed narration segments for assistant turns + a single player-dialogue

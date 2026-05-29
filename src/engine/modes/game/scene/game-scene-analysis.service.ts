@@ -2,7 +2,21 @@ import type { LlmGateway } from "../../../capabilities/llm";
 import type { StorageGateway } from "../../../capabilities/storage";
 import type { SceneAnalysis } from "../../../contracts/types/scene";
 import { parseGameJsonish } from "../../../shared/parsing-jsonish";
-import { isRecord, parseRecord, readString, type JsonRecord } from "../../../generation/runtime-records";
+import {
+  boolish,
+  isRecord,
+  parseRecord,
+  readNonNegativeInteger,
+  readString,
+  stringArray,
+  type JsonRecord,
+} from "../../../generation/runtime-records";
+import {
+  buildSceneAnalyzerSystemPrompt,
+  buildSceneAnalyzerUserPrompt,
+  type SceneAnalyzerContext,
+} from "./scene-analyzer";
+import { postProcessSceneResult, type PostProcessContext } from "./scene-postprocess";
 
 export interface GameSceneAnalysisCapabilities {
   storage: StorageGateway;
@@ -70,6 +84,64 @@ function parseObject(raw: string): JsonRecord {
   }
 }
 
+function readNullableString(value: unknown): string | null {
+  const text = readString(value).trim();
+  return text || null;
+}
+
+function readRecordArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value.filter(isRecord) as T[]) : [];
+}
+
+function readGameActiveState(value: unknown): SceneAnalyzerContext["currentState"] {
+  const state = readString(value).trim();
+  if (state === "dialogue" || state === "combat" || state === "travel_rest") return state;
+  return "exploration";
+}
+
+function normalizeSceneAnalyzerContext(value: unknown): SceneAnalyzerContext {
+  const context = parseRecord(value);
+  const turnNumber = readNonNegativeInteger(context.turnNumber, 0);
+
+  return {
+    currentState: readGameActiveState(context.currentState),
+    ...(turnNumber > 0 ? { turnNumber } : {}),
+    availableBackgrounds: stringArray(context.availableBackgrounds),
+    availableSfx: stringArray(context.availableSfx),
+    activeWidgets: readRecordArray<SceneAnalyzerContext["activeWidgets"][number]>(context.activeWidgets),
+    trackedNpcs: readRecordArray<SceneAnalyzerContext["trackedNpcs"][number]>(context.trackedNpcs),
+    characterNames: stringArray(context.characterNames),
+    currentBackground: readNullableString(context.currentBackground),
+    currentMusic: readNullableString(context.currentMusic),
+    recentMusic: stringArray(context.recentMusic),
+    useSpotifyMusic: boolish(context.useSpotifyMusic, false),
+    availableSpotifyTracks: readRecordArray<NonNullable<SceneAnalyzerContext["availableSpotifyTracks"]>[number]>(
+      context.availableSpotifyTracks,
+    ),
+    currentSpotifyTrack: readNullableString(context.currentSpotifyTrack),
+    recentSpotifyTracks: stringArray(context.recentSpotifyTracks),
+    currentAmbient: readNullableString(context.currentAmbient),
+    currentWeather: readNullableString(context.currentWeather),
+    currentTimeOfDay: readNullableString(context.currentTimeOfDay),
+    canGenerateIllustrations: boolish(context.canGenerateIllustrations, false),
+    canGenerateBackgrounds: boolish(context.canGenerateBackgrounds, false),
+    artStylePrompt: readNullableString(context.artStylePrompt),
+    imagePromptInstructions: readNullableString(context.imagePromptInstructions),
+  };
+}
+
+function scenePostProcessContext(context: SceneAnalyzerContext): PostProcessContext {
+  return {
+    availableBackgrounds: context.availableBackgrounds,
+    availableSfx: context.availableSfx,
+    useSpotifyMusic: context.useSpotifyMusic,
+    availableSpotifyTracks: context.availableSpotifyTracks,
+    validWidgetIds: new Set(context.activeWidgets.map((widget) => readString(widget.id)).filter(Boolean)),
+    characterNames: context.characterNames,
+    canGenerateBackgrounds: context.canGenerateBackgrounds,
+  };
+}
+
 async function resolveGameSceneConnectionId(
   storage: StorageGateway,
   chat: JsonRecord | null,
@@ -98,22 +170,17 @@ export async function analyzeGameScene(
   try {
     chat = input.chatId ? await capabilities.storage.get<JsonRecord>("chats", input.chatId) : null;
     const connectionId = await resolveGameSceneConnectionId(capabilities.storage, chat, input.connectionId ?? null);
-    const prompt = [
-      "Analyze this Marinara game-mode GM narration. Return only compact JSON for the game scene renderer.",
-      "Do not use roleplay-scene lifecycle semantics. Preserve game state ownership: choose visual/audio/direction metadata only.",
-      "Allowed keys: background, music, ambient, weather, timeOfDay, musicGenre, musicIntensity, locationKind, spotifyTrack, reputationChanges, segmentEffects, directions, illustration.",
-      "Game context JSON:",
-      JSON.stringify(input.context ?? {}, null, 2).slice(0, 8000),
-      "Narration:",
-      input.narration,
-    ].join("\n\n");
+    const sceneContext = normalizeSceneAnalyzerContext(input.context);
 
     const raw = await capabilities.llm.complete({
       connectionId,
-      messages: [{ role: "user", content: prompt }],
-      parameters: { maxTokens: 900, temperature: 0.2 },
+      messages: [
+        { role: "system", content: buildSceneAnalyzerSystemPrompt(sceneContext) },
+        { role: "user", content: buildSceneAnalyzerUserPrompt(input.narration, undefined, sceneContext) },
+      ],
+      parameters: { maxTokens: 1200, temperature: 0.2 },
     });
-    return sanitizeGameSceneAnalysis(parseObject(raw));
+    return postProcessSceneResult(sanitizeGameSceneAnalysis(parseObject(raw)), scenePostProcessContext(sceneContext));
   } catch {
     return defaultGameSceneAnalysis();
   }
