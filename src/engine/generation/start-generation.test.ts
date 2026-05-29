@@ -43,6 +43,7 @@ function generationDepsForChat(
     prompts?: Record<string, unknown>[];
     promptSections?: Record<string, unknown>[];
     promptVariables?: Record<string, unknown>[];
+    completeResponse?: string;
   } = {},
 ) {
   const chat = {
@@ -67,9 +68,14 @@ function generationDepsForChat(
     listChatMessages.mock.calls.length > 1 && options.messagesAfterSave ? options.messagesAfterSave : initialMessages,
   );
   const streamedRequests: unknown[] = [];
+  const completedRequests: unknown[] = [];
   const stream: LlmGateway["stream"] = vi.fn(async function* (request) {
     streamedRequests.push(request);
     yield { type: "token" as const, text: "Done." };
+  });
+  const complete: LlmGateway["complete"] = vi.fn(async (request) => {
+    completedRequests.push(request);
+    return options.completeResponse ?? '{"characterIds":[]}';
   });
   const createChatMessage = vi.fn(async (_chatId: string, value: Record<string, unknown>) => {
     if (value.role === "user") {
@@ -137,10 +143,18 @@ function generationDepsForChat(
   } as Partial<StorageGateway> as StorageGateway;
   const deps: GenerationEngineDeps = {
     storage,
-    llm: { stream } as Partial<LlmGateway> as LlmGateway,
+    llm: { stream, complete } as Partial<LlmGateway> as LlmGateway,
     integrations: {} as GenerationEngineDeps["integrations"],
   };
-  return { deps, createChatMessage, addChatMessageSwipe, patchChatMessageExtra, listChatMessages, streamedRequests };
+  return {
+    deps,
+    createChatMessage,
+    addChatMessageSwipe,
+    patchChatMessageExtra,
+    listChatMessages,
+    streamedRequests,
+    completedRequests,
+  };
 }
 
 async function drainGeneration(stream: AsyncGenerator<unknown>) {
@@ -692,6 +706,66 @@ describe("startGeneration chat message loading", () => {
     expect(snapshot.messages.map((message) => message.content).join("\n")).toContain("Preset rules.");
     expect(snapshot.messages.map((message) => message.content).join("\n")).not.toContain("Done.");
     expect(extra.generationPromptSnapshotsBySwipe).toMatchObject({ "0": snapshot });
+  });
+
+  it("stores provider-visible parameters in peek prompt snapshots for Opus adaptive models", async () => {
+    const { deps, createChatMessage, streamedRequests } = generationDepsForChat({
+      chatPatch: { mode: "roleplay", promptPresetId: "preset-1" },
+      connectionPatch: { provider: "openrouter", model: "anthropic/claude-opus-4-8" },
+      prompts: [
+        {
+          id: "preset-1",
+          wrapFormat: "xml",
+          parameters: {
+            temperature: 0.33,
+            topP: 0.9,
+            maxTokens: 444,
+            reasoningEffort: "xhigh",
+            verbosity: "high",
+          },
+        },
+      ],
+      promptSections: [
+        {
+          id: "main",
+          presetId: "preset-1",
+          name: "Main Prompt",
+          role: "system",
+          content: "Preset rules.",
+          enabled: true,
+          sortOrder: 0,
+        },
+      ],
+    });
+
+    await drainGeneration(
+      startGeneration(deps, {
+        chatId: "chat-1",
+        userMessage: "advance",
+        impersonateBlockAgents: true,
+      }),
+    );
+
+    const request = streamedRequests[0] as { parameters: Record<string, unknown> };
+    const assistantSave = createChatMessage.mock.calls.find(([, value]) => value.role === "assistant");
+    const extra = (assistantSave?.[1] as { extra?: Record<string, unknown> } | undefined)?.extra ?? {};
+    const snapshot = extra.generationPromptSnapshot as {
+      parameters: Record<string, unknown>;
+      generationInfo?: Record<string, unknown> | null;
+    };
+
+    expect(request.parameters).toMatchObject({ temperature: 0.33, topP: 0.9, verbosity: "high" });
+    expect(snapshot.parameters).toMatchObject({ stream: true, max_tokens: 444, reasoning: { effort: "high" } });
+    expect(snapshot.parameters).not.toHaveProperty("temperature");
+    expect(snapshot.parameters).not.toHaveProperty("top_p");
+    expect(snapshot.parameters).not.toHaveProperty("verbosity");
+    expect(snapshot.generationInfo).toMatchObject({
+      temperature: null,
+      topP: null,
+      verbosity: null,
+      maxTokens: 444,
+      reasoningEffort: "high",
+    });
   });
 });
 
@@ -1771,10 +1845,14 @@ describe("startGeneration Discord mirror", () => {
 });
 
 describe("startGeneration group turn prompt toggle", () => {
-  it("keeps target character instructions enabled by default for non-conversation group chats", async () => {
+  it("keeps target character instructions enabled by default for individual roleplay groups", async () => {
     const { deps, streamedRequests } = generationDepsForChat({
       chatPatch: { mode: "roleplay", characterIds: ["char-1", "char-2"] },
-      characters: [{ id: "char-1", data: { name: "Marina" } }],
+      chatMetadata: { groupChatMode: "individual" },
+      characters: [
+        { id: "char-1", data: { name: "Marina" } },
+        { id: "char-2", data: { name: "Roux" } },
+      ],
     });
 
     await drainGeneration(
@@ -1782,15 +1860,18 @@ describe("startGeneration group turn prompt toggle", () => {
     );
 
     expect((streamedRequests[0] as { messages: Array<{ content: string }> }).messages).toEqual(
-      expect.arrayContaining([expect.objectContaining({ content: "[Generation instruction: respond as Marina.]" })]),
+      expect.arrayContaining([expect.objectContaining({ content: expect.stringContaining("Respond only as Marina") })]),
     );
   });
 
-  it("omits target character instructions when non-conversation group turn prompts are disabled", async () => {
+  it("omits target character instructions when individual roleplay group turn prompts are disabled", async () => {
     const { deps, streamedRequests } = generationDepsForChat({
       chatPatch: { mode: "roleplay", characterIds: ["char-1", "char-2"] },
-      chatMetadata: { groupTurnPromptEnabled: false },
-      characters: [{ id: "char-1", data: { name: "Marina" } }],
+      chatMetadata: { groupChatMode: "individual", groupTurnPromptEnabled: false },
+      characters: [
+        { id: "char-1", data: { name: "Marina" } },
+        { id: "char-2", data: { name: "Roux" } },
+      ],
     });
 
     await drainGeneration(
@@ -1798,8 +1879,128 @@ describe("startGeneration group turn prompt toggle", () => {
     );
 
     expect((streamedRequests[0] as { messages: Array<{ content: string }> }).messages).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ content: "[Generation instruction: respond as Marina.]" })]),
+      expect.arrayContaining([expect.objectContaining({ content: expect.stringContaining("Respond only as Marina") })]),
     );
+  });
+
+  it("resolves sequential individual roleplay turns before assembling character cards", async () => {
+    const { deps, createChatMessage, streamedRequests } = generationDepsForChat({
+      chatPatch: {
+        mode: "roleplay",
+        promptPresetId: "preset",
+        characterIds: ["char-a", "char-b"],
+      },
+      chatMetadata: { groupChatMode: "individual", groupResponseOrder: "sequential" },
+      characters: [
+        { id: "char-a", data: { name: "Aster", description: "ASTER CARD" } },
+        { id: "char-b", data: { name: "Briar", description: "BRIAR CARD" } },
+      ],
+      prompts: [{ id: "preset", wrapFormat: "xml" }],
+      promptSections: [
+        {
+          id: "character",
+          presetId: "preset",
+          name: "Characters",
+          role: "system",
+          markerConfig: { type: "character" },
+          enabled: true,
+          sortOrder: 0,
+        },
+        {
+          id: "history",
+          presetId: "preset",
+          name: "History",
+          role: "user",
+          markerConfig: { type: "chat_history" },
+          enabled: true,
+          sortOrder: 1,
+        },
+      ],
+      initialMessages: [
+        {
+          id: "assistant-a",
+          chatId: "chat-1",
+          role: "assistant",
+          characterId: "char-a",
+          content: "Aster answered last.",
+        },
+      ],
+    });
+
+    await drainGeneration(
+      startGeneration(deps, {
+        chatId: "chat-1",
+        userMessage: "continue",
+        impersonateBlockAgents: true,
+      }),
+    );
+
+    const promptText = (streamedRequests[0] as { messages: Array<{ content: string }> }).messages
+      .map((message) => message.content)
+      .join("\n");
+    expect(promptText).toContain("BRIAR CARD");
+    expect(promptText).not.toContain("ASTER CARD");
+    expect(promptText).toContain("Respond only as Briar");
+    const assistantSave = createChatMessage.mock.calls.find(([, value]) => value.role === "assistant");
+    expect(assistantSave?.[1]).toMatchObject({ characterId: "char-b" });
+  });
+
+  it("uses the smart response orchestrator to choose one individual roleplay responder", async () => {
+    const { deps, createChatMessage, streamedRequests, completedRequests } = generationDepsForChat({
+      chatPatch: {
+        mode: "roleplay",
+        promptPresetId: "preset",
+        characterIds: ["char-a", "char-b"],
+      },
+      chatMetadata: { groupChatMode: "individual", groupResponseOrder: "smart" },
+      characters: [
+        { id: "char-a", data: { name: "Aster", description: "ASTER CARD", personality: "Reserved." } },
+        { id: "char-b", data: { name: "Briar", description: "BRIAR CARD", personality: "Direct." } },
+      ],
+      prompts: [{ id: "preset", wrapFormat: "xml" }],
+      promptSections: [
+        {
+          id: "character",
+          presetId: "preset",
+          name: "Characters",
+          role: "system",
+          markerConfig: { type: "character" },
+          enabled: true,
+          sortOrder: 0,
+        },
+        {
+          id: "history",
+          presetId: "preset",
+          name: "History",
+          role: "user",
+          markerConfig: { type: "chat_history" },
+          enabled: true,
+          sortOrder: 1,
+        },
+      ],
+      initialMessages: [{ id: "user-old", chatId: "chat-1", role: "user", content: "Who should answer?" }],
+      completeResponse: '{"characterIds":["char-b"],"reason":"Briar was addressed."}',
+    });
+
+    await drainGeneration(
+      startGeneration(deps, {
+        chatId: "chat-1",
+        userMessage: "Briar, what do you think?",
+        impersonateBlockAgents: true,
+      }),
+    );
+
+    expect(completedRequests).toHaveLength(1);
+    const selectorPrompt = JSON.stringify(completedRequests[0]);
+    expect(selectorPrompt).toContain("hidden response orchestrator");
+    expect(selectorPrompt).toContain("char-b");
+    const promptText = (streamedRequests[0] as { messages: Array<{ content: string }> }).messages
+      .map((message) => message.content)
+      .join("\n");
+    expect(promptText).toContain("BRIAR CARD");
+    expect(promptText).not.toContain("ASTER CARD");
+    const assistantSave = createChatMessage.mock.calls.find(([, value]) => value.role === "assistant");
+    expect(assistantSave?.[1]).toMatchObject({ characterId: "char-b" });
   });
 });
 

@@ -48,6 +48,7 @@ import {
 } from "./generation-replay";
 import { assembleGenerationPrompt, chatSummaryForGeneration } from "./prompt-assembly";
 import type { GenerationCharacterContext, GenerationPersonaContext } from "./prompt-assembly";
+import { generationInfoFromVisibleParameters, providerVisibleLlmParameters } from "./provider-visible-parameters";
 import { applyRuntimeRegexScripts } from "./regex-runtime";
 import {
   boolish,
@@ -612,10 +613,8 @@ function directiveMessages(
   }
 
   const forCharacterId = readString(input.forCharacterId).trim();
-  const isNonConversationGroup =
-    readString(chat.mode || chat.chatMode) !== "conversation" && stringArray(chat.characterIds).length > 1;
-  const addGroupTurnPrompt = !isNonConversationGroup || parseRecord(chat.metadata).groupTurnPromptEnabled !== false;
-  if (forCharacterId && addGroupTurnPrompt) {
+  const chatMode = readString(chat.mode || chat.chatMode);
+  if (forCharacterId && chatMode === "conversation") {
     const character = characters.find((candidate) => candidate.id === forCharacterId);
     messages.push({
       role: "user",
@@ -656,6 +655,251 @@ function messagesBeforeRegenerationTarget(
   if (!targetId) return storedMessages;
   const targetIndex = storedMessages.findIndex((message) => readString(message.id) === targetId);
   return targetIndex >= 0 ? storedMessages.slice(0, targetIndex) : storedMessages;
+}
+
+function roleplayIndividualGroupCharacterIds(chat: JsonRecord): string[] {
+  if (readString(chat.mode || chat.chatMode) !== "roleplay") return [];
+  const ids = activeCharacterIds(chat);
+  if (ids.length <= 1) return [];
+  return readString(parseRecord(chat.metadata).groupChatMode, "merged") === "individual" ? ids : [];
+}
+
+function lastVisibleAssistantCharacterId(messages: JsonRecord[], activeIds: string[]): string | null {
+  const active = new Set(activeIds);
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || hiddenFromAi(message)) continue;
+    if (readString(message.role) !== "assistant") continue;
+    const characterId = readString(message.characterId).trim();
+    if (active.has(characterId)) return characterId;
+  }
+  return null;
+}
+
+function sequentialRoleplayGroupTarget(messages: JsonRecord[], activeIds: string[]): string | null {
+  if (activeIds.length === 0) return null;
+  const lastCharacterId = lastVisibleAssistantCharacterId(messages, activeIds);
+  if (!lastCharacterId) return activeIds[0] ?? null;
+  const index = activeIds.indexOf(lastCharacterId);
+  return activeIds[(index + 1) % activeIds.length] ?? activeIds[0] ?? null;
+}
+
+function explicitRoleplayGroupTarget(
+  input: StartGenerationInput,
+  storedMessages: JsonRecord[],
+  activeIds: string[],
+): string | null {
+  const active = new Set(activeIds);
+  const requestedCharacterId = readString(input.forCharacterId).trim();
+  if (requestedCharacterId && active.has(requestedCharacterId)) return requestedCharacterId;
+
+  const regenerateMessageId = readString(input.regenerateMessageId).trim();
+  if (!regenerateMessageId) return null;
+  const target = storedMessages.find((message) => readString(message.id) === regenerateMessageId);
+  const targetCharacterId = readString(target?.characterId).trim();
+  return active.has(targetCharacterId) ? targetCharacterId : null;
+}
+
+function continuationRoleplayGroupTarget(args: {
+  input: StartGenerationInput;
+  latestUserInput: string;
+  storedMessages: JsonRecord[];
+  activeIds: string[];
+}): string | null {
+  if (readString(args.input.regenerateMessageId).trim()) return null;
+  if (args.latestUserInput.trim()) return null;
+  return lastVisibleAssistantCharacterId(args.storedMessages, args.activeIds);
+}
+
+type SmartResponderCandidate = {
+  id: string;
+  name: string;
+  description: string;
+  personality: string;
+  talkativeness: number | null;
+};
+
+function compactPromptLine(value: unknown, limit = 260): string {
+  const text = collapseExcessBlankLines(readString(value)).replace(/\s+/g, " ").trim();
+  return text.length > limit ? `${text.slice(0, limit - 3).trimEnd()}...` : text;
+}
+
+function characterDataRecord(record: JsonRecord): JsonRecord {
+  const data = parseRecord(record.data);
+  return Object.keys(data).length > 0 ? data : record;
+}
+
+async function loadSmartResponderCandidates(
+  storage: StorageGateway,
+  activeIds: string[],
+): Promise<SmartResponderCandidate[]> {
+  const rows = await Promise.all(activeIds.map((id) => storage.get<JsonRecord>("characters", id).catch(() => null)));
+  return rows
+    .map((row, index): SmartResponderCandidate | null => {
+      if (!isRecord(row)) return null;
+      const data = characterDataRecord(row);
+      const name = readString(data.name).trim() || readString(row.name).trim() || `Character ${index + 1}`;
+      return {
+        id: activeIds[index]!,
+        name,
+        description: compactPromptLine(data.description),
+        personality: compactPromptLine(data.personality),
+        talkativeness: data.talkativeness == null ? null : readNumber(data.talkativeness, 0),
+      };
+    })
+    .filter((candidate): candidate is SmartResponderCandidate => candidate !== null);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function mentionedSmartResponderIds(args: {
+  candidates: SmartResponderCandidate[];
+  latestUserInput: string;
+  mentionedNames: string[];
+}): string[] {
+  const mentioned = new Set(args.mentionedNames.map((name) => name.trim().toLowerCase()).filter(Boolean));
+  const latest = args.latestUserInput;
+  const ids: string[] = [];
+  for (const candidate of args.candidates) {
+    const lowerName = candidate.name.toLowerCase();
+    const explicitlyMentioned = mentioned.has(lowerName);
+    const atMentioned = new RegExp(`(^|\\s)@${escapeRegExp(candidate.name)}(?=\\s|$|[,.!?;:])`, "i").test(latest);
+    if (explicitlyMentioned || atMentioned) ids.push(candidate.id);
+  }
+  return ids;
+}
+
+function smartSelectorTranscript(messages: JsonRecord[]): string {
+  return messages
+    .filter((message) => !hiddenFromAi(message))
+    .slice(-12)
+    .map((message) => {
+      const role = readString(message.role, "message");
+      const name = readString(message.displayName || message.name || message.characterName).trim();
+      const prefix = name ? `${role} (${name})` : role;
+      return `${prefix}: ${compactPromptLine(message.content, 500)}`;
+    })
+    .join("\n");
+}
+
+function parseSmartGroupSelectionIds(raw: string, validIds: string[]): string[] {
+  const valid = new Set(validIds);
+  let text = raw.trim();
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) text = fenced[1].trim();
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start >= 0 && end > start) text = text.slice(start, end + 1);
+  try {
+    const parsed = JSON.parse(text) as JsonRecord;
+    const ids = stringArray(parsed.characterIds ?? parsed.character_ids ?? parsed.characters);
+    return [...new Set(ids.filter((id) => valid.has(id)))];
+  } catch {
+    return validIds.filter((id) => raw.includes(id)).slice(0, 3);
+  }
+}
+
+async function smartRoleplayGroupTarget(args: {
+  deps: GenerationEngineDeps;
+  input: StartGenerationInput;
+  chat: JsonRecord;
+  connection: JsonRecord;
+  storedMessages: JsonRecord[];
+  latestUserInput: string;
+  mentionedNames: string[];
+  activeIds: string[];
+  signal?: AbortSignal;
+}): Promise<string | null> {
+  const candidates = await loadSmartResponderCandidates(args.deps.storage, args.activeIds);
+  const mentionedIds = mentionedSmartResponderIds({
+    candidates,
+    latestUserInput: args.latestUserInput,
+    mentionedNames: args.mentionedNames,
+  });
+  if (mentionedIds.length > 0) return mentionedIds[0] ?? null;
+  if (candidates.length === 0) return sequentialRoleplayGroupTarget(args.storedMessages, args.activeIds);
+
+  const personaId = readString(args.chat.personaId).trim();
+  const persona = personaId ? await args.deps.storage.get<JsonRecord>("personas", personaId).catch(() => null) : null;
+  const personaData = isRecord(persona) ? characterDataRecord(persona) : {};
+  const candidateLines = candidates
+    .map((candidate) =>
+      JSON.stringify({
+        id: candidate.id,
+        name: candidate.name,
+        talkativeness: candidate.talkativeness,
+        personality: candidate.personality,
+        description: candidate.description,
+      }),
+    )
+    .join("\n");
+  let raw = "";
+  try {
+    raw = await args.deps.llm.complete(
+      {
+        connectionId: readString(args.connection.id).trim() || args.input.connectionId || null,
+        provider: readString(args.connection.provider).trim() || null,
+        model: readString(args.connection.model).trim() || null,
+        parameters: { maxTokens: 256 },
+        messages: [
+          {
+            role: "system",
+            content:
+              'You are a hidden response orchestrator for an individual-mode roleplay group chat. Choose which character should respond next based on the latest message, direct address, narrative momentum, and talkativeness. Usually choose exactly one character. Return only JSON: {"characterIds":["character-id"],"reason":"short"}.',
+          },
+          {
+            role: "user",
+            content: [
+              `<persona>${compactPromptLine(readString(personaData.name || persona?.name), 120)}</persona>`,
+              `<candidates>\n${candidateLines}\n</candidates>`,
+              `<recent_transcript>\n${smartSelectorTranscript(args.storedMessages)}\n</recent_transcript>`,
+              `<latest_user_message>\n${compactPromptLine(args.latestUserInput, 1200)}\n</latest_user_message>`,
+            ].join("\n\n"),
+          },
+        ],
+      },
+      args.signal,
+    );
+  } catch (error) {
+    if (isRecord(error) && readString(error.name) === "AbortError") throw error;
+  }
+  return (
+    parseSmartGroupSelectionIds(raw, args.activeIds)[0] ??
+    sequentialRoleplayGroupTarget(args.storedMessages, args.activeIds)
+  );
+}
+
+async function resolveRoleplayGroupTargetForGeneration(args: {
+  deps: GenerationEngineDeps;
+  input: StartGenerationInput;
+  chat: JsonRecord;
+  connection: JsonRecord;
+  storedMessages: JsonRecord[];
+  latestUserInput: string;
+  mentionedNames: string[];
+  signal?: AbortSignal;
+}): Promise<string | null> {
+  if (args.input.impersonate === true) return null;
+  const activeIds = roleplayIndividualGroupCharacterIds(args.chat);
+  if (activeIds.length === 0) return null;
+  const explicit = explicitRoleplayGroupTarget(args.input, args.storedMessages, activeIds);
+  if (explicit) return explicit;
+  const continuation = continuationRoleplayGroupTarget({
+    input: args.input,
+    latestUserInput: args.latestUserInput,
+    storedMessages: args.storedMessages,
+    activeIds,
+  });
+  if (continuation) return continuation;
+
+  const order = readString(parseRecord(args.chat.metadata).groupResponseOrder, "sequential");
+  if (order === "manual") return null;
+  if (order === "smart") {
+    return smartRoleplayGroupTarget({ ...args, activeIds });
+  }
+  return sequentialRoleplayGroupTarget(args.storedMessages, activeIds);
 }
 
 function isPassiveGenerationRequest(input: StartGenerationInput, prepared: PreparedUserInput): boolean {
@@ -812,42 +1056,26 @@ function buildSavedGenerationPromptSnapshot(args: {
   if (!args.promptSnapshot?.messages?.length) return null;
   const parameters = cloneSerializableValue(args.promptSnapshot.parameters ?? {});
   const tools = Array.isArray(args.promptSnapshot.tools) ? cloneSerializableValue(args.promptSnapshot.tools) : null;
+  const generationInfo = generationInfoFromVisibleParameters(args.connection, isRecord(parameters) ? parameters : {});
   return {
     messages: args.promptSnapshot.messages.map(clonePromptMessage),
     parameters: isRecord(parameters) ? parameters : {},
     ...(tools?.length ? { tools } : {}),
     promptPresetId: args.promptSnapshot.promptPresetId ?? null,
     generationInfo: {
-      model: readString(args.connection.model) || undefined,
-      provider: readString(args.connection.provider) || undefined,
-      temperature: nullableNumber(args.promptSnapshot.parameters.temperature),
-      maxTokens: nullableNumber(args.promptSnapshot.parameters.maxTokens ?? args.promptSnapshot.parameters.max_tokens),
-      topP: nullableNumber(args.promptSnapshot.parameters.topP ?? args.promptSnapshot.parameters.top_p),
-      topK: nullableNumber(args.promptSnapshot.parameters.topK ?? args.promptSnapshot.parameters.top_k),
-      frequencyPenalty: nullableNumber(
-        args.promptSnapshot.parameters.frequencyPenalty ?? args.promptSnapshot.parameters.frequency_penalty,
-      ),
-      presencePenalty: nullableNumber(
-        args.promptSnapshot.parameters.presencePenalty ?? args.promptSnapshot.parameters.presence_penalty,
-      ),
-      showThoughts:
-        typeof args.promptSnapshot.parameters.showThoughts === "boolean"
-          ? args.promptSnapshot.parameters.showThoughts
-          : null,
-      reasoningEffort:
-        typeof args.promptSnapshot.parameters.reasoningEffort === "string"
-          ? args.promptSnapshot.parameters.reasoningEffort
-          : null,
-      verbosity:
-        typeof args.promptSnapshot.parameters.verbosity === "string" ? args.promptSnapshot.parameters.verbosity : null,
-      serviceTier:
-        typeof args.promptSnapshot.parameters.serviceTier === "string"
-          ? args.promptSnapshot.parameters.serviceTier
-          : null,
-      assistantPrefill:
-        typeof args.promptSnapshot.parameters.assistantPrefill === "string"
-          ? args.promptSnapshot.parameters.assistantPrefill
-          : null,
+      model: generationInfo.model,
+      provider: generationInfo.provider,
+      temperature: generationInfo.temperature ?? null,
+      maxTokens: generationInfo.maxTokens ?? null,
+      topP: generationInfo.topP ?? null,
+      topK: generationInfo.topK ?? null,
+      frequencyPenalty: generationInfo.frequencyPenalty ?? null,
+      presencePenalty: generationInfo.presencePenalty ?? null,
+      showThoughts: generationInfo.showThoughts ?? null,
+      reasoningEffort: generationInfo.reasoningEffort ?? null,
+      verbosity: generationInfo.verbosity ?? null,
+      serviceTier: generationInfo.serviceTier ?? null,
+      assistantPrefill: generationInfo.assistantPrefill ?? null,
       tokensPrompt: usageNumber(args.usage, ["promptTokens", "prompt_tokens", "inputTokens", "input_tokens"]),
       tokensCompletion: usageNumber(args.usage, [
         "completionTokens",
@@ -1564,6 +1792,21 @@ export async function* startGeneration(
     storedMessages,
   );
   const chatForGeneration = generationTrackerBaseline ? { ...chat, gameState: generationTrackerBaseline } : chat;
+  const latestUserInput = preparedUserInput.content || inputUserMessage(input);
+  const resolvedRoleplayGroupTarget = await resolveRoleplayGroupTargetForGeneration({
+    deps,
+    input,
+    chat: chatForGeneration,
+    connection,
+    storedMessages: generationMessages,
+    latestUserInput,
+    mentionedNames: preparedUserInput.mentionedCharacterNames,
+    signal,
+  });
+  throwIfAborted(signal);
+  if (resolvedRoleplayGroupTarget && readString(input.forCharacterId).trim() !== resolvedRoleplayGroupTarget) {
+    input = { ...input, forCharacterId: resolvedRoleplayGroupTarget };
+  }
   const directMessages = requestMessages(input);
   const agentEvents: AgentResult[] = [];
   const continueAssistantResponse = shouldContinueAssistantResponse(input, preparedUserInput, generationMessages);
@@ -1576,7 +1819,7 @@ export async function* startGeneration(
     storedMessages: generationMessages,
     connection,
     request: input,
-    latestUserInput: preparedUserInput.content || inputUserMessage(input),
+    latestUserInput,
     embeddingSource: generationEmbeddingSource(deps.llm, connection),
   });
   throwIfAborted(signal);
@@ -1633,7 +1876,7 @@ export async function* startGeneration(
       storedMessages: generationMessages,
       connection,
       request: input,
-      latestUserInput: preparedUserInput.content || inputUserMessage(input),
+      latestUserInput,
       agentData: runtime?.agentData,
       embeddingSource: generationEmbeddingSource(deps.llm, connection),
     });
@@ -1976,10 +2219,11 @@ async function* streamMainGenerationLoop(args: {
 
     const requestMessages = fitMessagesToContextWindow(conversation, parameters);
     const requestParameters = runtimeLlmParameters(connection, input, chat, parameters);
+    const visibleRequestParameters = providerVisibleLlmParameters(connection, requestParameters, { stream: true });
     const requestTools = mainTools?.toolDefs;
     promptSnapshot = {
       messages: requestMessages.map(clonePromptMessage),
-      parameters: cloneSerializableValue(requestParameters),
+      parameters: cloneSerializableValue(visibleRequestParameters),
       promptPresetId: promptPresetId ?? null,
       ...(requestTools?.length ? { tools: cloneSerializableValue(requestTools) } : {}),
     };

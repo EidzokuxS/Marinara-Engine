@@ -67,6 +67,9 @@ type AgentResultEffectOptions = {
 };
 const HAPTIC_COMMAND_INTERVAL_MS = 225;
 const TYPEWRITER_MAX_FRAME_MS = 120;
+const AGENT_DEBUG_FLUSH_DELAY_MS = 80;
+const AGENT_DEBUG_FLUSH_CHUNK_SIZE = 8;
+const AGENT_DEBUG_FLUSH_CONTINUE_DELAY_MS = 16;
 const scheduledChatRefreshTimers = new Map<string, number>();
 const queuedAgentDebugEntries: Array<Omit<AgentDebugEntry, "timestamp"> & { timestamp?: number }> = [];
 let agentDebugFlushTimer: number | null = null;
@@ -247,14 +250,19 @@ function runDeferredGenerationWork(label: string, task: () => Promise<void> | vo
 function flushQueuedAgentDebugEntries(): void {
   agentDebugFlushTimer = null;
   if (queuedAgentDebugEntries.length === 0) return;
-  const entries = queuedAgentDebugEntries.splice(0, queuedAgentDebugEntries.length);
+  const entries = queuedAgentDebugEntries.splice(0, AGENT_DEBUG_FLUSH_CHUNK_SIZE);
   useAgentStore.getState().addDebugEntries(entries);
+  if (queuedAgentDebugEntries.length > 0) scheduleAgentDebugFlush(AGENT_DEBUG_FLUSH_CONTINUE_DELAY_MS);
+}
+
+function scheduleAgentDebugFlush(delayMs = AGENT_DEBUG_FLUSH_DELAY_MS): void {
+  if (agentDebugFlushTimer !== null) return;
+  agentDebugFlushTimer = window.setTimeout(flushQueuedAgentDebugEntries, delayMs);
 }
 
 function enqueueAgentDebugEntry(entry: Omit<AgentDebugEntry, "timestamp"> & { timestamp?: number }): void {
   queuedAgentDebugEntries.push(entry);
-  if (agentDebugFlushTimer !== null) return;
-  agentDebugFlushTimer = window.setTimeout(flushQueuedAgentDebugEntries, 80);
+  scheduleAgentDebugFlush();
 }
 
 function scheduleChatQueryRefresh(queryClient: QueryClient, chatId: string): void {
@@ -954,6 +962,7 @@ export async function runGenerationWithUi(
   let typewriterRemainder = 0;
   const revealWaiters = new Set<() => void>();
   const pendingAgentResultEffects: unknown[] = [];
+  let agentResultEffectsDrainScheduled = false;
 
   const cancelTypewriterFrame = () => {
     if (typewriterFrame === null) return;
@@ -1074,13 +1083,19 @@ export async function runGenerationWithUi(
   };
 
   const drainAgentResultEffects = () => {
-    if (pendingAgentResultEffects.length === 0) return;
-    const batch = pendingAgentResultEffects.splice(0, pendingAgentResultEffects.length);
-    runDeferredGenerationWork("agent result effects", async () => {
-      for (const rawResult of batch) {
-        await applyAgentResultEffects(queryClient, chatId, rawResult, { skipTrackerSync: true });
-        await delay(0);
+    if (pendingAgentResultEffects.length === 0 || agentResultEffectsDrainScheduled) return;
+    agentResultEffectsDrainScheduled = true;
+    runDeferredGenerationWork("agent result effect", async () => {
+      agentResultEffectsDrainScheduled = false;
+      if (controller.signal.aborted) {
+        pendingAgentResultEffects.length = 0;
+        return;
       }
+      const rawResult = pendingAgentResultEffects.shift();
+      if (rawResult !== undefined) {
+        await applyAgentResultEffects(queryClient, chatId, rawResult, { skipTrackerSync: true });
+      }
+      if (pendingAgentResultEffects.length > 0) drainAgentResultEffects();
     });
   };
 

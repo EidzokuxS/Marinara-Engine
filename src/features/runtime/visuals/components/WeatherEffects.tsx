@@ -721,7 +721,7 @@ export function WeatherEffects({ weather, timeOfDay, showCelestial = true }: Wea
     const dpr = window.devicePixelRatio || 1;
 
     const resize = () => {
-      const rect = canvas.parentElement?.getBoundingClientRect();
+      const rect = canvas.getBoundingClientRect();
       if (!rect) return;
       canvas.width = rect.width * dpr;
       canvas.height = rect.height * dpr;
@@ -859,5 +859,5 @@ export function WeatherEffects({ weather, timeOfDay, showCelestial = true }: Wea
 
   if (!shouldRender) return null;
 
-  return <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 z-0 h-full w-full" />;
+  return <canvas ref={canvasRef} className="pointer-events-none absolute -inset-px z-0" />;
 }

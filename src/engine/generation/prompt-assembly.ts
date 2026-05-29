@@ -17,7 +17,7 @@ import {
   type ScanOptions,
 } from "../generation-core/lorebooks/keyword-scanner";
 import { resolveGameLorebookScopeExclusions } from "../generation-core/lorebooks/game-lorebook-scope";
-import { wrapContent } from "../generation-core/prompt/format-engine";
+import { wrapContent, wrapGroup } from "../generation-core/prompt/format-engine";
 import { mergeAdjacentMessages, squashLeadingSystemMessages } from "../generation-core/prompt/merger";
 import { applyRegexScriptsToPromptMessages } from "../generation-core/regex/regex-application";
 import { stripConversationPromptTimestamps } from "../modes/chat/core/summaries/transcript-sanitize";
@@ -142,6 +142,7 @@ type PromptSectionRecord = JsonRecord & {
   name?: unknown;
   identifier?: unknown;
   markerConfig?: unknown;
+  groupId?: unknown;
 };
 
 type PromptChoiceBlockRecord = JsonRecord & {
@@ -150,10 +151,29 @@ type PromptChoiceBlockRecord = JsonRecord & {
   randomPick?: unknown;
 };
 
+type PromptGroupRecord = JsonRecord & {
+  id?: unknown;
+  name?: unknown;
+  enabled?: unknown;
+};
+
+type PromptPresetBundle = {
+  preset: JsonRecord;
+  sections: PromptSectionRecord[];
+  groups: PromptGroupRecord[];
+  choiceBlocks: PromptChoiceBlockRecord[];
+};
+
+type PromptAssemblyEntry = ChatMLMessage & {
+  promptGroupId?: string | null;
+  promptGroupName?: string | null;
+};
+
 interface SelectedPromptPreset {
   id: string;
   preset: JsonRecord | null;
   sections: PromptSectionRecord[];
+  groups: PromptGroupRecord[];
   variables: Record<string, string>;
   parameters: StoredGenerationParameters | null;
   wrapFormat: WrapFormat | null;
@@ -482,7 +502,11 @@ function buildGamePerceptionHints(
   const skills = parseRecord(playerStats.skills);
   const personaWisdom = readPersonaAttribute(persona, ["wis", "wisdom"]);
   const wisdomScore = readNormalizedNumber(attributes, ["wis", "wisdom"], personaWisdom ?? 10);
-  const dangerLevel = readNormalizedNumber(state, ["dangerLevel"], readNormalizedNumber(meta, ["gameDangerLevel"], Number.NaN));
+  const dangerLevel = readNormalizedNumber(
+    state,
+    ["dangerLevel"],
+    readNormalizedNumber(meta, ["gameDangerLevel"], Number.NaN),
+  );
   const presentNpcNames = recordArray(state.presentCharacters)
     .map((character) => readString(character.name).trim())
     .filter(Boolean);
@@ -668,6 +692,11 @@ async function loadPromptChoiceBlocks(storage: StorageGateway, presetId: string)
   return blocks.filter(isRecord).sort(bySortOrder);
 }
 
+async function loadPromptGroups(storage: StorageGateway, presetId: string): Promise<PromptGroupRecord[]> {
+  const groups = await storage.list<PromptGroupRecord>("prompt-groups", { filters: { presetId } });
+  return groups.filter(isRecord).sort(bySortOrder);
+}
+
 async function loadPromptPresetRecord(storage: StorageGateway, presetId: string): Promise<JsonRecord | null> {
   const direct = await storage.get<JsonRecord>("prompts", presetId).catch(() => null);
   if (direct && isRecord(direct)) return direct;
@@ -675,32 +704,34 @@ async function loadPromptPresetRecord(storage: StorageGateway, presetId: string)
   return prompts.find((prompt) => readString(prompt.id).trim() === presetId) ?? null;
 }
 
-async function loadPromptPresetBundle(
-  storage: StorageGateway,
-  presetId: string,
-): Promise<{ preset: JsonRecord; sections: PromptSectionRecord[]; choiceBlocks: PromptChoiceBlockRecord[] } | null> {
+async function loadPromptPresetBundle(storage: StorageGateway, presetId: string): Promise<PromptPresetBundle | null> {
   const full = await storage.promptFull?.<JsonRecord>(presetId).catch(() => null);
   if (full && isRecord(full.preset)) {
     const sections = Array.isArray(full.sections)
       ? full.sections.filter(isRecord).sort(bySortOrder)
       : await loadPromptSections(storage, presetId);
+    const groups = Array.isArray(full.groups)
+      ? full.groups.filter(isRecord).sort(bySortOrder)
+      : await loadPromptGroups(storage, presetId);
     const choiceBlocks = Array.isArray(full.choiceBlocks)
       ? full.choiceBlocks.filter(isRecord).sort(bySortOrder)
       : await loadPromptChoiceBlocks(storage, presetId);
     return {
       preset: full.preset,
       sections: sections as PromptSectionRecord[],
+      groups: groups as PromptGroupRecord[],
       choiceBlocks: choiceBlocks as PromptChoiceBlockRecord[],
     };
   }
 
   const preset = await loadPromptPresetRecord(storage, presetId);
   if (!preset) return null;
-  const [sections, choiceBlocks] = await Promise.all([
+  const [sections, groups, choiceBlocks] = await Promise.all([
     loadPromptSections(storage, presetId),
+    loadPromptGroups(storage, presetId),
     loadPromptChoiceBlocks(storage, presetId),
   ]);
-  return { preset, sections, choiceBlocks };
+  return { preset, sections, groups, choiceBlocks };
 }
 
 async function loadSelectedPromptPreset(
@@ -719,7 +750,7 @@ async function loadSelectedPromptPreset(
     const presetId = candidate.id;
     const bundle = await loadPromptPresetBundle(storage, presetId);
     if (!bundle) continue;
-    const { preset, sections, choiceBlocks } = bundle;
+    const { preset, sections, groups, choiceBlocks } = bundle;
     const blocksByName = new Map(
       choiceBlocks
         .map((block) => [readString(block.variableName).trim(), block] as const)
@@ -735,6 +766,7 @@ async function loadSelectedPromptPreset(
       id: presetId,
       preset,
       sections,
+      groups,
       variables: {
         ...stringRecord(preset.variableValues),
         ...promptChoiceVariables(preset.defaultChoices, blocksByName),
@@ -764,6 +796,76 @@ function markerConfig(section: PromptSectionRecord): MarkerConfig | null {
   if (identifier.includes("persona")) return { type: "persona" };
   if (identifier.includes("char")) return { type: "character" };
   return null;
+}
+
+function promptGroupLookup(groups: PromptGroupRecord[]): Map<string, PromptGroupRecord> {
+  const lookup = new Map<string, PromptGroupRecord>();
+  for (const group of groups) {
+    const id = readString(group.id).trim();
+    if (id) lookup.set(id, group);
+  }
+  return lookup;
+}
+
+function promptGroupName(group: PromptGroupRecord): string {
+  return readString(group.name).trim() || "Prompt Group";
+}
+
+function promptGroupForSection(
+  section: PromptSectionRecord,
+  groupsById: Map<string, PromptGroupRecord>,
+): { id: string; name: string } | null {
+  const groupId = readString(section.groupId).trim();
+  if (!groupId) return null;
+  const group = groupsById.get(groupId);
+  if (!group || !boolish(group.enabled, true)) return null;
+  return { id: groupId, name: promptGroupName(group) };
+}
+
+function groupedPromptMessages(entries: PromptAssemblyEntry[], wrapFormat: WrapFormat): ChatMLMessage[] {
+  const messages: ChatMLMessage[] = [];
+  let activeGroup: {
+    id: string;
+    name: string;
+    role: ChatMLMessage["role"];
+    contents: string[];
+  } | null = null;
+
+  const flushGroup = () => {
+    if (!activeGroup) return;
+    const content = wrapGroup(activeGroup.contents.join("\n\n"), activeGroup.name, wrapFormat);
+    if (content.trim()) {
+      messages.push({
+        role: activeGroup.role,
+        content,
+        contextKind: "prompt",
+        displayName: activeGroup.name,
+      });
+    }
+    activeGroup = null;
+  };
+
+  for (const entry of entries) {
+    const { promptGroupId, promptGroupName, ...message } = entry;
+    if (!promptGroupId || !promptGroupName) {
+      flushGroup();
+      messages.push(message);
+      continue;
+    }
+    if (!activeGroup || activeGroup.id !== promptGroupId || activeGroup.role !== message.role) {
+      flushGroup();
+      activeGroup = {
+        id: promptGroupId,
+        name: promptGroupName,
+        role: message.role,
+        contents: [],
+      };
+    }
+    activeGroup.contents.push(message.content);
+  }
+  flushGroup();
+
+  return messages;
 }
 
 function resolveLiveHostTimeZone(): string | undefined {
@@ -853,7 +955,6 @@ const DEFAULT_CHARACTER_MARKER_FIELDS = [
   "scenario",
   "first_mes",
   "mes_example",
-  "creator_notes",
   "system_prompt",
   "post_history_instructions",
 ] as const;
@@ -899,7 +1000,7 @@ function characterFieldValue(character: GenerationCharacterContext, fieldName: s
       return character.mesExample ?? "";
     case "creator_notes":
     case "creatorNotes":
-      return character.creatorNotes ?? "";
+      return "";
     case "system_prompt":
     case "systemPrompt":
       return character.systemPrompt ?? "";
@@ -1423,6 +1524,23 @@ function promptCharactersForGeneration(
   return characters.filter((character) => character.id === targetId);
 }
 
+function individualGroupTurnPromptMessage(
+  input: PromptAssemblyInput,
+  characters: GenerationCharacterContext[],
+): ChatMLMessage | null {
+  const targetId = scopedIndividualGroupTarget(input, characters);
+  if (!targetId) return null;
+  if (parseRecord(input.chat.metadata).groupTurnPromptEnabled === false) return null;
+  const character = characters.find((candidate) => candidate.id === targetId);
+  const name = character?.name.trim() || "the requested character";
+  return {
+    role: "system",
+    content: `Respond only as ${name}`,
+    contextKind: "prompt",
+    displayName: "Turn",
+  };
+}
+
 function isIndividualGroupHistoryMessage(message: ChatMLMessage): boolean {
   return (
     message.contextKind === "history" ||
@@ -1918,10 +2036,19 @@ export async function assembleGenerationPrompt(
   let usedFallbackSystemPrompt = false;
 
   if (selectedPreset) {
+    const groupsById = promptGroupLookup(selectedPreset.groups);
+    let promptEntries: PromptAssemblyEntry[] = [];
+    const flushPromptEntries = () => {
+      if (promptEntries.length === 0) return;
+      messages.push(...groupedPromptMessages(promptEntries, wrapFormat));
+      promptEntries = [];
+    };
+
     for (const section of selectedPreset.sections) {
       if (!boolish(section.enabled, true)) continue;
       const marker = markerConfig(section);
       if (marker?.type === "chat_history") {
+        flushPromptEntries();
         messages.push(...history);
         insertedHistory = true;
         continue;
@@ -1941,13 +2068,17 @@ export async function assembleGenerationPrompt(
       if (!resolved.trim()) continue;
       if (marker?.type === "chat_summary" && summary?.trim()) insertedSummary = true;
       const name = readString(section.name) || readString(section.identifier) || marker?.type || "Prompt";
-      messages.push({
+      const group = promptGroupForSection(section, groupsById);
+      promptEntries.push({
         role: normalizeRole(section.role),
-        content: wrapContent(resolved, name, wrapFormat),
+        content: wrapContent(resolved, name, wrapFormat, group ? 1 : 0),
         contextKind: "prompt",
         displayName: name,
+        promptGroupId: group?.id ?? null,
+        promptGroupName: group?.name ?? null,
       });
     }
+    flushPromptEntries();
   }
 
   if (messages.length === 0) {
@@ -2023,6 +2154,10 @@ export async function assembleGenerationPrompt(
   applyRegexScriptsToPromptMessages(messages, regexScripts, {
     resolveMacros: (value) => resolveMacros(value, macros, { trimResult: false }),
   });
+  const turnPrompt = individualGroupTurnPromptMessage(input, characters);
+  if (turnPrompt) {
+    messages.push(turnPrompt);
+  }
   messages = messages
     .map((message) => ({
       ...message,

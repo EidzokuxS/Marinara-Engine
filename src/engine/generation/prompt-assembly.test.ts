@@ -50,7 +50,7 @@ function storageWithSections(sections: Row[]): StorageGateway {
   };
 }
 
-function storageWithPreset(preset: Row, sections: Row[], variables: Row[] = []): StorageGateway {
+function storageWithPreset(preset: Row, sections: Row[], variables: Row[] = [], groups: Row[] = []): StorageGateway {
   return {
     ...storageWithSections(sections),
     get: async <T>(entity: string, id: string) => {
@@ -65,12 +65,20 @@ function storageWithPreset(preset: Row, sections: Row[], variables: Row[] = []):
       if (entity === "prompt-variables") {
         return variables.filter((row) => row.presetId === options?.filters?.presetId) as T[];
       }
+      if (entity === "prompt-groups") {
+        return groups.filter((row) => row.presetId === options?.filters?.presetId) as T[];
+      }
       return [] as T[];
     },
   };
 }
 
-function storageWithPrompts(prompts: Row[], sections: Row[], variables: Row[] = []): StorageGateway {
+function storageWithPrompts(
+  prompts: Row[],
+  sections: Row[],
+  variables: Row[] = [],
+  groups: Row[] = [],
+): StorageGateway {
   return {
     ...storageWithSections(sections),
     get: async <T>(entity: string, id: string) => {
@@ -84,6 +92,9 @@ function storageWithPrompts(prompts: Row[], sections: Row[], variables: Row[] = 
       }
       if (entity === "prompt-variables") {
         return variables.filter((row) => row.presetId === options?.filters?.presetId) as T[];
+      }
+      if (entity === "prompt-groups") {
+        return groups.filter((row) => row.presetId === options?.filters?.presetId) as T[];
       }
       return [] as T[];
     },
@@ -359,6 +370,8 @@ describe("assembleGenerationPrompt macro parity", () => {
     expect(prompt).toContain("Extension appearance.");
     expect(prompt).toContain("<example_dialogue>");
     expect(prompt).toContain("Aster: Example line.");
+    expect(prompt).not.toContain("Author note.");
+    expect(prompt).not.toContain("<creator_notes>");
   });
 
   it("keeps preset XML wrappers when prompt-only regex cleanup strips HTML from history", async () => {
@@ -468,6 +481,10 @@ describe("assembleGenerationPrompt macro parity", () => {
     const prompt = assembly.messages.map((message) => message.content).join("\n\n");
     expect(prompt).toContain("BRIAR CARD");
     expect(prompt).not.toContain("ASTER CARD");
+    expect(assembly.previewMessages.at(-1)).toMatchObject({
+      role: "system",
+      content: "Respond only as Briar",
+    });
   });
 
   it("uses selected preset wrap format and chat choice variables", async () => {
@@ -514,6 +531,64 @@ describe("assembleGenerationPrompt macro parity", () => {
     expect(prompt).toContain("Tags=slow burn | soft tension");
     expect(prompt).not.toContain("{{POV}}");
     expect(prompt).not.toContain("{{TAGS}}");
+  });
+
+  it("wraps adjacent preset sections in their configured XML group", async () => {
+    const assembly = await assembleGenerationPrompt(
+      storageWithPreset(
+        { id: "preset", wrapFormat: "xml" },
+        [
+          section({
+            id: "role",
+            name: "Role",
+            role: "system",
+            content: "You are {{char}}.",
+            sortOrder: 0,
+          }),
+          section({
+            id: "setting",
+            name: "Setting",
+            role: "system",
+            content: "Teyvat.",
+            groupId: "group-lore",
+            sortOrder: 1,
+          }),
+          section({
+            id: "world-info",
+            name: "World Info",
+            role: "system",
+            content: "Snezhnaya is cold.",
+            groupId: "group-lore",
+            sortOrder: 2,
+          }),
+          section({
+            id: "style",
+            name: "Style",
+            role: "system",
+            content: "Write sharply.",
+            sortOrder: 3,
+          }),
+        ],
+        [],
+        [{ id: "group-lore", presetId: "preset", name: "Lore", enabled: true, sortOrder: 0 }],
+      ),
+      {
+        chat: { id: "chat", mode: "roleplay", promptPresetId: "preset" },
+        storedMessages: [],
+        connection: {},
+        request,
+        latestUserInput: "",
+      },
+    );
+
+    const prompt = assembly.messages.map((message) => message.content).join("\n\n");
+    expect(prompt).toContain("<lore>");
+    expect(prompt).toContain("<setting>");
+    expect(prompt).toContain("Teyvat.");
+    expect(prompt).toContain("<world_info>");
+    expect(prompt).toContain("Snezhnaya is cold.");
+    expect(prompt).toContain("</lore>");
+    expect(prompt.indexOf("<lore>")).toBeLessThan(prompt.indexOf("<style>"));
   });
 
   it("does not append the generic roleplay scene scaffold after a selected preset", async () => {
