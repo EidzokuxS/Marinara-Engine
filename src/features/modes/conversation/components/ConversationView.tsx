@@ -34,6 +34,7 @@ import { useUIStore } from "../../../../shared/stores/ui.store";
 import { showConversationLocalNotification } from "../../../../shared/lib/local-notifications";
 import { playNotificationPing } from "../../../../shared/lib/notification-sound";
 import { getAvatarCropStyle, type AvatarCropValue } from "../../../../shared/lib/utils";
+import { usePageActivity } from "../../../../shared/hooks/use-page-activity";
 import { invalidateCharacterCollectionQueries } from "../../../catalog/characters/index";
 import { getConversationStatus } from "../../../../engine/modes/chat/autonomous/autonomous.service";
 import { storageApi } from "../../../../shared/api/storage-api";
@@ -371,14 +372,13 @@ export function ConversationView({
   const liveTypingVerb = liveTypingName.includes(",") || liveTypingName.includes(" & ") ? "are" : "is";
   const showTypingIndicator =
     isStreaming && !delayedCharacterInfo && (!regenerateMessageId || (!streamBuffer && !thinkingBuffer));
+  const isPageActive = usePageActivity();
 
   // ── Periodic status refresh (every 60s) ──
   // Keeps status dots in sync with the character's schedule regardless of autonomous messaging
   useEffect(() => {
-    if (!chatId) return;
+    if (!chatId || !isPageActive) return;
     const refreshStatus = async () => {
-      // Skip while tab is hidden to avoid a burst of requests on return
-      if (document.hidden) return;
       try {
         await getConversationStatus(storageApi, chatId);
         invalidateCharacterCollectionQueries(qc);
@@ -389,7 +389,7 @@ export function ConversationView({
     void refreshStatus();
     const timer = setInterval(refreshStatus, 60_000);
     return () => clearInterval(timer);
-  }, [chatId, qc]);
+  }, [chatId, isPageActive, qc]);
 
   // Per-scheme conversation gradient from settings.
   // When a scheme's values are still the defaults (user hasn't customized), use

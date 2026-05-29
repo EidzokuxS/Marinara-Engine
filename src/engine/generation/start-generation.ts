@@ -9,6 +9,7 @@ import type { VisualAssetGateway } from "../capabilities/visual-assets";
 import type { GenerationGuideSource } from "../shared/text/generation-guide";
 import { chatSummaryFingerprintMatches, fingerprintChatSummary } from "../shared/text/chat-summary-fingerprint";
 import { collapseExcessBlankLines } from "../shared/text/newlines";
+import { buildImpersonateInstruction } from "../modes/chat/commands/impersonate-prompt";
 import {
   activeCharacterIds,
   assertChatHasActiveCharacters,
@@ -591,19 +592,20 @@ function directiveMessages(
   input: StartGenerationInput,
   chat: JsonRecord,
   characters: GenerationCharacterContext[],
+  persona: GenerationPersonaContext | null,
   prepared: PreparedUserInput,
   options: { continueAssistantResponse?: boolean } = {},
 ): LlmMessage[] {
   const messages: LlmMessage[] = [];
   if (input.impersonate === true) {
-    const template =
-      readString(input.impersonatePromptTemplate).trim() ||
-      "Write the next reply as the user's persona. Do not continue as the assistant or narrator.";
     messages.push({
       role: "user",
-      content: [template, prepared.content.trim() ? `Direction:\n${prepared.content.trim()}` : ""]
-        .filter(Boolean)
-        .join("\n\n"),
+      content: buildImpersonateInstruction({
+        customPrompt: input.impersonatePromptTemplate,
+        direction: prepared.content,
+        personaName: persona?.name,
+        personaDescription: persona?.description,
+      }),
     });
     return messages;
   }
@@ -1640,7 +1642,9 @@ export async function* startGeneration(
     prompt = withImageAttachments(
       [
         ...assembly.messages,
-        ...directiveMessages(input, chat, assembly.characters, preparedUserInput, { continueAssistantResponse }),
+        ...directiveMessages(input, chat, assembly.characters, assembly.persona, preparedUserInput, {
+          continueAssistantResponse,
+        }),
       ],
       preparedUserInput.images,
     );
@@ -1771,7 +1775,9 @@ export async function* startGeneration(
   prompt = withImageAttachments(
     [
       ...(prompt ?? []),
-      ...directiveMessages(input, chat, assembly.characters, preparedUserInput, { continueAssistantResponse }),
+      ...directiveMessages(input, chat, assembly.characters, assembly.persona, preparedUserInput, {
+        continueAssistantResponse,
+      }),
     ],
     preparedUserInput.images,
   );

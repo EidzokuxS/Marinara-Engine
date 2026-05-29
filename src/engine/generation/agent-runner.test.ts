@@ -25,7 +25,8 @@ function storage(
     listChatMemories: async () => [],
     getWorldState: async <T>() => null as T | null,
     saveTrackerSnapshot: async <T>() => ({}) as T,
-    listLorebookEntries: async () => [],
+    listLorebookEntries: async <T>(lorebookId: string) =>
+      (collections["lorebook-entries"] ?? []).filter((entry) => entry.lorebookId === lorebookId) as T[],
     createLorebookEntries: async () => [],
     promptFull: async <T>() => null as T | null,
   };
@@ -263,6 +264,143 @@ describe("createGenerationAgentRuntime", () => {
       }),
     ]);
     expect(results).toEqual(runtime.preResults);
+  });
+
+  it("loads selected lorebook entries into Knowledge Retrieval source material", async () => {
+    const calls: LlmRequest[] = [];
+    const runtime = await createGenerationAgentRuntime(
+      {
+        storage: storage(
+          [
+            {
+              id: "knowledge-a",
+              type: "knowledge-retrieval",
+              name: "Knowledge Retrieval",
+              enabled: true,
+              phase: "pre_generation",
+              connectionId: null,
+              model: "agent-model",
+              promptTemplate: "Return the relevant source facts.",
+              settings: { sourceLorebookIds: ["lorebook-a"] },
+            },
+          ],
+          {
+            lorebooks: [{ id: "lorebook-a", excludeFromVectorization: false }],
+            "lorebook-entries": [
+              {
+                id: "entry-docks",
+                lorebookId: "lorebook-a",
+                name: "Harbor Secret",
+                content: "The dockmaster hides the blue key under the west pier.",
+                enabled: true,
+              },
+              {
+                id: "entry-disabled",
+                lorebookId: "lorebook-a",
+                name: "Disabled",
+                content: "This should not be offered to the retrieval agent.",
+                enabled: false,
+              },
+            ],
+          },
+        ),
+        llm: countingLlm(calls, "The blue key is under the west pier."),
+        integrations,
+      },
+      {
+        chat: { id: "chat-a", metadata: { activeAgentIds: ["knowledge-a"] } },
+        connection: { id: "chat-connection", model: "chat-model" },
+        storedMessages: [{ id: "user-1", role: "user", content: "Where would the key be hidden?" }],
+        characters: [],
+        persona: null,
+        activatedLorebookEntries: [],
+        chatSummary: null,
+      },
+    );
+
+    expect(runtime.preInjections).toEqual([
+      {
+        agentType: "knowledge-retrieval",
+        agentName: "Knowledge Retrieval",
+        text: "The blue key is under the west pier.",
+      },
+    ]);
+    expect(calls).toHaveLength(1);
+    const systemPrompt = calls[0]?.messages[0]?.content ?? "";
+    expect(systemPrompt).toContain("<source_material>");
+    expect(systemPrompt).toContain("### Harbor Secret");
+    expect(systemPrompt).toContain("The dockmaster hides the blue key under the west pier.");
+    expect(systemPrompt).not.toContain("This should not be offered to the retrieval agent.");
+  });
+
+  it("routes Knowledge Router over selected lorebook entries and injects chosen content verbatim", async () => {
+    const calls: LlmRequest[] = [];
+    const runtime = await createGenerationAgentRuntime(
+      {
+        storage: storage(
+          [
+            {
+              id: "router-a",
+              type: "knowledge-router",
+              name: "Knowledge Router",
+              enabled: true,
+              phase: "pre_generation",
+              connectionId: null,
+              model: "agent-model",
+              promptTemplate: 'Return JSON like {"entryIds":["id"]}.',
+              settings: { sourceLorebookIds: ["lorebook-a"] },
+            },
+          ],
+          {
+            lorebooks: [{ id: "lorebook-a", excludeFromVectorization: false }],
+            "lorebook-entries": [
+              {
+                id: "entry-clocktower",
+                lorebookId: "lorebook-a",
+                name: "Clocktower",
+                description: "Where the silver bell is hidden.",
+                content: "The silver bell is sealed behind the clocktower face.",
+                enabled: true,
+                keys: ["bell"],
+              },
+              {
+                id: "entry-constant",
+                lorebookId: "lorebook-a",
+                name: "Always Injected",
+                description: "Already handled by normal lore injection.",
+                content: "This constant entry should not be routed.",
+                enabled: true,
+                constant: true,
+              },
+            ],
+          },
+        ),
+        llm: countingLlm(calls, '{"entryIds":["entry-clocktower","entry-constant","entry-clocktower","missing"]}'),
+        integrations,
+      },
+      {
+        chat: { id: "chat-a", metadata: { activeAgentIds: ["router-a"] } },
+        connection: { id: "chat-connection", model: "chat-model" },
+        storedMessages: [{ id: "user-1", role: "user", content: "What about the bell?" }],
+        characters: [],
+        persona: null,
+        activatedLorebookEntries: [],
+        chatSummary: null,
+      },
+    );
+
+    expect(runtime.preInjections).toEqual([
+      {
+        agentType: "knowledge-router",
+        agentName: "Knowledge Router",
+        text: "### Clocktower\nThe silver bell is sealed behind the clocktower face.",
+      },
+    ]);
+    expect(calls).toHaveLength(1);
+    const systemPrompt = calls[0]?.messages[0]?.content ?? "";
+    expect(systemPrompt).toContain("<entry_catalog>");
+    expect(systemPrompt).toContain('id="entry-clocktower"');
+    expect(systemPrompt).not.toContain("entry-constant");
   });
 
   it("merges connection generation parameters into agent LLM calls", async () => {
@@ -1918,6 +2056,70 @@ describe("createGenerationAgentRuntime", () => {
     const promptText = calls[0]!.messages.map((message) => message.content).join("\n");
     expect(promptText).toContain("The active city is Hearthglass.");
     expect(promptText).not.toContain("Wrongport");
+  });
+
+  it("excludes generated game lorebook-keeper books from knowledge agent sources when the keeper is disabled", async () => {
+    const calls: LlmRequest[] = [];
+    const runtime = await createGenerationAgentRuntime(
+      {
+        storage: storage(
+          [
+            {
+              id: "knowledge-retrieval",
+              type: "knowledge-retrieval",
+              name: "Knowledge Retrieval",
+              enabled: true,
+              phase: "pre_generation",
+              connectionId: null,
+              model: "agent-model",
+              promptTemplate: "Extract relevant lore.",
+              settings: { sourceLorebookIds: ["keeper-book"] },
+            },
+          ],
+          {
+            lorebooks: [
+              {
+                id: "keeper-book",
+                enabled: true,
+                isGlobal: true,
+                sourceAgentId: "game-lorebook-keeper",
+              },
+            ],
+            "lorebook-entries": [
+              {
+                id: "keeper-entry",
+                lorebookId: "keeper-book",
+                name: "Keeper Internal Lore",
+                content: "This generated game keeper lore should not leak.",
+                enabled: true,
+              },
+            ],
+          },
+        ),
+        llm: countingLlm(calls, "Leaked keeper lore."),
+        integrations,
+      },
+      {
+        chat: {
+          id: "chat-a",
+          mode: "game",
+          metadata: {
+            activeAgentIds: ["knowledge-retrieval"],
+            gameLorebookKeeperEnabled: false,
+            gameLorebookKeeperLorebookId: "keeper-book",
+          },
+        },
+        connection: { id: "chat-connection", model: "chat-model" },
+        storedMessages: [{ role: "user", content: "What does the keeper know?" }],
+        characters: [],
+        persona: null,
+        activatedLorebookEntries: [],
+        chatSummary: null,
+      },
+    );
+
+    expect(runtime.preInjections).toEqual([]);
+    expect(calls).toHaveLength(0);
   });
 
   it("scopes knowledge router candidates to lorebooks linked to active characters", async () => {

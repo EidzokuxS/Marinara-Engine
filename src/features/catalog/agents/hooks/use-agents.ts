@@ -2,6 +2,7 @@
 // Hooks: Agent Configs (React Query)
 // ──────────────────────────────────────────────
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { createAgentConfigSchema } from "../../../../engine/contracts/schemas/agent.schema";
 import { BUILT_IN_AGENTS } from "../../../../engine/contracts/types/agent";
 import { agentApi } from "../../../../shared/api/agent-api";
 import { storageApi } from "../../../../shared/api/storage-api";
@@ -98,7 +99,7 @@ export function useUpdateAgentByType() {
 export function useCreateAgent() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: Record<string, unknown>) => storageApi.create("agents", data),
+    mutationFn: (data: Record<string, unknown>) => storageApi.create("agents", createAgentConfigSchema.parse(data)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentKeys.all });
     },

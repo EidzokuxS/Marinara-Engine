@@ -2,6 +2,7 @@
 // Hooks: Custom Tools (React Query)
 // ──────────────────────────────────────────────
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { createCustomToolSchema } from "../../../../engine/contracts/schemas/custom-tool.schema";
 import { customToolApi } from "../../../../shared/api/custom-tool-api";
 import { storageApi } from "../../../../shared/api/storage-api";
 
@@ -66,7 +67,7 @@ export function useCustomToolCapabilities() {
 export function useCreateCustomTool() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: Record<string, unknown>) => storageApi.create("custom-tools", data),
+    mutationFn: (data: Record<string, unknown>) => storageApi.create("custom-tools", createCustomToolSchema.parse(data)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: toolKeys.all });
     },

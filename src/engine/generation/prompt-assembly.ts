@@ -5,6 +5,7 @@ import type { StorageGateway } from "../capabilities/storage";
 import { getCharacterDescriptionWithExtensions } from "../generation-core/prompt/character-description-extensions";
 import { injectAtDepth, processActivatedEntries } from "../generation-core/lorebooks/prompt-injector";
 import { scanForActivatedEntries, type ActivatedEntry } from "../generation-core/lorebooks/keyword-scanner";
+import { resolveGameLorebookScopeExclusions } from "../generation-core/lorebooks/game-lorebook-scope";
 import { wrapContent } from "../generation-core/prompt/format-engine";
 import { mergeAdjacentMessages, squashLeadingSystemMessages } from "../generation-core/prompt/merger";
 import { applyRegexScriptsToPromptMessages } from "../generation-core/regex/regex-application";
@@ -22,6 +23,7 @@ import type {
   SessionSummary,
 } from "../contracts/types/game";
 import { buildGmFormatReminder, buildGmSystemPrompt, type GmPromptContext } from "../modes/game/prompts/gm-prompts";
+import { formatPerceptionHints, generatePerceptionHints } from "../modes/game/mechanics/perception.service";
 import { fingerprintChatSummary } from "../shared/text/chat-summary-fingerprint";
 import { activeCharacterIds } from "./active-characters";
 import {
@@ -409,6 +411,66 @@ function gameTimeAndWeather(chat: JsonRecord, meta: JsonRecord): { gameTime?: st
   };
 }
 
+function normalizedRecordKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function readNormalizedNumber(record: JsonRecord, keys: string[], fallback: number): number {
+  const wanted = new Set(keys.map(normalizedRecordKey));
+  for (const [key, value] of Object.entries(record)) {
+    if (wanted.has(normalizedRecordKey(key))) {
+      return readNumber(value, fallback);
+    }
+  }
+  return fallback;
+}
+
+function readPersonaAttribute(persona: GenerationPersonaContext | null, keys: string[]): number | null {
+  const wanted = new Set(keys.map(normalizedRecordKey));
+  for (const attribute of persona?.rpgStats?.attributes ?? []) {
+    if (wanted.has(normalizedRecordKey(attribute.name))) {
+      return readNumber(attribute.value, Number.NaN);
+    }
+  }
+  return null;
+}
+
+function normalizePerceptionToken(value: unknown): string | null {
+  const raw = readString(value).trim();
+  if (!raw) return null;
+  const parenthetical = raw.match(/\(([^)]+)\)/)?.[1]?.trim();
+  return (parenthetical || raw).toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function buildGamePerceptionHints(
+  chat: JsonRecord,
+  meta: JsonRecord,
+  persona: GenerationPersonaContext | null,
+): string | undefined {
+  const state = parseRecord(chat.gameState ?? meta.gameState);
+  const playerStats = parseRecord(state.playerStats);
+  const attributes = parseRecord(playerStats.attributes);
+  const skills = parseRecord(playerStats.skills);
+  const personaWisdom = readPersonaAttribute(persona, ["wis", "wisdom"]);
+  const wisdomScore = readNormalizedNumber(attributes, ["wis", "wisdom"], personaWisdom ?? 10);
+  const dangerLevel = readNormalizedNumber(state, ["dangerLevel"], readNormalizedNumber(meta, ["gameDangerLevel"], Number.NaN));
+  const presentNpcNames = recordArray(state.presentCharacters)
+    .map((character) => readString(character.name).trim())
+    .filter(Boolean);
+  const hints = generatePerceptionHints({
+    perceptionMod: readNormalizedNumber(skills, ["perception", "perceptionMod", "perceptionModifier"], 0),
+    wisdomScore,
+    gameState: readString(meta.gameActiveState, "exploration") || "exploration",
+    location: readString(state.location).trim() || null,
+    weather: normalizePerceptionToken(state.weather),
+    timeOfDay: normalizePerceptionToken(state.time),
+    presentNpcNames,
+    dangerLevel: Number.isFinite(dangerLevel) ? dangerLevel : undefined,
+  });
+  const block = formatPerceptionHints(hints);
+  return block || undefined;
+}
+
 function mergeGameLoreIntoPrompt(prompt: string, worldBefore: string, worldAfter: string): string {
   const lore = [worldBefore, worldAfter].filter((part) => part.trim().length > 0).join("\n\n");
   return lore ? `${prompt}\n\n<lore>\n${lore}\n</lore>` : prompt;
@@ -496,6 +558,7 @@ async function buildGamePromptMessages(
     hasSceneModel: !!(readString(meta.gameSceneConnectionId).trim() || readString(setup.sceneConnectionId).trim()),
     playerMoved: true,
     turnNumber: input.storedMessages.filter((message) => readString(message.role) === "user").length + 1,
+    perceptionHints: buildGamePerceptionHints(input.chat, meta, persona),
     moraleContext:
       meta.gameMorale == null ? undefined : `Current party morale: ${readNumber(meta.gameMorale, 50)} / 100.`,
     playerInventory: normalizeGameInventory(meta.gameInventory),
@@ -1428,7 +1491,7 @@ function authorNotesDepthEntry(chat: JsonRecord): { content: string; role: "syst
   return { content, role: "system", depth };
 }
 
-function normalizeLorebookEntry(entry: JsonRecord): LorebookEntry {
+export function normalizeLorebookEntry(entry: JsonRecord): LorebookEntry {
   return {
     id: readString(entry.id),
     lorebookId: readString(entry.lorebookId),
@@ -1492,6 +1555,11 @@ function lorebookAppliesToContext(
   persona: GenerationPersonaContext | null,
 ): boolean {
   if (!boolish(lorebook.enabled, true)) return false;
+  const meta = parseRecord(chat.metadata);
+  const scopeExclusions = resolveGameLorebookScopeExclusions(readString(chat.mode || chat.chatMode), meta);
+  const lorebookId = readString(lorebook.id);
+  if (scopeExclusions.excludedLorebookIds.includes(lorebookId)) return false;
+  if (scopeExclusions.excludedSourceAgentIds.includes(readString(lorebook.sourceAgentId))) return false;
   if (boolish(lorebook.isGlobal ?? lorebook.global, false)) return true;
   const activeIds = new Set(characters.map((character) => character.id));
   const lorebookCharacterIds = stringArray(lorebook.characterIds);
@@ -1503,8 +1571,7 @@ function lorebookAppliesToContext(
     const personaIds = stringArray(lorebook.personaIds);
     if (personaIds.includes(personaId) || readString(lorebook.personaId) === personaId) return true;
   }
-  const meta = parseRecord(chat.metadata);
-  return stringArray(meta.activeLorebookIds ?? chat.activeLorebookIds).includes(readString(lorebook.id));
+  return stringArray(meta.activeLorebookIds ?? chat.activeLorebookIds).includes(lorebookId);
 }
 
 async function loadActivatedLore(

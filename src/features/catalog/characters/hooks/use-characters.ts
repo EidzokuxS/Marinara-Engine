@@ -3,6 +3,14 @@
 // ──────────────────────────────────────────────
 import { useQuery, useQueries, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { characterKeys, spriteKeys } from "../query-keys";
+import {
+  createCharacterSchema,
+  createGroupSchema,
+  createPersonaGroupSchema,
+  updateCharacterSchema,
+  updateGroupSchema,
+  updatePersonaGroupSchema,
+} from "../../../../engine/contracts/schemas/character.schema";
 import { characterApi } from "../../../../shared/api/character-api";
 import { storageApi } from "../../../../shared/api/storage-api";
 import { storageCommandsApi } from "../../../../shared/api/storage-commands-api";
@@ -237,7 +245,7 @@ export function useCharacterSummariesByIds(ids: string[], enabled = true) {
 export function useCreateCharacter() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: Record<string, unknown>) => storageApi.create("characters", data),
+    mutationFn: (data: Record<string, unknown>) => storageApi.create("characters", createCharacterSchema.parse(data)),
     onSuccess: (character) => {
       refreshCharacterCollectionAfterMutation(qc, character);
     },
@@ -258,7 +266,7 @@ export function useUpdateCharacter() {
       versionSource?: string;
       versionReason?: string;
       skipVersionSnapshot?: boolean;
-    }) => storageApi.update("characters", id, data),
+    }) => storageApi.update("characters", id, updateCharacterSchema.parse(data)),
     onSuccess: (_data, variables) => {
       invalidateCharacterRecordQueries(qc, variables.id, { includeVersions: true });
     },
@@ -735,7 +743,7 @@ export function useCreateGroup() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: { name: string; description?: string; characterIds?: string[] }) =>
-      storageApi.create("character-groups", data),
+      storageApi.create("character-groups", createGroupSchema.parse(data)),
     onSuccess: () => qc.invalidateQueries({ queryKey: characterKeys.groups }),
   });
 }
@@ -744,7 +752,7 @@ export function useUpdateGroup() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...data }: { id: string; name?: string; description?: string; characterIds?: string[] }) =>
-      storageApi.update("character-groups", id, data),
+      storageApi.update("character-groups", id, updateGroupSchema.parse(data)),
     onSuccess: () => qc.invalidateQueries({ queryKey: characterKeys.groups }),
   });
 }
@@ -771,7 +779,7 @@ export function useCreatePersonaGroup() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: { name: string; description?: string; personaIds?: string[] }) =>
-      storageApi.create("persona-groups", data),
+      storageApi.create("persona-groups", createPersonaGroupSchema.parse(data)),
     onSuccess: () => qc.invalidateQueries({ queryKey: characterKeys.personaGroups }),
   });
 }
@@ -780,7 +788,7 @@ export function useUpdatePersonaGroup() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...data }: { id: string; name?: string; description?: string; personaIds?: string[] }) =>
-      storageApi.update("persona-groups", id, data),
+      storageApi.update("persona-groups", id, updatePersonaGroupSchema.parse(data)),
     onSuccess: () => qc.invalidateQueries({ queryKey: characterKeys.personaGroups }),
   });
 }

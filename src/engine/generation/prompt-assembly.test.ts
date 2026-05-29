@@ -148,17 +148,21 @@ function storageWithSectionsAndCharacters(sections: Row[], characters: Row[]): S
   };
 }
 
-function storageWithLore(entries: Row[]): StorageGateway {
+function storageWithLore(
+  entries: Row[],
+  lorebooks: Row[] = [{ id: "lorebook", enabled: true, isGlobal: true }],
+): StorageGateway {
   return {
     ...storageWithSections([]),
     list: async <T>(entity: string) => {
-      if (entity === "lorebooks") return [{ id: "lorebook", enabled: true, isGlobal: true }] as T[];
+      if (entity === "lorebooks") return lorebooks as T[];
       if (entity === "regex-scripts") return [] as T[];
       if (entity === "personas") return [] as T[];
       if (entity === "prompts") return [] as T[];
       return [] as T[];
     },
-    listLorebookEntries: async <T>() => entries as T[],
+    listLorebookEntries: async <T>(lorebookId: string) =>
+      entries.filter((entry) => !entry.lorebookId || entry.lorebookId === lorebookId) as T[],
   };
 }
 
@@ -1223,6 +1227,113 @@ describe("assembleGenerationPrompt lorebook game-state gates", () => {
     );
 
     expect(assembly.activatedLorebookEntries.map((entry) => entry.name)).toEqual(["Ungated moonlit lore"]);
+  });
+
+  it("excludes generated game lorebook-keeper books when the keeper is disabled", async () => {
+    const assembly = await assembleGenerationPrompt(
+      storageWithLore(
+        [
+          {
+            id: "entry-keeper",
+            lorebookId: "keeper-book",
+            name: "Keeper generated moonlit lore",
+            content: "This lore came from the game lorebook keeper.",
+            keys: ["moonlit"],
+            enabled: true,
+          },
+        ],
+        [{ id: "keeper-book", enabled: true, isGlobal: true, sourceAgentId: "game-lorebook-keeper" }],
+      ),
+      {
+        chat: {
+          id: "chat",
+          mode: "game",
+          metadata: {
+            gameLorebookKeeperEnabled: false,
+            gameLorebookKeeperLorebookId: "keeper-book",
+          },
+        },
+        storedMessages: [{ role: "user", content: "Tell me about the moonlit path.", contextKind: "history" }],
+        connection: {},
+        request: { ...request, promptPresetId: "" },
+        latestUserInput: "Tell me about the moonlit path.",
+      },
+    );
+
+    expect(assembly.activatedLorebookEntries).toHaveLength(0);
+  });
+
+  it("keeps generated game lorebook-keeper books active when the keeper is enabled", async () => {
+    const assembly = await assembleGenerationPrompt(
+      storageWithLore(
+        [
+          {
+            id: "entry-keeper",
+            lorebookId: "keeper-book",
+            name: "Keeper generated moonlit lore",
+            content: "This lore came from the game lorebook keeper.",
+            keys: ["moonlit"],
+            enabled: true,
+          },
+        ],
+        [{ id: "keeper-book", enabled: true, isGlobal: true, sourceAgentId: "game-lorebook-keeper" }],
+      ),
+      {
+        chat: {
+          id: "chat",
+          mode: "game",
+          metadata: {
+            gameLorebookKeeperEnabled: true,
+            gameLorebookKeeperLorebookId: "keeper-book",
+          },
+        },
+        storedMessages: [{ role: "user", content: "Tell me about the moonlit path.", contextKind: "history" }],
+        connection: {},
+        request: { ...request, promptPresetId: "" },
+        latestUserInput: "Tell me about the moonlit path.",
+      },
+    );
+
+    expect(assembly.activatedLorebookEntries.map((entry) => entry.name)).toEqual(["Keeper generated moonlit lore"]);
+  });
+
+  it("injects passive perception hints into game GM prompts", async () => {
+    const assembly = await assembleGenerationPrompt(storageWithSections([]), {
+      chat: {
+        id: "game-chat",
+        mode: "game",
+        characterIds: [],
+        gameState: {
+          playerStats: {
+            attributes: { WIS: 14 },
+            skills: { Perception: 5 },
+            stats: [],
+            inventory: [],
+            activeQuests: [],
+            status: "",
+          },
+          presentCharacters: [{ name: "Mira" }],
+        },
+        metadata: {
+          gameActiveState: "dialogue",
+          gameSetupConfig: {
+            genre: "fantasy",
+            setting: "market district",
+            tone: "tense",
+            difficulty: "normal",
+          },
+        },
+      },
+      storedMessages: [{ role: "user", content: "Watch Mira closely.", contextKind: "history" }],
+      connection: {},
+      request: { ...request, promptPresetId: "" },
+      latestUserInput: "Watch Mira closely.",
+    });
+
+    const prompt = assembly.messages.map((message) => message.content).join("\n\n");
+    expect(prompt).toContain("<passive_perception>");
+    expect(prompt).toContain("notices Mira glancing nervously at exits");
+    expect(prompt).toContain("Weave these observations naturally into the narration.");
   });
 });
 
