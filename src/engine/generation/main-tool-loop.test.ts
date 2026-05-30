@@ -5,6 +5,7 @@ import type { StorageGateway } from "../capabilities/storage";
 import { startGeneration, type GenerationEngineDeps } from "./start-generation";
 import {
   buildMainToolDefinitions,
+  executeBuiltInTool,
   executeMainToolCall,
   searchLorebookTool,
   normalizeToolCall,
@@ -397,6 +398,184 @@ describe("row 6 — agent-only tool names filtered from main toolDefs", () => {
     expect(names).not.toContain("append_chat_summary");
     expect(names).not.toContain("read_chat_variable");
     expect(names).not.toContain("write_chat_variable");
+  });
+});
+
+describe("append_chat_summary source message hiding", () => {
+  it("records and hides recent visible source messages when automated summary hiding is enabled", async () => {
+    const { deps, storage, update } = makeStubDeps({
+      chatMetadata: {},
+      initialMessages: [],
+      script: { turns: [] },
+    });
+    const patchChatMessageExtra = storage.patchChatMessageExtra as ReturnType<typeof vi.fn>;
+
+    const result = await executeBuiltInTool(
+      deps,
+      {
+        chat: { id: "chat-1", metadata: {} },
+        storedMessages: [
+          { id: "visible-1", role: "user", content: "First." },
+          { id: "hidden-1", role: "assistant", content: "Hidden.", extra: { hiddenFromAI: true } },
+          { id: "visible-2", role: "assistant", content: "Second." },
+        ],
+        activatedLorebookEntries: [],
+        characters: [],
+        persona: null,
+        chatSummary: null,
+        hideAutomatedSummarySourceMessages: true,
+      },
+      { id: "agent-a", name: "Summary Agent" },
+      normalizeToolCall({
+        function: {
+          name: "append_chat_summary",
+          arguments: JSON.stringify({ text: "The visible exchange was summarized." }),
+        },
+      })!,
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        success: true,
+        hiddenMessageIds: ["visible-1", "visible-2"],
+        entry: expect.objectContaining({
+          messageCount: 2,
+          messageIds: ["visible-1", "visible-2"],
+        }),
+      }),
+    );
+    expect(patchChatMessageExtra).toHaveBeenCalledTimes(2);
+    expect(patchChatMessageExtra).toHaveBeenNthCalledWith(1, "visible-1", {
+      hiddenFromAI: true,
+      hiddenFromAi: true,
+    });
+    expect(patchChatMessageExtra).toHaveBeenNthCalledWith(2, "visible-2", {
+      hiddenFromAI: true,
+      hiddenFromAi: true,
+    });
+    expect(update).toHaveBeenCalledWith(
+      "chats",
+      "chat-1",
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          summaryEntries: [
+            expect.objectContaining({
+              origin: "automated",
+              sourceMode: "agent",
+              messageIds: ["visible-1", "visible-2"],
+            }),
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("records source messages without hiding them when automated summary hiding is disabled", async () => {
+    const { deps, storage } = makeStubDeps({
+      chatMetadata: {},
+      initialMessages: [],
+      script: { turns: [] },
+    });
+    const patchChatMessageExtra = storage.patchChatMessageExtra as ReturnType<typeof vi.fn>;
+
+    const result = await executeBuiltInTool(
+      deps,
+      {
+        chat: { id: "chat-1", metadata: {} },
+        storedMessages: [{ id: "visible-1", role: "user", content: "First." }],
+        activatedLorebookEntries: [],
+        characters: [],
+        persona: null,
+        chatSummary: null,
+        hideAutomatedSummarySourceMessages: false,
+      },
+      { id: "agent-a", name: "Summary Agent" },
+      normalizeToolCall({
+        function: {
+          name: "append_chat_summary",
+          arguments: JSON.stringify({ text: "The visible exchange was summarized." }),
+        },
+      })!,
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        success: true,
+        hiddenMessageIds: [],
+        entry: expect.objectContaining({ messageIds: ["visible-1"] }),
+      }),
+    );
+    expect(patchChatMessageExtra).not.toHaveBeenCalled();
+  });
+
+  it("keeps successful hidden ids and persists metadata after partial hide failures settle", async () => {
+    const { deps, storage, update } = makeStubDeps({
+      chatMetadata: {},
+      initialMessages: [],
+      script: { turns: [] },
+    });
+    const patchChatMessageExtra = storage.patchChatMessageExtra as ReturnType<typeof vi.fn>;
+    patchChatMessageExtra.mockImplementation(async (id: string, patch: Record<string, unknown>) => {
+      if (id === "visible-2") throw new Error("patch failed");
+      return { id, ...patch };
+    });
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      const result = await executeBuiltInTool(
+        deps,
+        {
+          chat: { id: "chat-1", metadata: {} },
+          storedMessages: [
+            { id: "visible-1", role: "user", content: "First." },
+            { id: "visible-2", role: "assistant", content: "Second." },
+          ],
+          activatedLorebookEntries: [],
+          characters: [],
+          persona: null,
+          chatSummary: null,
+          hideAutomatedSummarySourceMessages: true,
+        },
+        { id: "agent-a", name: "Summary Agent" },
+        normalizeToolCall({
+          function: {
+            name: "append_chat_summary",
+            arguments: JSON.stringify({ text: "The visible exchange was summarized." }),
+          },
+        })!,
+      );
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: true,
+          hiddenMessageIds: ["visible-1"],
+        }),
+      );
+      expect(patchChatMessageExtra).toHaveBeenCalledTimes(2);
+      expect(consoleWarn).toHaveBeenCalledWith(
+        "[tools-runtime] Failed to hide automated summary source message",
+        expect.objectContaining({ messageId: "visible-2" }),
+      );
+      expect(update).toHaveBeenCalledWith(
+        "chats",
+        "chat-1",
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            summaryEntries: [
+              expect.objectContaining({
+                messageCount: 2,
+                messageIds: ["visible-1", "visible-2"],
+              }),
+            ],
+          }),
+        }),
+      );
+      const updateOrder = update.mock.invocationCallOrder[0] ?? 0;
+      const patchOrders = patchChatMessageExtra.mock.invocationCallOrder;
+      expect(Math.max(...patchOrders)).toBeLessThan(updateOrder);
+    } finally {
+      consoleWarn.mockRestore();
+    }
   });
 });
 
