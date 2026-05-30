@@ -1254,6 +1254,13 @@ function buildAgentExtras(context: AgentContext, agentTypes: string[] = []): str
     parts.push(`</secret_plot_state>`);
   }
 
+  // Tarot: the authoritative outcome from Justice, fed to the Emperor composer.
+  if (context.memory._justiceResolution) {
+    parts.push(`<justice_resolution>`);
+    parts.push(context.memory._justiceResolution as string);
+    parts.push(`</justice_resolution>`);
+  }
+
   return parts.join("\n");
 }
 
@@ -1283,6 +1290,7 @@ const AGENT_RESULT_TYPE_MAP: Record<string, AgentResultType> = {
   cyoa: "cyoa_choices",
   "secret-plot-driver": "secret_plot",
   justice: "justice_verdict",
+  emperor: "emperor_scenario",
 };
 
 const AGENT_RESULT_TYPES = new Set<AgentResultType>([
@@ -1312,6 +1320,7 @@ const AGENT_RESULT_TYPES = new Set<AgentResultType>([
   "game_map_update",
   "game_state_transition",
   "justice_verdict",
+  "emperor_scenario",
 ]);
 
 const TEXT_RESULT_TYPES = new Set<AgentResultType>(["context_injection", "director_event"]);
@@ -1366,6 +1375,7 @@ const JSON_AGENTS = new Set([
   "cyoa",
   "secret-plot-driver",
   "justice",
+  "emperor",
 ]);
 
 /**

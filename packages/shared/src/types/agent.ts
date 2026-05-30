@@ -38,7 +38,8 @@ export type AgentResultType =
   | "party_action"
   | "game_map_update"
   | "game_state_transition"
-  | "justice_verdict";
+  | "justice_verdict"
+  | "emperor_scenario";
 
 /** Configuration for a single agent. */
 export interface AgentConfig {
@@ -183,6 +184,7 @@ export const BUILT_IN_AGENT_IDS = {
   CYOA: "cyoa",
   SECRET_PLOT_DRIVER: "secret-plot-driver",
   JUSTICE: "justice",
+  EMPEROR: "emperor",
 } as const;
 
 export type AgentCategory = "writer" | "tracker" | "misc";
@@ -194,6 +196,12 @@ export interface JusticeVerdict {
   dc: number | null;
   on_success: string | null;
   on_fail: string | null;
+}
+
+/** Emperor agent output — the beat-by-beat scenario Tower renders into prose. */
+export interface EmperorScenario {
+  scenario: string;
+  beats?: string[];
 }
 
 export interface BuiltInAgentMeta {
@@ -257,6 +265,15 @@ export const BUILT_IN_AGENTS: BuiltInAgentMeta[] = [
     name: "Justice",
     description:
       "Судит реализм действия игрока: нужна ли проверка, гарантированный успех/провал с ризонингом, сложность (DC) и обе ветки последствий до броска. Дайс кидает харнесс, не модель.",
+    phase: "pre_generation",
+    enabledByDefault: false,
+    category: "writer",
+  },
+  {
+    id: "emperor",
+    name: "Emperor",
+    description:
+      "Композитор хода. Из исхода Justice + контекста сочиняет beat-by-beat сценарий (что происходит, кто реагирует), не меняя исход. Tower потом разворачивает сценарий в прозу.",
     phase: "pre_generation",
     enabledByDefault: false,
     category: "writer",
@@ -526,6 +543,7 @@ export const DEFAULT_AGENT_TOOLS: Record<string, string[]> = {
   "card-evolution-auditor": [],
   "prompt-reviewer": [],
   justice: [],
+  emperor: [],
   combat: ["roll_dice", "update_game_state"],
   background: [],
   "character-tracker": ["update_game_state"],

@@ -6257,7 +6257,10 @@ export async function generateRoutes(app: FastifyInstance) {
         // Static-injection agents don't need LLM calls — they inject prompt text directly
         const STATIC_INJECTION_AGENTS = new Set(["html"]);
         const SEPARATE_INJECTION_AGENTS = new Set(["knowledge-retrieval", "knowledge-router"]);
-        const EXCLUDED_FROM_PIPELINE = new Set(["html", "knowledge-retrieval", "knowledge-router"]);
+        // "emperor" is excluded from the batched pipeline because it runs MANUALLY
+        // after Justice in the fresh branch (it depends on Justice's resolved outcome —
+        // a sequential chain link that the parallel-batched pipeline can't express).
+        const EXCLUDED_FROM_PIPELINE = new Set(["html", "knowledge-retrieval", "knowledge-router", "emperor"]);
         const hasPreGenAgents = resolvedAgents.some(
           (a) => a.phase === "pre_generation" && !EXCLUDED_FROM_PIPELINE.has(a.type) && !reviewedAgentTypes.has(a.type),
         );
@@ -6308,6 +6311,9 @@ export async function generateRoutes(app: FastifyInstance) {
         // Justice: authoritative resolution block, computed in the fresh pre-gen
         // branch (where this turn's agent results live) and injected later.
         let justiceResolutionBlock: string | null = null;
+        // Raw Justice outcome text (fed to Emperor) + Emperor's composed scenario block.
+        let justiceOutcomeText: string | null = null;
+        let emperorScenarioBlock: string | null = null;
 
         if (shouldRunPreGen || shouldRunKR || shouldRunRouter) {
           sendProgress("agents");
@@ -6601,11 +6607,49 @@ export async function generateRoutes(app: FastifyInstance) {
                   "Ты рассказчик: передай ИМЕННО этот исход живой прозой. НЕ меняй успех на провал или наоборот, НЕ выдумывай фактов сверх данного.";
                 const resolutionBlock = wrapContent(resolved.resolvedOutcome, "justice_resolution", wrapFormat);
                 justiceResolutionBlock = `${directive}\n${resolutionBlock}`;
+                justiceOutcomeText = resolved.resolvedOutcome;
               } else {
                 logger.warn("[justice] verdict missing or invalid — skipping injection");
               }
             } catch (justiceErr) {
               logger.error(justiceErr, "[justice] Failed to resolve verdict");
+            }
+          }
+
+          // ── Emperor: compose the turn scenario AFTER Justice (sequential chain link) ──
+          // Emperor runs manually here (excluded from the batched pipeline) so it can
+          // consume this turn's Justice outcome. Tower then renders Emperor's scenario.
+          const emperorAgent = resolvedAgents.find((a) => a.type === "emperor");
+          if (emperorAgent) {
+            try {
+              const emperorContext: AgentContext = {
+                ...agentContext,
+                memory: {
+                  ...agentContext.memory,
+                  ...(justiceOutcomeText ? { _justiceResolution: justiceOutcomeText } : {}),
+                },
+              };
+              const emperorResult = await executeAgent(
+                emperorAgent,
+                emperorContext,
+                emperorAgent.provider,
+                emperorAgent.model,
+              );
+              sendAgentEvent(emperorResult);
+              if (emperorResult.success && emperorResult.data && typeof emperorResult.data === "object") {
+                const scenario = (emperorResult.data as Record<string, unknown>).scenario;
+                if (typeof scenario === "string" && scenario.trim()) {
+                  logger.debug("[emperor] composed scenario (%d chars)", scenario.length);
+                  const emperorDirective =
+                    "Ниже в <turn_scenario> — раскадровка хода от режиссёра (Emperor). " +
+                    "Ты рассказчик: разверни её живой прозой. НЕ меняй суть и исход, НЕ добавляй новых событий сверх сценария.";
+                  emperorScenarioBlock = `${emperorDirective}\n${wrapContent(scenario, "turn_scenario", wrapFormat)}`;
+                } else {
+                  logger.warn("[emperor] empty or invalid scenario — falling back to raw justice resolution");
+                }
+              }
+            } catch (emperorErr) {
+              logger.error(emperorErr, "[emperor] Failed to compose scenario");
             }
           }
 
@@ -6913,14 +6957,16 @@ export async function generateRoutes(app: FastifyInstance) {
           }
         }
 
-        // ── Justice: inject the authoritative resolution (ungated; computed in the fresh pre-gen branch) ──
-        // Must run regardless of whether the secret-plot block above executed, so it
-        // is placed outside that guard. No-op when justiceResolutionBlock is null.
-        if (justiceResolutionBlock) {
+        // ── Tarot chain: inject the authoritative turn content (ungated) ──
+        // Prefer Emperor's composed scenario (Tower renders the scenario). Fall back to
+        // the raw Justice resolution when Emperor is off. Computed in the fresh pre-gen
+        // branch; placed outside the secret-plot guard so it always runs.
+        const tarotTurnBlock = emperorScenarioBlock ?? justiceResolutionBlock;
+        if (tarotTurnBlock) {
           const lastUserIdx = findLastIndex(finalMessages, "user");
           finalMessages.splice(lastUserIdx >= 0 ? lastUserIdx : finalMessages.length, 0, {
             role: "system",
-            content: justiceResolutionBlock,
+            content: tarotTurnBlock,
           });
         }
 
