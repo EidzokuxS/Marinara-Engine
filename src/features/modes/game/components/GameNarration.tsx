@@ -2486,10 +2486,11 @@ export function GameNarration({
   const getSegmentStartVisibleChars = useCallback(
     (index: number) => {
       const segment = segments[index];
-      if (!segment || !gameInstantTextReveal || directionsActive || scenePreparing) return 0;
-      return effectDisplayLength(segment.content);
+      if (!segment || directionsActive || scenePreparing) return 0;
+      if (!isStreaming || gameInstantTextReveal) return effectDisplayLength(segment.content);
+      return 0;
     },
-    [segments, gameInstantTextReveal, directionsActive, scenePreparing],
+    [segments, directionsActive, scenePreparing, isStreaming, gameInstantTextReveal],
   );
 
   useEffect(() => {
@@ -2855,7 +2856,7 @@ export function GameNarration({
     tw.pos = visibleChars;
 
     if (tw.pos >= dispLen) return;
-    if (gameInstantTextReveal || gameTextSpeed >= 100) {
+    if (!isStreaming || gameInstantTextReveal || gameTextSpeed >= 100) {
       // Instant
       tw.pos = dispLen;
       setVisibleChars(dispLen);
@@ -2877,7 +2878,7 @@ export function GameNarration({
     }, TICK_MS);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, gameInstantTextReveal, gameTextSpeed, directionsActive, scenePreparing, logsOpen]); // visibleChars intentionally excluded — managed internally
+  }, [active, isStreaming, gameInstantTextReveal, gameTextSpeed, directionsActive, scenePreparing, logsOpen]); // visibleChars intentionally excluded — managed internally
 
   const assetManifest = useGameAssetStore((s) => s.manifest);
 
