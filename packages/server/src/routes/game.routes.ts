@@ -3022,7 +3022,9 @@ export async function gameRoutes(app: FastifyInstance) {
     if (!sessionChat) throw new Error("Failed to create game session chat");
 
     const sessionMeta = parseMeta(sessionChat.metadata);
-    const setupActiveAgentIds = [...(setupConfig.enableSpotifyDj ? ["spotify"] : [])];
+    // Tarot chain on by default for new game sessions (its natural home is the GM/Game mode):
+    // Justice judges realism + harness dice, Emperor composes the turn scenario, Tower renders it.
+    const setupActiveAgentIds = ["justice", "emperor", ...(setupConfig.enableSpotifyDj ? ["spotify"] : [])];
     const spotifySourceType = setupConfig.spotifySourceType ?? "liked";
     const gameChatParameters = mergeStoredGenerationParameters(
       defaultGenerationParameters,

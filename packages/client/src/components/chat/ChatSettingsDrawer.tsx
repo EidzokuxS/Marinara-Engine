@@ -3712,7 +3712,7 @@ export function ChatSettingsDrawer({
                     />
                   </div>
                 </button>
-                {!isGame && metadata.enableAgents && (
+                {metadata.enableAgents && (
                   <div className="mt-1.5 px-3">
                     <label className="mb-1 block text-[0.6875rem] font-medium text-[var(--muted-foreground)]">
                       Tarot Mode
