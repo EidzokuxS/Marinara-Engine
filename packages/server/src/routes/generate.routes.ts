@@ -6622,10 +6622,12 @@ export async function generateRoutes(app: FastifyInstance) {
           const emperorAgent = resolvedAgents.find((a) => a.type === "emperor");
           if (emperorAgent) {
             try {
+              const tarotMode = chatMeta.tarotMode === "world" ? "world" : "player";
               const emperorContext: AgentContext = {
                 ...agentContext,
                 memory: {
                   ...agentContext.memory,
+                  _tarotMode: tarotMode,
                   ...(justiceOutcomeText ? { _justiceResolution: justiceOutcomeText } : {}),
                 },
               };

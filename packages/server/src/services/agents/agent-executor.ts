@@ -1261,6 +1261,11 @@ function buildAgentExtras(context: AgentContext, agentTypes: string[] = []): str
     parts.push(`</justice_resolution>`);
   }
 
+  // Tarot: directing mode that governs how far the player's action chain resolves.
+  if (context.memory._tarotMode) {
+    parts.push(`<tarot_mode>${context.memory._tarotMode as string}</tarot_mode>`);
+  }
+
   return parts.join("\n");
 }
 
