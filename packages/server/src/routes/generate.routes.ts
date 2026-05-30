@@ -6624,8 +6624,11 @@ export async function generateRoutes(app: FastifyInstance) {
                   "[justice] resolved verdict",
                 );
                 const directive =
-                  "Ниже в <justice_resolution> — авторитетный исход действия игрока, определённый судьёй реализма и честным броском. " +
-                  "Ты рассказчик: передай ИМЕННО этот исход живой прозой. НЕ меняй успех на провал или наоборот, НЕ выдумывай фактов сверх данного.";
+                  chatMode === "game"
+                    ? "Ниже в <justice_resolution> — авторитетный исход действия игрока (судья реализма + честный бросок). " +
+                      "Впиши этот исход в свой ход Гейм-Мастера, сохраняя обычный формат GM и обновления состояния игры. НЕ меняй успех на провал или наоборот, НЕ выдумывай фактов сверх данного."
+                    : "Ниже в <justice_resolution> — авторитетный исход действия игрока, определённый судьёй реализма и честным броском. " +
+                      "Ты рассказчик: передай ИМЕННО этот исход живой прозой. НЕ меняй успех на провал или наоборот, НЕ выдумывай фактов сверх данного.";
                 const resolutionBlock = wrapContent(resolved.resolvedOutcome, "justice_resolution", wrapFormat);
                 justiceResolutionBlock = `${directive}\n${resolutionBlock}`;
                 justiceOutcomeText = resolved.resolvedOutcome;
@@ -6665,8 +6668,11 @@ export async function generateRoutes(app: FastifyInstance) {
                 if (typeof scenario === "string" && scenario.trim()) {
                   logger.debug("[emperor] composed scenario (%d chars)", scenario.length);
                   const emperorDirective =
-                    "Ниже в <turn_scenario> — раскадровка хода от режиссёра (Emperor). " +
-                    "Ты рассказчик: разверни её живой прозой. НЕ меняй суть и исход, НЕ добавляй новых событий сверх сценария.";
+                    chatMode === "game"
+                      ? "Ниже в <turn_scenario> — раскадровка хода от режиссёра (Emperor): авторитетная основа этого хода. " +
+                        "Проведи свой ход Гейм-Мастера по этой раскадровке, сохраняя обычный формат GM и обновления состояния игры. НЕ меняй суть и исход, НЕ добавляй событий сверх сценария."
+                      : "Ниже в <turn_scenario> — раскадровка хода от режиссёра (Emperor). " +
+                        "Ты рассказчик: разверни её живой прозой. НЕ меняй суть и исход, НЕ добавляй новых событий сверх сценария.";
                   emperorScenarioBlock = `${emperorDirective}\n${wrapContent(scenario, "turn_scenario", wrapFormat)}`;
                 } else {
                   logger.warn("[emperor] empty or invalid scenario — falling back to raw justice resolution");
