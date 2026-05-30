@@ -1266,6 +1266,13 @@ function buildAgentExtras(context: AgentContext, agentTypes: string[] = []): str
     parts.push(`<tarot_mode>${context.memory._tarotMode as string}</tarot_mode>`);
   }
 
+  // Tarot: this turn's World forecast (arc / scene direction / pacing), fed to Emperor.
+  if (context.memory._worldForecast) {
+    parts.push(`<world_forecast>`);
+    parts.push(context.memory._worldForecast as string);
+    parts.push(`</world_forecast>`);
+  }
+
   return parts.join("\n");
 }
 

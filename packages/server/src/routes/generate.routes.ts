@@ -6314,6 +6314,8 @@ export async function generateRoutes(app: FastifyInstance) {
         // Raw Justice outcome text (fed to Emperor) + Emperor's composed scenario block.
         let justiceOutcomeText: string | null = null;
         let emperorScenarioBlock: string | null = null;
+        // World (secret-plot) forecast summary for this turn, fed to Emperor.
+        let worldForecastText: string | null = null;
 
         if (shouldRunPreGen || shouldRunKR || shouldRunRouter) {
           sendProgress("agents");
@@ -6534,6 +6536,25 @@ export async function generateRoutes(app: FastifyInstance) {
             const plotData = plotResult.data as Record<string, unknown>;
             const agentConfigId = secretPlotAgent?.id ?? plotResult.agentId;
 
+            // Tarot: capture this turn's World forecast (arc + active direction + pacing) for Emperor.
+            const arcObj = plotData.overarchingArc;
+            const arcDesc =
+              arcObj && typeof arcObj === "object"
+                ? ((arcObj as Record<string, unknown>).description as string) || ""
+                : typeof arcObj === "string"
+                  ? arcObj
+                  : "";
+            const activeDir = Array.isArray(plotData.sceneDirections)
+              ? (normalizeSecretPlotSceneDirections(plotData.sceneDirections).find((d) => !d.fulfilled)?.direction ?? "")
+              : "";
+            const pacingText = typeof plotData.pacing === "string" ? plotData.pacing : "";
+            const forecastParts = [
+              arcDesc ? `Арка: ${arcDesc}` : "",
+              activeDir ? `Направление сцены: ${activeDir}` : "",
+              pacingText ? `Темп: ${pacingText}` : "",
+            ].filter(Boolean);
+            if (forecastParts.length > 0) worldForecastText = forecastParts.join("\n");
+
             // Persist to agent memory so swipes/regens read from it
             try {
               if (plotData.overarchingArc) {
@@ -6629,6 +6650,7 @@ export async function generateRoutes(app: FastifyInstance) {
                   ...agentContext.memory,
                   _tarotMode: tarotMode,
                   ...(justiceOutcomeText ? { _justiceResolution: justiceOutcomeText } : {}),
+                  ...(worldForecastText ? { _worldForecast: worldForecastText } : {}),
                 },
               };
               const emperorResult = await executeAgent(
