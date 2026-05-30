@@ -3712,6 +3712,24 @@ export function ChatSettingsDrawer({
                     />
                   </div>
                 </button>
+                {!isGame && metadata.enableAgents && (
+                  <div className="mt-1.5 px-3">
+                    <label className="mb-1 block text-[0.6875rem] font-medium text-[var(--muted-foreground)]">
+                      Tarot Mode
+                    </label>
+                    <select
+                      value={(metadata.tarotMode as string) === "world" ? "world" : "player"}
+                      onChange={(e) => updateMeta.mutate({ id: chat.id, tarotMode: e.target.value })}
+                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-2.5 py-1.5 text-xs text-[var(--foreground)]"
+                    >
+                      <option value="player">Player — заявка игрока катится до хард-блока</option>
+                      <option value="world">World — мир перебивает на первом спорном бите</option>
+                    </select>
+                    <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
+                      Докуда доезжает цепочка действий из одного сообщения (агент Emperor).
+                    </p>
+                  </div>
+                )}
                 {isGame && metadata.enableAgents && (
                   <div className="mt-1.5 px-3">
                     <select
