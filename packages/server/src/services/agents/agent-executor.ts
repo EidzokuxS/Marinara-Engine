@@ -1282,6 +1282,7 @@ const AGENT_RESULT_TYPE_MAP: Record<string, AgentResultType> = {
   haptic: "haptic_command",
   cyoa: "cyoa_choices",
   "secret-plot-driver": "secret_plot",
+  justice: "justice_verdict",
 };
 
 const AGENT_RESULT_TYPES = new Set<AgentResultType>([
@@ -1310,6 +1311,7 @@ const AGENT_RESULT_TYPES = new Set<AgentResultType>([
   "party_action",
   "game_map_update",
   "game_state_transition",
+  "justice_verdict",
 ]);
 
 const TEXT_RESULT_TYPES = new Set<AgentResultType>(["context_injection", "director_event"]);
@@ -1363,6 +1365,7 @@ const JSON_AGENTS = new Set([
   "haptic",
   "cyoa",
   "secret-plot-driver",
+  "justice",
 ]);
 
 /**

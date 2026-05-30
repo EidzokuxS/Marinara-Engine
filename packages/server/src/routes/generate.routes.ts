@@ -84,6 +84,7 @@ import { executeToolCalls, type MetadataPatchInput } from "../services/tools/too
 import { createAgentPipeline, type ResolvedAgent, type AgentInjection } from "../services/agents/agent-pipeline.js";
 import { DATA_DIR } from "../utils/data-dir.js";
 import { executeAgent, normalizeAgentContextSize, resolveAgentResultType } from "../services/agents/agent-executor.js";
+import { resolveJustice } from "../services/agents/tarot/justice-resolve.js";
 import { matchCustomAgentActivation } from "./generate/agent-activation.js";
 import { listCharacterSprites } from "../services/game/sprite.service.js";
 import { generateChatBackground } from "../services/game/game-asset-generation.js";
@@ -6304,6 +6305,10 @@ export async function generateRoutes(app: FastifyInstance) {
           }
         };
 
+        // Justice: authoritative resolution block, computed in the fresh pre-gen
+        // branch (where this turn's agent results live) and injected later.
+        let justiceResolutionBlock: string | null = null;
+
         if (shouldRunPreGen || shouldRunKR || shouldRunRouter) {
           sendProgress("agents");
 
@@ -6560,6 +6565,47 @@ export async function generateRoutes(app: FastifyInstance) {
               );
             } catch (persistErr) {
               logger.error(persistErr, "[secret-plot-driver] Failed to persist state");
+            }
+          }
+
+          // ── Justice: harness-side dice roll + authoritative resolution (Tower mode) ──
+          // Justice (the model) declared the verdict and both outcome branches. The
+          // HARNESS rolls the die and picks the branch — the model never decides the
+          // random outcome (agents-best-practices: the harness acts, not the model).
+          // The resolved block is stored here and injected into finalMessages below.
+          const justiceResult = preGenResults.find((r) => r.type === "justice_verdict");
+          if (justiceResult?.success && justiceResult.data && typeof justiceResult.data === "object") {
+            try {
+              const raw = justiceResult.data as Record<string, unknown>;
+              const verdictKind = raw.verdict;
+              if (verdictKind === "auto_success" || verdictKind === "auto_fail" || verdictKind === "roll") {
+                const resolved = resolveJustice({
+                  verdict: verdictKind,
+                  reasoning: typeof raw.reasoning === "string" ? raw.reasoning : "",
+                  dc: typeof raw.dc === "number" ? raw.dc : null,
+                  on_success: typeof raw.on_success === "string" ? raw.on_success : null,
+                  on_fail: typeof raw.on_fail === "string" ? raw.on_fail : null,
+                });
+                logger.debug(
+                  {
+                    verdict: verdictKind,
+                    branch: resolved.branch,
+                    dc: resolved.dc,
+                    rolled: resolved.rolled,
+                    margin: resolved.margin,
+                  },
+                  "[justice] resolved verdict",
+                );
+                const directive =
+                  "Ниже в <justice_resolution> — авторитетный исход действия игрока, определённый судьёй реализма и честным броском. " +
+                  "Ты рассказчик: передай ИМЕННО этот исход живой прозой. НЕ меняй успех на провал или наоборот, НЕ выдумывай фактов сверх данного.";
+                const resolutionBlock = wrapContent(resolved.resolvedOutcome, "justice_resolution", wrapFormat);
+                justiceResolutionBlock = `${directive}\n${resolutionBlock}`;
+              } else {
+                logger.warn("[justice] verdict missing or invalid — skipping injection");
+              }
+            } catch (justiceErr) {
+              logger.error(justiceErr, "[justice] Failed to resolve verdict");
             }
           }
 
@@ -6864,6 +6910,15 @@ export async function generateRoutes(app: FastifyInstance) {
             }
           } catch (plotInjectErr) {
             logger.error(plotInjectErr, "[secret-plot-driver] Failed to inject arc/directions");
+          }
+
+          // ── Justice: inject the authoritative resolution computed in the fresh branch ──
+          if (justiceResolutionBlock) {
+            const lastUserIdx = findLastIndex(finalMessages, "user");
+            finalMessages.splice(lastUserIdx >= 0 ? lastUserIdx : finalMessages.length, 0, {
+              role: "system",
+              content: justiceResolutionBlock,
+            });
           }
         }
 

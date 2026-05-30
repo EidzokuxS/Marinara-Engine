@@ -37,7 +37,8 @@ export type AgentResultType =
   | "game_master_narration"
   | "party_action"
   | "game_map_update"
-  | "game_state_transition";
+  | "game_state_transition"
+  | "justice_verdict";
 
 /** Configuration for a single agent. */
 export interface AgentConfig {
