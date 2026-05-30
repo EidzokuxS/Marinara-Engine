@@ -181,9 +181,19 @@ export const BUILT_IN_AGENT_IDS = {
   HAPTIC: "haptic",
   CYOA: "cyoa",
   SECRET_PLOT_DRIVER: "secret-plot-driver",
+  JUSTICE: "justice",
 } as const;
 
 export type AgentCategory = "writer" | "tracker" | "misc";
+
+/** Justice agent verdict — declares both outcome branches BEFORE the harness rolls. */
+export interface JusticeVerdict {
+  verdict: "auto_success" | "auto_fail" | "roll";
+  reasoning: string;
+  dc: number | null;
+  on_success: string | null;
+  on_fail: string | null;
+}
 
 export interface BuiltInAgentMeta {
   id: string;
@@ -237,6 +247,15 @@ export const BUILT_IN_AGENTS: BuiltInAgentMeta[] = [
     name: "Prompt Reviewer",
     description:
       "Analyses your prompt preset for clarity, redundancy, and formatting issues, and suggests improvements.",
+    phase: "pre_generation",
+    enabledByDefault: false,
+    category: "writer",
+  },
+  {
+    id: "justice",
+    name: "Justice",
+    description:
+      "Судит реализм действия игрока: нужна ли проверка, гарантированный успех/провал с ризонингом, сложность (DC) и обе ветки последствий до броска. Дайс кидает харнесс, не модель.",
     phase: "pre_generation",
     enabledByDefault: false,
     category: "writer",
@@ -505,6 +524,7 @@ export const DEFAULT_AGENT_TOOLS: Record<string, string[]> = {
   "lorebook-keeper": ["search_lorebook"],
   "card-evolution-auditor": [],
   "prompt-reviewer": [],
+  justice: [],
   combat: ["roll_dice", "update_game_state"],
   background: [],
   "character-tracker": ["update_game_state"],
