@@ -6911,15 +6911,17 @@ export async function generateRoutes(app: FastifyInstance) {
           } catch (plotInjectErr) {
             logger.error(plotInjectErr, "[secret-plot-driver] Failed to inject arc/directions");
           }
+        }
 
-          // ── Justice: inject the authoritative resolution computed in the fresh branch ──
-          if (justiceResolutionBlock) {
-            const lastUserIdx = findLastIndex(finalMessages, "user");
-            finalMessages.splice(lastUserIdx >= 0 ? lastUserIdx : finalMessages.length, 0, {
-              role: "system",
-              content: justiceResolutionBlock,
-            });
-          }
+        // ── Justice: inject the authoritative resolution (ungated; computed in the fresh pre-gen branch) ──
+        // Must run regardless of whether the secret-plot block above executed, so it
+        // is placed outside that guard. No-op when justiceResolutionBlock is null.
+        if (justiceResolutionBlock) {
+          const lastUserIdx = findLastIndex(finalMessages, "user");
+          finalMessages.splice(lastUserIdx >= 0 ? lastUserIdx : finalMessages.length, 0, {
+            role: "system",
+            content: justiceResolutionBlock,
+          });
         }
 
         // ────────────────────────────────────────
