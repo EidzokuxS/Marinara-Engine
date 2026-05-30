@@ -50,7 +50,7 @@ import { galleryKeys } from "../../../catalog/gallery/query-keys";
 import { useConnections } from "../../../catalog/connections/index";
 import { useGameGeneration } from "../hooks/use-game-generation";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { spriteKeys, type SpriteInfo } from "../../../catalog/characters/index";
+import { spriteKeys, type SpriteInfo } from "../../../catalog/sprites/index";
 import { getJsonRepairRequest, type JsonRepairRequest } from "../../../../shared/api/api-errors";
 import { npcAvatarApi } from "../../../../shared/api/avatar-api";
 import { spriteApi } from "../../../../shared/api/image-generation-api";
@@ -2590,8 +2590,8 @@ export function GameSurface({
   });
 
   const personaSpriteQuery = useQuery({
-    queryKey: spriteKeys.list(personaSpriteId ?? ""),
-    queryFn: () => spriteApi.list<SpriteInfo[]>(personaSpriteId ?? ""),
+    queryKey: spriteKeys.list(personaSpriteId ?? "", "persona"),
+    queryFn: () => spriteApi.list<SpriteInfo[]>(personaSpriteId ?? "", { ownerType: "persona" }),
     enabled: !!personaSpriteId,
     staleTime: 5 * 60 * 1000,
   });
