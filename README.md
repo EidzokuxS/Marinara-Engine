@@ -1,4 +1,40 @@
-# 🍝 Marinara Engine
+# 🔮 TarotEngine <sub>— a fork of 🍝 Marinara Engine</sub>
+
+<table>
+<tr>
+<td>
+
+### What makes this fork special
+
+**TarotEngine splits the one big "do everything" LLM call into a small team of single-purpose agents, each named after a Tarot card.** Instead of one model juggling realism, plot, formatting and prose all at once, every job goes to a specialist that does *one* thing well — then their work is stitched into a single turn.
+
+The chain that drives a turn:
+
+| 🃏 Card | Role | What it does |
+|--------|------|--------------|
+| **⚖️ Justice** | The realism judge | Decides if your action is even possible. Trivial → waved through. Impossible → hard fail. Uncertain → **real dice roll** (the code rolls a d20, not the model). Owns the outcome *before* anyone writes a word. |
+| **👑 The Emperor** | The director | Composes the beat-by-beat scenario of the turn, respecting Justice's verdict. Plans *what happens*, not the prose. |
+| **🗼 The Tower** | The narrator | Renders the Emperor's scenario into prose / the GM turn — keeping the engine's native format (speaker tags, `[sfx:]`, `[widget:]`, game-state) fully intact. |
+| **🌍 The World** | The simulator | Evolves the world "in a vacuum," ahead of time, independent of the player. |
+| **🛞 The Chariot** | The trackers | Keeps stats, inventory, continuity. |
+
+**Why it's better:** one agent = one clearly-defined task → less cognitive load per call → higher-quality output. The processing *pipeline* does the heavy lifting, not clever tricks inside a single mega-prompt.
+
+**Player intent vs. observable fact:** what you type is your *intent*. If you "jump to the Moon," NPCs don't suddenly believe you can — Justice rules on reality first, and the world only ever sees the *observable* result.
+
+**Two directorial modes:** `player` (the director favors the player's lead) and `world` (the world gets the upper hand).
+
+**On by default in Game mode.** Install it, pick a provider per role, play. The Tarot chain auto-activates in new game sessions — no setup ritual. Verified end-to-end on a live model: realistic failures stay failures, dice rolls happen in code, and the GM's chunked streaming, inline effects, widgets and skill-checks all survive untouched.
+
+> This fork **adds** the Tarot chain on top of Marinara — all of the original engine's strengths below are preserved.
+
+</td>
+</tr>
+</table>
+
+---
+
+# 🍝 Marinara Engine <sub>(upstream)</sub>
 
 <h3 align="center"><b>Fun. Intuitive. Plug-And-Play.</b></h3>
 
