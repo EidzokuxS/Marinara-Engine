@@ -344,12 +344,17 @@ export const ConversationMessage = memo(function ConversationMessage({
     return () => window.removeEventListener("marinara:start-edit-message", handler);
   }, [message.id, onEdit, handleStartEdit]);
 
-  // ── Copy ──
+  // ── Copy / translate ──
   const handleCopy = useCallback(() => {
     copyToClipboard(renderedContent);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }, [renderedContent]);
+
+  const handleTranslate = useCallback(
+    () => translate(message.id, renderedContent, message.chatId),
+    [message.id, message.chatId, renderedContent, translate],
+  );
 
   // ── Mobile tap (show actions / multi-select) ──
   const handleMobileTap = useCallback(
@@ -411,10 +416,10 @@ export const ConversationMessage = memo(function ConversationMessage({
     translatedText, isTranslating,
     hasSwipes: (message.swipeCount ?? 0) > 1,
     swipeCount: message.swipeCount ?? 0,
-    multiSelectMode, isSelected, onToggleSelect,
+    multiSelectMode, isSelected,
     handleMobileTap,
     onCopy: handleCopy,
-    onTranslate: () => translate(message.id, renderedContent, message.chatId),
+    onTranslate: handleTranslate,
     onStartEdit: handleStartEdit,
     onImageOpen: (url, prompt) => setImageLightbox({ url, prompt }),
     onRemoveAttachment: handleRemoveAttachment,
@@ -535,7 +540,7 @@ export const ConversationMessage = memo(function ConversationMessage({
             regenerateButtonTitle={regenerateButtonTitle}
             regenerateGuidedClass={regenerateGuidedClass}
             onCopy={handleCopy}
-            onTranslate={() => translate(message.id, renderedContent, message.chatId)}
+            onTranslate={handleTranslate}
             onEdit={handleStartEdit}
             onRegenerate={onRegenerate ? () => onRegenerate(message.id) : undefined}
             onToggleHiddenFromAI={onToggleHiddenFromAI ? () => onToggleHiddenFromAI(message.id, isHiddenFromAI) : undefined}

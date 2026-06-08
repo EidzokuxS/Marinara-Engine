@@ -9,7 +9,7 @@ import { cn } from "../../lib/utils";
 import { applyInlineMarkdown, renderMarkdownBlocks } from "../../lib/markdown";
 import { ImagePromptPanel } from "./ImagePromptPanel";
 import { SwipeJumpControl } from "./SwipeJumpControl";
-import type { CharacterMap, MessageSelectionToggle } from "./chat-area.types";
+import type { CharacterMap } from "./chat-area.types";
 
 // ── Types ────────────────────────────────────────
 
@@ -121,7 +121,6 @@ export interface MessageRenderContext {
   onDelete?: (id: string) => void;
   onShowGenerationReplay: () => void;
   onShowThinking: () => void;
-  onToggleSelect?: (toggle: MessageSelectionToggle) => void;
   // style
   messageTextStyle: CSSProperties;
   // bubble-specific (ignored by Line/Grouped)
@@ -362,20 +361,6 @@ export function MsgAction({
     >
       {icon}
     </button>
-  );
-}
-
-/** Inline multi-select checkbox. */
-export function MessageSelectCheckbox({ isSelected }: { isSelected?: boolean }) {
-  return (
-    <div
-      className={cn(
-        "h-5 w-5 rounded border-2 flex items-center justify-center transition-colors cursor-pointer",
-        isSelected ? "border-[var(--destructive)] bg-[var(--destructive)]" : "border-[var(--muted-foreground)]/40 bg-[var(--secondary)]",
-      )}
-    >
-      {isSelected && <span className="text-white text-xs font-bold">✓</span>}
-    </div>
   );
 }
 
