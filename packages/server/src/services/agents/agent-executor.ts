@@ -570,6 +570,13 @@ export async function executeAgentBatch(
   logger.info(`[agent-batch] Batching ${configs.length} agents: [${configs.map((c) => c.type).join(", ")}]`);
 
   const startTime = Date.now();
+  const perAgentTokens = configs.map((c) => normalizeAgentMaxTokens(c.settings.maxTokens));
+  const temperature = Math.min(...configs.map((c) => (c.settings.temperature as number) ?? 0.3));
+  const rawBatchMaxTokens = Math.min(
+    perAgentTokens.reduce((sum, tokens) => sum + tokens, 0),
+    MAX_AGENT_MAX_TOKENS,
+  );
+  const batchMaxTokens = applyProviderMaxTokensOverride(provider, rawBatchMaxTokens);
 
   try {
     // Build merged system prompt (includes lore + agent extras)
@@ -586,13 +593,6 @@ export async function executeAgentBatch(
 
     // Each agent reserves its own configured output budget. The context fitter
     // may still reduce this further if the prompt needs more room.
-    const perAgentTokens = configs.map((c) => normalizeAgentMaxTokens(c.settings.maxTokens));
-    const temperature = Math.min(...configs.map((c) => (c.settings.temperature as number) ?? 0.3));
-    const rawBatchMaxTokens = Math.min(
-      perAgentTokens.reduce((sum, tokens) => sum + tokens, 0),
-      MAX_AGENT_MAX_TOKENS,
-    );
-    const batchMaxTokens = applyProviderMaxTokensOverride(provider, rawBatchMaxTokens);
     const streamResponses = context.streaming !== false;
     logger.info(
       `[agent-batch] maxTokens: ${batchMaxTokens} (sum=${rawBatchMaxTokens} from [${perAgentTokens.join(", ")}]${provider.maxTokensOverrideValue !== null ? `, capped at ${provider.maxTokensOverrideValue}` : ""})`,
@@ -702,8 +702,8 @@ export async function executeAgentBatch(
       agentName: `Agent Batch (${configs.length})`,
       phase: "batch",
       model,
-      temperature: Math.min(...configs.map((c) => (c.settings.temperature as number) ?? 0.3)),
-      maxTokens: 0,
+      temperature,
+      maxTokens: batchMaxTokens,
       messageCount: 0,
       durationMs: Date.now() - startTime,
       error: errMsg,
