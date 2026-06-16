@@ -47,7 +47,7 @@ export function useCreateLorebook() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: lorebookKeys.all });
       void trackAchievementEvent("library_changed")
-        .then(() => qc.invalidateQueries({ queryKey: achievementKeys.all }))
+        .finally(() => qc.invalidateQueries({ queryKey: achievementKeys.all }))
         .catch(() => undefined);
     },
   });

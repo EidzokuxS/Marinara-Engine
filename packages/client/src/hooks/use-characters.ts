@@ -73,7 +73,7 @@ export function useCreateCharacter() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: characterKeys.list() });
       void trackAchievementEvent("library_changed")
-        .then(() => qc.invalidateQueries({ queryKey: achievementKeys.all }))
+        .finally(() => qc.invalidateQueries({ queryKey: achievementKeys.all }))
         .catch(() => undefined);
     },
   });
@@ -516,7 +516,7 @@ export function useCreatePersona() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: characterKeys.personas });
       void trackAchievementEvent("library_changed")
-        .then(() => qc.invalidateQueries({ queryKey: achievementKeys.all }))
+        .finally(() => qc.invalidateQueries({ queryKey: achievementKeys.all }))
         .catch(() => undefined);
     },
   });

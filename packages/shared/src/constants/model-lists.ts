@@ -721,12 +721,19 @@ export function findKnownModel(provider: APIProvider, modelId: string): KnownMod
   return MODEL_LISTS[provider]?.find((m) => m.id === modelId);
 }
 
+function normalizeProviderForCatalog(provider: APIProvider | string): APIProvider | null {
+  const normalized = provider.replace(/-/g, "_");
+  return normalized in MODEL_LISTS ? (normalized as APIProvider) : null;
+}
+
 export function shouldSuppressUnknownModelParameters(
   provider: APIProvider | string | null | undefined,
   modelId: string | null | undefined,
 ): boolean {
   if (!provider || !modelId?.trim()) return false;
-  const catalog = MODEL_LISTS[provider as APIProvider];
+  const normalizedProvider = normalizeProviderForCatalog(provider);
+  if (!normalizedProvider) return false;
+  const catalog = MODEL_LISTS[normalizedProvider];
   if (!catalog || catalog.length === 0) return false;
-  return !findKnownModel(provider as APIProvider, modelId.trim());
+  return !findKnownModel(normalizedProvider, modelId.trim());
 }

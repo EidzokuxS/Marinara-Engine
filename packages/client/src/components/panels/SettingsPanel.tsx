@@ -3023,7 +3023,7 @@ function BackgroundPicker({
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (!isDefaultRoleplay) onDefaultChange(bg.url);
+                          onDefaultChange(isDefaultRoleplay ? DEFAULT_ROLEPLAY_BACKGROUND_URL : bg.url);
                         }}
                         className={cn(
                           "shrink-0 rounded-md p-0.5 transition-colors",

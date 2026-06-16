@@ -372,8 +372,9 @@ export class AnthropicProvider extends BaseLLMProvider {
       body.stream = options.stream ?? true;
       if (options.temperature !== undefined) body.temperature = options.temperature;
       if (options.topK) body.top_k = options.topK;
-    } else if (options.stream) {
-      body.stream = true;
+    } else {
+      body.max_tokens = maxTokens ?? 4096;
+      if (options.stream) body.stream = true;
     }
 
     // Claude adaptive-only models reject sampling parameters (400 error).

@@ -115,6 +115,7 @@ export function Modal({ open, onClose, title, children, width = "max-w-md", cont
         <div className={`shrink-0 flex items-center justify-between ${NEUTRAL_PANEL_HEADER}`}>
           <h2 className={NEUTRAL_PANEL_TITLE}>{title}</h2>
           <button
+            type="button"
             onClick={onClose}
             className="rounded-lg p-1.5 text-[var(--marinara-chat-chrome-panel-muted)] transition-colors hover:bg-[var(--marinara-chat-chrome-highlight-bg-hover)] hover:text-[var(--marinara-chat-chrome-highlight-text)]"
           >

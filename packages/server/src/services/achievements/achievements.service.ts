@@ -95,7 +95,7 @@ export function createAchievementsService(db: DB) {
     for (const id of uniqueIds) {
       if (existingById.has(id)) continue;
       const row = { id, unlockedAt: timestamp, updatedAt: timestamp };
-      await db.insert(achievementUnlocks).values(row);
+      await db.insert(achievementUnlocks).values(row).onConflictDoNothing();
       newlyUnlockedRows.push(row);
     }
 

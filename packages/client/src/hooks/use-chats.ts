@@ -365,7 +365,7 @@ export function useCreateChat() {
       }
       qc.invalidateQueries({ queryKey: chatKeys.list() });
       void trackAchievementEvent("chat_created")
-        .then(() => qc.invalidateQueries({ queryKey: achievementKeys.all }))
+        .finally(() => qc.invalidateQueries({ queryKey: achievementKeys.all }))
         .catch(() => undefined);
     },
   });

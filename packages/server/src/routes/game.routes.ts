@@ -100,7 +100,9 @@ import {
 import { mergeCustomParameters } from "./generate/generate-route-utils.js";
 import {
   fitMessagesToModelAccessContext,
+  mergeModelContextLimit,
   resolveModelAccessPolicy,
+  resolveStoredModelContextLimit,
   type ModelAccessPolicy,
 } from "../services/generation/model-access-policy.js";
 import { postToDiscordWebhook } from "../services/discord-webhook.js";
@@ -1349,6 +1351,27 @@ function resolveStoredGameGenerationParameters(
   return mergeStoredGenerationParameters(connectionDefaults, setupConfig?.generationParameters, meta?.chatParameters);
 }
 
+function resolveGameModelAccessPolicy(args: {
+  provider: APIProvider | string | null | undefined;
+  model: string | null | undefined;
+  maxContext?: unknown;
+  parameters: StoredGenerationParameters | null | undefined;
+}): ModelAccessPolicy {
+  const policy = resolveModelAccessPolicy({
+    provider: args.provider,
+    model: args.model,
+    maxContext: args.maxContext,
+  });
+  return {
+    ...policy,
+    effectiveMaxContext: mergeModelContextLimit(
+      policy,
+      policy.effectiveMaxContext,
+      resolveStoredModelContextLimit(policy, args.parameters),
+    ),
+  };
+}
+
 function resolveGameReasoningEffort(
   model: string,
   reasoningEffort: GenerationParameters["reasoningEffort"] | ChatOptions["reasoningEffort"] | null | undefined,
@@ -2137,10 +2160,11 @@ async function runGameLorebookKeeperAfterConclusion(args: {
       generationParameters,
       conn.provider,
     );
-    const modelAccessPolicy = resolveModelAccessPolicy({
+    const modelAccessPolicy = resolveGameModelAccessPolicy({
       provider: conn.provider,
       model: conn.model,
       maxContext: conn.maxContext,
+      parameters: generationParameters,
     });
 
     const messages = await chats.listMessages(args.chatId);
@@ -3911,10 +3935,11 @@ export async function gameRoutes(app: FastifyInstance) {
       chat.connectionId,
     );
     const conclusionGenerationParameters = resolveStoredGameGenerationParameters(meta, defaultGenerationParameters);
-    const modelAccessPolicy = resolveModelAccessPolicy({
+    const modelAccessPolicy = resolveGameModelAccessPolicy({
       provider: conn.provider,
       model: conn.model,
       maxContext: conn.maxContext,
+      parameters: conclusionGenerationParameters,
     });
     const provider = createLLMProvider(
       conn.provider,
@@ -4287,10 +4312,11 @@ export async function gameRoutes(app: FastifyInstance) {
       chat.connectionId,
     );
     const conclusionGenerationParameters = resolveStoredGameGenerationParameters(meta, defaultGenerationParameters);
-    const modelAccessPolicy = resolveModelAccessPolicy({
+    const modelAccessPolicy = resolveGameModelAccessPolicy({
       provider: conn.provider,
       model: conn.model,
       maxContext: conn.maxContext,
+      parameters: conclusionGenerationParameters,
     });
     const provider = createLLMProvider(
       conn.provider,
@@ -4558,10 +4584,11 @@ export async function gameRoutes(app: FastifyInstance) {
       progressionGenerationParameters,
       conn.provider,
     );
-    const modelAccessPolicy = resolveModelAccessPolicy({
+    const modelAccessPolicy = resolveGameModelAccessPolicy({
       provider: conn.provider,
       model: conn.model,
       maxContext: conn.maxContext,
+      parameters: progressionGenerationParameters,
     });
     const userLines = [
       `Session ${sessionNumber} journal recap:`,

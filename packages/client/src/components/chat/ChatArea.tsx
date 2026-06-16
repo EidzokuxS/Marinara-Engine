@@ -611,7 +611,10 @@ export function ChatArea() {
     if (!chat?.id) return;
     const savedUrl = chatBackgroundMetadataToUrl(chatMeta.background);
     const restoredUrl =
-      savedUrl ?? (chat.mode === "roleplay" ? useUIStore.getState().defaultRoleplayBackground : null);
+      savedUrl ??
+      (chat.mode === "roleplay" || chat.mode === "visual_novel"
+        ? useUIStore.getState().defaultRoleplayBackground
+        : null);
     restoredChatBackgroundRef.current = { chatId: chat.id, url: restoredUrl, isSyncing: true };
     useUIStore.getState().setChatBackground(restoredUrl);
     // eslint-disable-next-line react-hooks/exhaustive-deps

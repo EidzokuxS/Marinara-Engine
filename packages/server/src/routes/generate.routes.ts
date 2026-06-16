@@ -4841,11 +4841,16 @@ export async function generateRoutes(app: FastifyInstance) {
 
             const result = await selectorProvider.chatComplete(selectionPrompt, {
               model: selectorModel,
-              temperature: 0.2,
-              maxTokens: selectorMaxTokens,
-              maxContext: effectiveMaxContext,
-              topP: 1,
-              serviceTier,
+              ...(suppressModelParameters
+                ? {}
+                : {
+                    temperature: 0.2,
+                    maxTokens: selectorMaxTokens,
+                    maxContext: effectiveMaxContext,
+                    topP: 1,
+                    serviceTier,
+                  }),
+              suppressModelParameters,
               stream: false,
               signal: abortController.signal,
             });
