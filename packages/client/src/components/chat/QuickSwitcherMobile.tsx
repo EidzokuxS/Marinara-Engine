@@ -170,7 +170,9 @@ export function QuickSwitcherMobile() {
   useEffect(() => {
     if (!open || !btnRef.current) return;
     const update = () => {
-      const inputBox = btnRef.current!.closest(".rounded-2xl") as HTMLElement | null;
+      const buttonEl = btnRef.current;
+      if (!buttonEl) return;
+      const inputBox = buttonEl.closest(".marinara-chat-input-shell") as HTMLElement | null;
       const menuEl = menuRef.current;
       const menuHeight = menuEl?.offsetHeight || 400;
       if (inputBox) {
@@ -181,7 +183,7 @@ export function QuickSwitcherMobile() {
           width: boxRect.width,
         });
       } else {
-        const rect = btnRef.current!.getBoundingClientRect();
+        const rect = buttonEl.getBoundingClientRect();
         setPos({
           left: 8,
           top: Math.max(8, rect.top - menuHeight - 8),
