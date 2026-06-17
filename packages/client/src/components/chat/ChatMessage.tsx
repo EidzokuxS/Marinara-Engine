@@ -44,6 +44,8 @@ import { useShallow } from "zustand/react/shallow";
 import { createMessageMacroResolver } from "../../lib/chat-macros";
 import { useApplyRegex } from "../../hooks/use-apply-regex";
 import { useUIStore } from "../../stores/ui.store";
+import { useChatStore } from "../../stores/chat.store";
+import { parseChatMetadata } from "../../lib/chat-display";
 import { useTranslate } from "../../hooks/use-translate";
 import { api } from "../../lib/api-client";
 import { applyTextareaQuoteFormat } from "../../lib/textarea-quotes";
@@ -518,13 +520,16 @@ function extractChatStyleBlocks(html: string): { html: string; css: string } {
 
 /** Decode CSS escape sequences (`\XX` hex, `\c` literal) to the characters a browser parses. */
 function decodeCssEscapes(input: string): string {
-  return input.replace(/\\(?:([0-9a-fA-F]{1,6})\s?|([\s\S]))/g, (_m, hex: string | undefined, ch: string | undefined) => {
-    if (hex) {
-      const cp = parseInt(hex, 16);
-      return cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : "";
-    }
-    return ch ?? "";
-  });
+  return input.replace(
+    /\\(?:([0-9a-fA-F]{1,6})\s?|([\s\S]))/g,
+    (_m, hex: string | undefined, ch: string | undefined) => {
+      if (hex) {
+        const cp = parseInt(hex, 16);
+        return cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : "";
+      }
+      return ch ?? "";
+    },
+  );
 }
 
 // Match a quoted string (group 1) OR a single CSS escape sequence. Strings come first so the
@@ -1193,6 +1198,8 @@ export const ChatMessage = memo(function ChatMessage({
 
   // Apply regex scripts to AI output (assistant/narrator roles)
   const { applyToAIOutput } = useApplyRegex();
+  // Per-chat scoped-regex mode — gates character-scoped scripts at display time.
+  const scopedRegexMode = useChatStore((s) => parseChatMetadata(s.activeChat?.metadata).scopedRegexMode);
 
   const scopedCharacterMap = useMemo(() => {
     if (!characterMap) return null;
@@ -1261,10 +1268,17 @@ export const ChatMessage = memo(function ChatMessage({
     const text =
       isUser || isSystem
         ? message.content
-        : applyToAIOutput(message.content, { depth: messageDepth, resolveMacros: resolveDisplayMacros });
+        : applyToAIOutput(message.content, {
+            depth: messageDepth,
+            resolveMacros: resolveDisplayMacros,
+            scopedMode: scopedRegexMode,
+            characterId: message.characterId,
+          });
     return resolveDisplayMacros(text);
   }, [
     applyToAIOutput,
+    scopedRegexMode,
+    message.characterId,
     charName,
     isSystem,
     isUser,

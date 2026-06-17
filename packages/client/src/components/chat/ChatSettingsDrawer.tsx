@@ -34,6 +34,7 @@ import {
   Vibrate,
   Feather,
   Paintbrush,
+  Regex,
   Activity,
   Puzzle,
   Save,
@@ -99,6 +100,7 @@ import {
   useClearChatNotes,
   chatKeys,
 } from "../../hooks/use-chats";
+import { useRegexScripts } from "../../hooks/use-regex-scripts";
 import { api } from "../../lib/api-client";
 import { filterLanguageGenerationConnections } from "../../lib/connection-filters";
 import { getConnectedChatDisplayName } from "../../lib/chat-display";
@@ -313,6 +315,7 @@ const CHAT_SETTINGS_ORDER = {
   persona: -1000,
   characters: -900,
   cardTheming: -850,
+  scopedRegex: -845,
   groupChat: -800,
   connectedChat: -700,
   connectedNotes: -690,
@@ -476,6 +479,7 @@ export function ChatSettingsDrawer({
   const qc = useQueryClient();
   const updateChat = useUpdateChat();
   const updateMeta = useUpdateChatMetadata();
+  const { data: regexScripts } = useRegexScripts();
   const updateAgentConfig = useUpdateAgent();
   const createAgent = useCreateAgent();
   const createMessage = useCreateMessage(chat.id);
@@ -557,6 +561,23 @@ export function ChatSettingsDrawer({
       return typeof notes === "string" && extractCreatorNotesCss(notes).css.trim().length > 0;
     });
   }, [allCharacters, chatCharIds]);
+  // Scoped regex: the per-chat display mode (default "disabled"), and whether any
+  // script is character-scoped — the control only appears when at least one is.
+  const scopedRegexMode: "disabled" | "exclusive" | "chat" =
+    metadata.scopedRegexMode === "exclusive" || metadata.scopedRegexMode === "chat"
+      ? metadata.scopedRegexMode
+      : "disabled";
+  const hasCharacterScopedScripts = useMemo(() => {
+    if (!regexScripts) return false;
+    return (regexScripts as Array<{ targetCharacterIds?: string }>).some((script) => {
+      try {
+        const ids = JSON.parse(script.targetCharacterIds ?? "[]");
+        return Array.isArray(ids) && ids.length > 0;
+      } catch {
+        return false;
+      }
+    });
+  }, [regexScripts]);
   const conversationCommandToggles = useMemo(
     () => readConversationCommandToggles(metadata.conversationCommandToggles),
     [metadata.conversationCommandToggles],
@@ -3094,6 +3115,61 @@ export function ChatSettingsDrawer({
                     : cardCssMode === "exclusive"
                       ? "Each character's CSS only affects their own messages."
                       : "All card CSS affects the entire chat area, including UI elements."}
+                </p>
+              </div>
+            </Section>
+          )}
+
+          {/* Scoped Regex Scripts — only shown when a character-scoped script exists */}
+          {hasCharacterScopedScripts && (
+            <Section
+              style={{ order: CHAT_SETTINGS_ORDER.scopedRegex }}
+              label="Scoped Regex Scripts"
+              icon={<Regex size="0.875rem" />}
+              help="Apply character-scoped regex scripts to displayed messages. Exclusive runs each script only on its character's messages; Chat runs them on every message."
+            >
+              <div className="space-y-2">
+                <div className="flex rounded-lg ring-1 ring-[var(--border)]">
+                  <button
+                    onClick={() => updateMeta.mutate({ id: chat.id, scopedRegexMode: "disabled" })}
+                    className={cn(
+                      "flex-1 px-3 py-2 text-[0.6875rem] font-medium transition-colors rounded-l-lg",
+                      scopedRegexMode === "disabled"
+                        ? "bg-[var(--primary)] text-white"
+                        : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
+                    )}
+                  >
+                    Disabled
+                  </button>
+                  <button
+                    onClick={() => updateMeta.mutate({ id: chat.id, scopedRegexMode: "exclusive" })}
+                    className={cn(
+                      "flex-1 px-3 py-2 text-[0.6875rem] font-medium transition-colors",
+                      scopedRegexMode === "exclusive"
+                        ? "bg-[var(--primary)] text-white"
+                        : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
+                    )}
+                  >
+                    Exclusive
+                  </button>
+                  <button
+                    onClick={() => updateMeta.mutate({ id: chat.id, scopedRegexMode: "chat" })}
+                    className={cn(
+                      "flex-1 px-3 py-2 text-[0.6875rem] font-medium transition-colors rounded-r-lg",
+                      scopedRegexMode === "chat"
+                        ? "bg-[var(--primary)] text-white"
+                        : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
+                    )}
+                  >
+                    Chat
+                  </button>
+                </div>
+                <p className="text-[0.625rem] text-[var(--muted-foreground)]">
+                  {scopedRegexMode === "disabled"
+                    ? "Character-scoped regex is off — only global scripts run."
+                    : scopedRegexMode === "exclusive"
+                      ? "Each scoped script only transforms its own character's messages."
+                      : "All scoped scripts transform every message."}
                 </p>
               </div>
             </Section>
