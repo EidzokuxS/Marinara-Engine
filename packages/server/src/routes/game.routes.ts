@@ -7700,10 +7700,9 @@ export async function gameRoutes(app: FastifyInstance) {
 
     // Clone the snapshot state onto the new message, preserving tracker field
     // locks and manual overrides so they keep protecting fields after a restore.
-    const manualOverrides =
-      typeof snapshot.manualOverrides === "string"
-        ? (JSON.parse(snapshot.manualOverrides) as Record<string, string>)
-        : null;
+    // Tolerant parse: malformed JSON must not throw after the restore message is
+    // already created, and an object value (not a string) must not be dropped.
+    const manualOverrides = parseJsonField<Record<string, string> | null>(snapshot.manualOverrides, null);
     await stateStore.create(
       {
         chatId: input.chatId,
