@@ -246,7 +246,7 @@ export function CharacterRegexSection({
               title="Import regexes from JSON"
             >
               <input type="file" accept="application/json" className="hidden" onChange={handleImport} />
-              <Download size="0.8125rem" />
+              <Upload size="0.8125rem" />
             </label>
             <button
               type="button"
@@ -255,7 +255,7 @@ export function CharacterRegexSection({
               className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-purple-400/10 hover:text-purple-400 disabled:cursor-not-allowed disabled:opacity-35"
               title="Export regexes to JSON"
             >
-              <Upload size="0.8125rem" />
+              <Download size="0.8125rem" />
             </button>
           </div>
         )}
