@@ -43,6 +43,7 @@ import { QuickPersonaSwitcher } from "./QuickPersonaSwitcher";
 import { QuickSwitcherMobile } from "./QuickSwitcherMobile";
 import { EmojiPicker } from "../ui/EmojiPicker";
 import { CustomEmojiTab } from "./CustomEmojiTab";
+import { useCustomEmojis, type CustomEmoji } from "../../hooks/use-custom-emojis";
 import { GifPicker } from "../ui/GifPicker";
 import { SpeechToTextButton } from "../ui/SpeechToTextButton";
 import { SlashCommandFeedback } from "./SlashCommandFeedback";
@@ -154,6 +155,11 @@ export function ConversationInput({
   const [mentionCompletions, setMentionCompletions] = useState<string[]>([]);
   const [selectedMention, setSelectedMention] = useState(0);
   const [mentionStartPos, setMentionStartPos] = useState(0);
+  // :emoji: autocomplete
+  const [emojiCompletions, setEmojiCompletions] = useState<CustomEmoji[]>([]);
+  const [selectedEmojiCompletion, setSelectedEmojiCompletion] = useState(0);
+  const [emojiStartPos, setEmojiStartPos] = useState(0);
+  const { data: customEmojiList } = useCustomEmojis();
   const [charPickerOpen, setCharPickerOpen] = useState(false);
   const [charPickerPos, setCharPickerPos] = useState<{ left: number; top: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -487,6 +493,24 @@ export function ConversationInput({
       el.focus();
     },
     [activeChatId, mentionStartPos, setInputDraft, syncInputState],
+  );
+
+  /** Insert an emoji completion into the textarea, replacing the :query. */
+  const insertEmoji = useCallback(
+    (name: string) => {
+      const el = textareaRef.current;
+      if (!el) return;
+      const before = el.value.slice(0, emojiStartPos);
+      const after = el.value.slice(el.selectionStart);
+      el.value = `${before}:${name}: ${after}`;
+      const cursorPos = before.length + name.length + 3; // ':' + name + ':' + space
+      el.selectionStart = el.selectionEnd = cursorPos;
+      syncInputState(el.value);
+      if (activeChatId) setInputDraft(activeChatId, el.value);
+      setEmojiCompletions([]);
+      el.focus();
+    },
+    [activeChatId, emojiStartPos, setInputDraft, syncInputState],
   );
 
   const handleSend = useCallback(async () => {
@@ -1035,6 +1059,30 @@ export function ConversationInput({
         }
       }
 
+      // :emoji: completions navigation
+      if (emojiCompletions.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setSelectedEmojiCompletion((p) => (p + 1) % emojiCompletions.length);
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setSelectedEmojiCompletion((p) => (p - 1 + emojiCompletions.length) % emojiCompletions.length);
+          return;
+        }
+        if (e.key === "Tab" || e.key === "Enter") {
+          e.preventDefault();
+          const em = emojiCompletions[selectedEmojiCompletion];
+          if (em) insertEmoji(em.name);
+          return;
+        }
+        if (e.key === "Escape") {
+          setEmojiCompletions([]);
+          return;
+        }
+      }
+
       // Slash completions navigation
       if (completions.length > 0) {
         if (e.key === "ArrowDown") {
@@ -1077,6 +1125,9 @@ export function ConversationInput({
       mentionCompletions,
       selectedMention,
       insertMention,
+      emojiCompletions,
+      selectedEmojiCompletion,
+      insertEmoji,
       enterToSend,
       handleSend,
       setInputDraft,
@@ -1141,7 +1192,26 @@ export function ConversationInput({
       setMentionQuery(null);
       setMentionCompletions([]);
     }
-  }, [activeChatId, activeCharacterNames, clearInputDraft, quoteFormat, setInputDraft, syncInputState]);
+
+    // :emoji: detection — a `:partial` at a word boundary, just before the cursor
+    const emojiMatch = textBefore.match(/(?:^|\s):([a-z0-9_]+)$/);
+    if (emojiMatch && customEmojiList && customEmojiList.length > 0) {
+      const eq = emojiMatch[1]!.toLowerCase();
+      const matches = customEmojiList
+        .filter((em) => em.name.includes(eq))
+        .sort((a, b) => Number(b.name.startsWith(eq)) - Number(a.name.startsWith(eq)))
+        .slice(0, 10);
+      if (matches.length > 0) {
+        setEmojiCompletions(matches);
+        setSelectedEmojiCompletion(0);
+        setEmojiStartPos(cursor - eq.length - 1);
+      } else {
+        setEmojiCompletions([]);
+      }
+    } else {
+      setEmojiCompletions([]);
+    }
+  }, [activeChatId, activeCharacterNames, customEmojiList, clearInputDraft, quoteFormat, setInputDraft, syncInputState]);
 
   useEffect(() => {
     if (hasInput && feedback) setFeedback(null);
@@ -1367,6 +1437,29 @@ export function ConversationInput({
             >
               <AtSign size="0.75rem" className="shrink-0 text-foreground/45" />
               <span className="font-medium">{name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* :emoji: autocomplete */}
+      {emojiCompletions.length > 0 && (
+        <div className="absolute bottom-full left-0 right-0 mb-1 max-h-56 overflow-y-auto rounded-lg border border-foreground/10 bg-[var(--card)] shadow-lg">
+          {emojiCompletions.map((em, i) => (
+            <button
+              key={em.id}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                insertEmoji(em.name);
+              }}
+              className={cn(
+                "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors",
+                i === selectedEmojiCompletion ? "bg-foreground/10 text-foreground" : "hover:bg-foreground/10",
+              )}
+            >
+              <img src={em.url} alt={`:${em.name}:`} className="h-5 w-5 shrink-0 object-contain" />
+              <span className="min-w-0 flex-1 truncate font-medium">:{em.name}:</span>
+              <span className="hidden shrink-0 text-xs text-foreground/40 sm:inline">Global</span>
             </button>
           ))}
         </div>
