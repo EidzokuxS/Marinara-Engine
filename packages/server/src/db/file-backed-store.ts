@@ -170,6 +170,7 @@ export const FILE_BACKED_TABLES = [
   "persona_images",
   "gallery_folders",
   "global_images",
+  "custom_emojis",
   "ooc_influences",
   "conversation_notes",
   "memory_chunks",

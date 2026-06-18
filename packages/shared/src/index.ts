@@ -38,6 +38,7 @@ export * from "./schemas/connection.schema.js";
 export * from "./schemas/agent.schema.js";
 export * from "./schemas/custom-tool.schema.js";
 export * from "./schemas/regex.schema.js";
+export * from "./schemas/custom-emoji.schema.js";
 export * from "./schemas/theme.schema.js";
 export * from "./schemas/extension.schema.js";
 export * from "./schemas/app-settings.schema.js";
