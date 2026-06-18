@@ -5,6 +5,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import {
   Send,
   Smile,
+  Sticker,
   StopCircle,
   X,
   Plus,
@@ -44,6 +45,7 @@ import { QuickPersonaSwitcher } from "./QuickPersonaSwitcher";
 import { QuickSwitcherMobile } from "./QuickSwitcherMobile";
 import { EmojiPicker } from "../ui/EmojiPicker";
 import { CustomEmojiTab } from "./CustomEmojiTab";
+import { StickerPicker } from "./StickerPicker";
 import { useConversationCustomEmojis, type ConversationCustomEmoji } from "../../hooks/use-conversation-custom-emojis";
 import { GifPicker } from "../ui/GifPicker";
 import { SpeechToTextButton } from "../ui/SpeechToTextButton";
@@ -150,6 +152,7 @@ export function ConversationInput({
   const [isTranslatingDraft, setIsTranslatingDraft] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
+  const [stickerOpen, setStickerOpen] = useState(false);
   const [mobilePickerOpen, setMobilePickerOpen] = useState(false);
   const [mobilePickerTab, setMobilePickerTab] = useState<"emoji" | "gifs" | "stickers">("emoji");
   const [isDragging, setIsDragging] = useState(false);
@@ -170,6 +173,7 @@ export function ConversationInput({
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const gifButtonRef = useRef<HTMLButtonElement>(null);
+  const stickerButtonRef = useRef<HTMLButtonElement>(null);
   const charPickerBtnRef = useRef<HTMLButtonElement>(null);
   const charPickerMenuRef = useRef<HTMLDivElement>(null);
   const inputBarRef = useRef<HTMLDivElement>(null);
@@ -1272,6 +1276,24 @@ export function ConversationInput({
     [activeChatId, isStreaming, groupResponseOrder, activeCharacterNames.length, generate, createMessage],
   );
 
+  const handleStickerSelect = useCallback(
+    async (name: string) => {
+      if (!activeChatId) return;
+      const content = `sticker:${name}:`;
+      // Mirror the GIF send guards: while streaming or in manual group order, just persist the message.
+      if (isStreaming) {
+        createMessage.mutate({ role: "user", content, characterId: null });
+        return;
+      }
+      if (groupResponseOrder === "manual" && activeCharacterNames.length > 1) {
+        createMessage.mutate({ role: "user", content, characterId: null });
+        return;
+      }
+      await generate({ chatId: activeChatId, connectionId: null, userMessage: content });
+    },
+    [activeChatId, isStreaming, groupResponseOrder, activeCharacterNames.length, generate, createMessage],
+  );
+
   const handleCharacterResponse = useCallback(
     async (characterId: string) => {
       if (!activeChatId || isStreaming) return;
@@ -1476,15 +1498,12 @@ export function ConversationInput({
               <button
                 key={tab}
                 type="button"
-                disabled={tab === "stickers"}
                 onClick={() => setMobilePickerTab(tab)}
                 className={cn(
                   "flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors",
-                  tab === "stickers"
-                    ? "cursor-not-allowed text-foreground/25"
-                    : mobilePickerTab === tab
-                      ? "bg-foreground/10 text-foreground/80 ring-1 ring-foreground/15"
-                      : "text-foreground/45 hover:bg-foreground/10 hover:text-foreground/70",
+                  mobilePickerTab === tab
+                    ? "bg-foreground/10 text-foreground/80 ring-1 ring-foreground/15"
+                    : "text-foreground/45 hover:bg-foreground/10 hover:text-foreground/70",
                 )}
               >
                 {tab === "gifs" ? "GIFs" : tab === "stickers" ? "Stickers" : "Emoji"}
@@ -1509,9 +1528,12 @@ export function ConversationInput({
               <GifPicker embedded open onClose={() => setMobilePickerOpen(false)} onSelect={handleGifSelect} />
             )}
             {mobilePickerTab === "stickers" && (
-              <div className="flex h-full items-center justify-center px-6 text-center text-xs text-foreground/45">
-                Custom stickers are coming soon.
-              </div>
+              <StickerPicker
+                embedded
+                open
+                onClose={() => setMobilePickerOpen(false)}
+                onSelect={handleStickerSelect}
+              />
             )}
           </div>
         </div>
@@ -1661,6 +1683,7 @@ export function ConversationInput({
               onClick={() => {
                 setGifOpen((v) => !v);
                 setEmojiOpen(false);
+                setStickerOpen(false);
               }}
               className={cn(
                 "flex h-9 w-9 items-center justify-center rounded-xl transition-colors sm:h-8 sm:w-8 sm:rounded-full",
@@ -1687,6 +1710,7 @@ export function ConversationInput({
               onClick={() => {
                 setEmojiOpen((v) => !v);
                 setGifOpen(false);
+                setStickerOpen(false);
               }}
               className={cn(
                 "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
@@ -1709,6 +1733,33 @@ export function ConversationInput({
                 label: "Custom emojis",
                 render: (query) => <CustomEmojiTab onInsert={handleEmojiSelect} query={query} />,
               }}
+            />
+          </div>
+
+          <div className="relative hidden sm:block">
+            <button
+              ref={stickerButtonRef}
+              onClick={() => {
+                setStickerOpen((v) => !v);
+                setEmojiOpen(false);
+                setGifOpen(false);
+              }}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+                stickerOpen
+                  ? "bg-foreground/10 text-foreground/75 ring-1 ring-foreground/20"
+                  : "text-foreground/40 hover:bg-foreground/10 hover:text-foreground/70",
+              )}
+              title="Stickers"
+            >
+              <Sticker size="1.25rem" />
+            </button>
+            <StickerPicker
+              open={stickerOpen}
+              onClose={() => setStickerOpen(false)}
+              onSelect={handleStickerSelect}
+              anchorRef={stickerButtonRef}
+              containerRef={inputBarRef}
             />
           </div>
 
