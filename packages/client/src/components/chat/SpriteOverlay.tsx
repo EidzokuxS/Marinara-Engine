@@ -7,7 +7,7 @@ import { motion, AnimatePresence, type TargetAndTransition } from "framer-motion
 import { Check } from "lucide-react";
 import type { SpritePlacement, SpriteSide } from "@marinara-engine/shared";
 import { useCharacterSprites, type SpriteInfo } from "../../hooks/use-characters";
-import { resolveSpriteExpression } from "../../lib/sprite-expression-match";
+import { normalizeSpriteExpressionKey, resolveSpriteExpression } from "../../lib/sprite-expression-match";
 import { useAgentStore } from "../../stores/agent.store";
 import {
   SPRITE_DISPLAY_OPACITY_MAX,
@@ -74,6 +74,13 @@ interface VisibleSpriteEntry {
 
 function getSpritePlacementKey(characterId: string, renderMode: SpriteRenderMode) {
   return `${characterId}:${renderMode}`;
+}
+
+function hasTokenContainmentMatch(requested: string, candidate: string): boolean {
+  if (requested.length < 3 || candidate.length < 3) return false;
+  const requestedTokens = requested.split("_").filter(Boolean);
+  const candidateTokens = candidate.split("_").filter(Boolean);
+  return requestedTokens.includes(candidate) || candidateTokens.includes(requested);
 }
 
 function offsetPairedSpritePlacement(
@@ -420,6 +427,7 @@ function CharacterSprite({
   const spriteUrl = useMemo(() => {
     if (!sprites || !(sprites as SpriteInfo[]).length) return null;
     const exprLower = expression.toLowerCase();
+    const exprKey = normalizeSpriteExpressionKey(expression);
     const allSprites = sprites as SpriteInfo[];
     const allowExpressions = !fullBodyOnly && spriteDisplayModes.includes("expressions");
     const allowFullBody = fullBodyOnly || spriteDisplayModes.includes("full-body");
@@ -446,19 +454,20 @@ function CharacterSprite({
     if (exact) return exact;
 
     const partial = findMatchingSprite((spriteExpression) => {
-      const baseExpression = fullBodyBaseExpression(spriteExpression);
-      return (
-        spriteExpression.includes(exprLower) ||
-        exprLower.includes(spriteExpression) ||
-        baseExpression.includes(exprLower) ||
-        exprLower.includes(baseExpression)
-      );
+      const spriteKey = normalizeSpriteExpressionKey(spriteExpression);
+      const baseExpression = fullBodyBaseExpression(spriteKey);
+      return hasTokenContainmentMatch(exprKey, spriteKey) || hasTokenContainmentMatch(exprKey, baseExpression);
     });
     if (partial) return partial;
 
     for (const spriteList of spritePools) {
       const semantic = resolveSpriteExpression(spriteList, expression);
       if (semantic) return semantic.url;
+    }
+
+    for (const spriteList of spritePools) {
+      const first = spriteList[0];
+      if (first) return first.url;
     }
 
     return null;

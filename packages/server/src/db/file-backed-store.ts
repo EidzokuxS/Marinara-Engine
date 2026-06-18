@@ -493,6 +493,36 @@ async function quarantineUnrecoverableFiles(paths: string[], context: string): P
 
 function parseJsonFile<T>(path: string, fallback: T): ParseResult<T> {
   if (!existsSync(path)) {
+    const backupPath = `${path}.bak`;
+    if (existsSync(backupPath)) {
+      try {
+        const value = JSON.parse(readFileSync(backupPath, "utf8")) as T;
+        logger.warn(
+          "[file-storage] %s is missing; recovering from %s. A fresh primary snapshot will be written on next save.",
+          path,
+          backupPath,
+        );
+        return {
+          value,
+          recoveredFromBackup: true,
+          recoveredFromFallback: false,
+          unreadablePaths: [],
+        };
+      } catch (backupErr) {
+        logger.error(
+          backupErr,
+          "[file-storage] %s is missing and backup %s could not be used; continuing with fallback data.",
+          path,
+          backupPath,
+        );
+        return {
+          value: fallback,
+          recoveredFromBackup: false,
+          recoveredFromFallback: true,
+          unreadablePaths: [backupPath],
+        };
+      }
+    }
     return { value: fallback, recoveredFromBackup: false, recoveredFromFallback: false, unreadablePaths: [] };
   }
   try {

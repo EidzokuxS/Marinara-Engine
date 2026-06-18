@@ -62,7 +62,9 @@ export function normalizeSpriteExpressionKey(value: string): string {
 
 function hasUsefulContainmentMatch(requested: string, candidate: string): boolean {
   if (requested.length < 3 || candidate.length < 3) return false;
-  return requested.includes(candidate) || candidate.includes(requested);
+  const requestedTokens = requested.split("_").filter(Boolean);
+  const candidateTokens = candidate.split("_").filter(Boolean);
+  return requestedTokens.includes(candidate) || candidateTokens.includes(requested);
 }
 
 function getFallbackKeys(expression: string): string[] {

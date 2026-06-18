@@ -67,7 +67,10 @@ export function resolveDialogueFullBodyPose(
     return pickFirstAvailable(availablePoses, "cheer", "idle");
   }
 
-  return resolveAvailablePose(availablePoses, normalizedExpression) ?? pickFirstAvailable(availablePoses, "idle");
+  return (
+    (normalizedExpression ? resolveAvailablePose(availablePoses, normalizedExpression) : undefined) ??
+    pickFirstAvailable(availablePoses, "idle")
+  );
 }
 
 export function resolveCombatFullBodyPose(
@@ -91,7 +94,7 @@ export function resolveCombatFullBodyPose(
       return pickFirstAvailable(availablePoses, "victory", "cheer", "battle_stance", "idle");
     default:
       return (
-        resolveAvailablePose(availablePoses, normalizedPose) ??
+        (normalizedPose ? resolveAvailablePose(availablePoses, normalizedPose) : undefined) ??
         pickFirstAvailable(availablePoses, "battle_stance", "idle")
       );
   }

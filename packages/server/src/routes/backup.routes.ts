@@ -12,6 +12,8 @@ import { pipeline } from "stream/promises";
 import { createHash } from "crypto";
 import { inflateRawSync } from "zlib";
 import AdmZip from "adm-zip";
+import { is } from "drizzle-orm";
+import { SQLiteTable, getTableConfig } from "drizzle-orm/sqlite-core";
 import { FILE_BACKED_TABLES } from "../db/file-backed-store.js";
 import * as schema from "../db/schema/index.js";
 import { createCharactersStorage } from "../services/storage/characters.storage.js";
@@ -336,25 +338,22 @@ function redactAgentSecrets(agent: any) {
   return { ...agent, settings: redactSettings(agent.settings) };
 }
 
-function symbolValue<T>(target: object, symbolName: string): T | undefined {
-  const symbol = Object.getOwnPropertySymbols(target).find((entry) => String(entry) === symbolName);
-  return symbol ? (target as Record<symbol, T>)[symbol] : undefined;
+function isSchemaTable(value: unknown): value is SQLiteTable {
+  return is(value, SQLiteTable);
 }
 
-function isSchemaTable(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && symbolValue(value as object, "Symbol(drizzle:IsDrizzleTable)"));
+function schemaTableName(table: SQLiteTable) {
+  return getTableConfig(table).name;
 }
 
-function schemaTableName(table: Record<string, unknown>) {
-  return symbolValue<string>(table, "Symbol(drizzle:Name)") ?? null;
+function schemaPrimaryKeyColumn(table: SQLiteTable) {
+  const config = getTableConfig(table);
+  const columnPrimary = config.columns.find((column) => column.primary === true);
+  if (columnPrimary) return columnPrimary;
+  return config.primaryKeys[0]?.columns[0] ?? null;
 }
 
-function schemaPrimaryKeyColumn(table: Record<string, unknown>) {
-  const columns = symbolValue<Record<string, { primary?: boolean }>>(table, "Symbol(drizzle:Columns)") ?? {};
-  return Object.values(columns).find((column) => column.primary === true) ?? null;
-}
-
-const profileTableObjects = new Map<string, Record<string, unknown>>();
+const profileTableObjects = new Map<string, SQLiteTable>();
 for (const candidate of Object.values(schema)) {
   if (!isSchemaTable(candidate)) continue;
   const tableName = schemaTableName(candidate);
