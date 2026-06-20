@@ -997,9 +997,26 @@ export function GameNarration({
   const gameVoiceCacheRef = useRef<Map<string, GameSegmentVoiceEntry>>(new Map());
   const gameVoicePendingRef = useRef<Map<string, AbortController>>(new Map());
   const gameVoiceAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Every voice <audio> currently created/playing. gameVoiceAudioRef only tracks
+  // the single most-recent element, so when two playback attempts interleave the
+  // earlier element is dropped from the ref and never paused — it plays to the end
+  // while new clips stack on top (issue #2647 overlap). This set lets
+  // stopGameVoicePlayback tear down ALL live elements, guaranteeing at most one
+  // voice clip is ever audible.
+  const gameVoiceActiveAudiosRef = useRef<Set<HTMLAudioElement>>(new Set());
   const gameVoiceSequenceRef = useRef(0);
   const gameVoiceGenerationTailRef = useRef<Promise<void>>(Promise.resolve());
   const lastAutoPlayedVoiceKeyRef = useRef<string | null>(null);
+  // Keys for which an auto-play attempt has been launched but not yet confirmed
+  // started. The committed dedup refs (lastAutoPlayedVoiceKeyRef /
+  // autoPlayedSideVoiceKeysRef) are only written in the async onStarted callback,
+  // so without these synchronous in-flight markers a gameVoiceVersion bump (fired
+  // as each clip finishes generating) re-runs the auto-play effects before the
+  // current clip reports playing and relaunches it — restarting the same line on
+  // a loop. onStarted clears in-flight after committing dedup; onBlocked clears it
+  // so the autoplay-blocked retry path still works. See issue #2647.
+  const autoPlayInFlightVoiceKeyRef = useRef<string | null>(null);
+  const autoPlayInFlightSideVoiceKeysRef = useRef<Set<string>>(new Set());
   const autoPlayedSideVoiceKeysRef = useRef<Set<string>>(new Set());
   const sideVoiceAutoPlayFailuresRef = useRef<Map<string, number>>(new Map());
   const sideVoiceAutoPlayRetryPendingRef = useRef<Set<string>>(new Set());
@@ -1748,14 +1765,16 @@ export function GameNarration({
   const stopGameVoicePlayback = useCallback(() => {
     gameVoiceSequenceRef.current += 1;
     queueLogScrollTopRestore();
-    const audio = gameVoiceAudioRef.current;
-    if (audio) {
+    // Tear down every live voice element, not just the current ref — interleaved
+    // playback attempts can orphan earlier elements off the single ref (#2647).
+    for (const audio of gameVoiceActiveAudiosRef.current) {
       audio.pause();
       audio.onended = null;
       audio.onerror = null;
       audio.onplaying = null;
-      gameVoiceAudioRef.current = null;
     }
+    gameVoiceActiveAudiosRef.current.clear();
+    gameVoiceAudioRef.current = null;
     setGameVoicePlayingKey(null);
     setGameVoicePausedKey(null);
   }, [queueLogScrollTopRestore]);
@@ -1808,6 +1827,7 @@ export function GameNarration({
         audio.preload = "auto";
         audioManager.setMediaElementVolume(audio, normalizedGameVoiceVolume);
         audio.muted = normalizedGameVoiceVolume <= 0;
+        gameVoiceActiveAudiosRef.current.add(audio);
         gameVoiceAudioRef.current = audio;
 
         let started = false;
@@ -1817,6 +1837,7 @@ export function GameNarration({
           options?.onStarted?.(key);
         };
         const markFailed = () => {
+          gameVoiceActiveAudiosRef.current.delete(audio);
           if (gameVoiceSequenceRef.current !== sequence || gameVoiceAudioRef.current !== audio) return;
           queueLogScrollTopRestore();
           setGameVoicePlayingKey(null);
@@ -1827,12 +1848,29 @@ export function GameNarration({
 
         audio.onplaying = markStarted;
         audio.onended = () => {
+          gameVoiceActiveAudiosRef.current.delete(audio);
           if (gameVoiceSequenceRef.current !== sequence || gameVoiceAudioRef.current !== audio) return;
           urlIndex += 1;
           playNext();
         };
         audio.onerror = markFailed;
-        void audio.play().then(markStarted).catch(markFailed);
+        void audio
+          .play()
+          .then(markStarted)
+          .catch(() => {
+            // Browsers can reject the play() promise (typically AbortError) when a
+            // rapid re-trigger "interrupts" it, even though playback actually
+            // started and continues. Dropping such a still-playing clip from the
+            // tracking set would orphan it so stopGameVoicePlayback() can never
+            // pause it — the clips stack and overlap (#2647). Only treat the
+            // rejection as a real failure when the element is genuinely not
+            // playing; otherwise treat it as a normal start.
+            if (!audio.paused && !audio.ended) {
+              markStarted();
+              return;
+            }
+            markFailed();
+          });
       };
 
       playNext();
@@ -2855,6 +2893,8 @@ export function GameNarration({
 
   useEffect(() => {
     lastAutoPlayedVoiceKeyRef.current = null;
+    autoPlayInFlightVoiceKeyRef.current = null;
+    autoPlayInFlightSideVoiceKeysRef.current.clear();
     autoPlayedSideVoiceKeysRef.current.clear();
     sideVoiceAutoPlayFailuresRef.current.clear();
     clearSideVoiceAutoPlayRetry();
@@ -2865,6 +2905,8 @@ export function GameNarration({
     if (gameVoiceEnabled && !isStreaming && !scenePreparing && !directionsActive && !gameVoicePlaybackBlocked) return;
     if (isStreaming || scenePreparing || directionsActive || gameVoicePlaybackBlocked) {
       lastAutoPlayedVoiceKeyRef.current = null;
+      autoPlayInFlightVoiceKeyRef.current = null;
+      autoPlayInFlightSideVoiceKeysRef.current.clear();
       autoPlayedSideVoiceKeysRef.current.clear();
       sideVoiceAutoPlayFailuresRef.current.clear();
       clearSideVoiceAutoPlayRetry();
@@ -2884,12 +2926,23 @@ export function GameNarration({
     if (!gameVoiceEnabled || !activeVoiceKey) return;
     if (isStreaming || scenePreparing || directionsActive || gameVoicePlaybackBlocked) return;
     if (lastAutoPlayedVoiceKeyRef.current === activeVoiceKey) return;
+    // A launch is already pending for this key; don't relaunch on version churn.
+    if (autoPlayInFlightVoiceKeyRef.current === activeVoiceKey) return;
     const entry = gameVoiceCacheRef.current.get(activeVoiceKey);
     if (!entry || entry.status !== "ready") return;
+    autoPlayInFlightVoiceKeyRef.current = activeVoiceKey;
     playGameVoiceKey(activeVoiceKey, {
       onStarted: (startedKey) => {
         if (startedKey === activeVoiceKey) {
           lastAutoPlayedVoiceKeyRef.current = activeVoiceKey;
+        }
+        if (autoPlayInFlightVoiceKeyRef.current === startedKey) {
+          autoPlayInFlightVoiceKeyRef.current = null;
+        }
+      },
+      onBlocked: (blockedKey) => {
+        if (autoPlayInFlightVoiceKeyRef.current === blockedKey) {
+          autoPlayInFlightVoiceKeyRef.current = null;
         }
       },
     });
@@ -2923,18 +2976,22 @@ export function GameNarration({
       (key, index) =>
         entries[index]?.status === "ready" &&
         !autoPlayedSideVoiceKeysRef.current.has(key) &&
+        !autoPlayInFlightSideVoiceKeysRef.current.has(key) &&
         !sideVoiceAutoPlayRetryPendingRef.current.has(key) &&
         (sideVoiceAutoPlayFailuresRef.current.get(key) ?? 0) < SIDE_VOICE_AUTOPLAY_MAX_FAILURES,
     );
     if (playableKeys.length > 0) {
+      for (const key of playableKeys) autoPlayInFlightSideVoiceKeysRef.current.add(key);
       playGameVoiceKeys(playableKeys, {
         onStarted: (startedKey) => {
+          autoPlayInFlightSideVoiceKeysRef.current.delete(startedKey);
           autoPlayedSideVoiceKeysRef.current.add(startedKey);
           sideVoiceAutoPlayFailuresRef.current.delete(startedKey);
           sideVoiceAutoPlayRetryPendingRef.current.delete(startedKey);
           setGameVoiceVersion((version) => version + 1);
         },
         onBlocked: (blockedKey) => {
+          autoPlayInFlightSideVoiceKeysRef.current.delete(blockedKey);
           const failures = (sideVoiceAutoPlayFailuresRef.current.get(blockedKey) ?? 0) + 1;
           sideVoiceAutoPlayFailuresRef.current.set(blockedKey, failures);
           if (failures < SIDE_VOICE_AUTOPLAY_MAX_FAILURES) {
