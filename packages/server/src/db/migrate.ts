@@ -359,6 +359,17 @@ const CREATE_TABLES: string[] = [
     committed INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS game_engine_state (
+    id TEXT PRIMARY KEY NOT NULL,
+    chat_id TEXT NOT NULL,
+    message_id TEXT NOT NULL DEFAULT '',
+    swipe_index INTEGER NOT NULL DEFAULT 0,
+    game_type TEXT NOT NULL,
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    state TEXT NOT NULL,
+    committed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS game_checkpoints (
     id TEXT PRIMARY KEY NOT NULL,
     chat_id TEXT NOT NULL,
@@ -925,6 +936,12 @@ export async function runMigrations(db: DB) {
   );
   await db.run(
     sql.raw(`CREATE INDEX IF NOT EXISTS idx_game_state_message ON game_state_snapshots(message_id, swipe_index)`),
+  );
+  await db.run(
+    sql.raw(`CREATE INDEX IF NOT EXISTS idx_game_engine_state_chat ON game_engine_state(chat_id, created_at DESC)`),
+  );
+  await db.run(
+    sql.raw(`CREATE INDEX IF NOT EXISTS idx_game_engine_state_message ON game_engine_state(message_id, swipe_index)`),
   );
   await db.run(
     sql.raw(`CREATE INDEX IF NOT EXISTS idx_lorebook_character_links_book ON lorebook_character_links(lorebook_id)`),

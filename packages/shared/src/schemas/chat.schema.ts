@@ -31,6 +31,8 @@ export const generateRequestSchema = z.object({
   connectionId: z.string().nullable().default(null),
 
   impersonate: z.boolean().optional().default(false),
+  /** When true, this generation drives the active turn-game's bot seats instead of a normal chat reply. */
+  turnGameBots: z.boolean().optional().default(false),
   streaming: z.boolean().optional().default(true),
   userStatus: z.enum(["active", "idle", "dnd", "invisible"]).optional().default("active"),
   userActivity: z.string().max(120).optional().default(""),

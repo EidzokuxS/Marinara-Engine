@@ -67,6 +67,13 @@ export * from "./features/agents/agent-registry.js";
 export * from "./features/function-calls/tool-definitions.js";
 export * from "./features/folder-packages/manifest-package.js";
 
+// Turn-game framework (UNO and future turn-based games)
+export * from "./features/turn-games/engine.types.js";
+export * from "./features/turn-games/registry.js";
+export * from "./features/turn-games/uno/types.js";
+export * from "./features/turn-games/uno/tools.js";
+export { unoEngine, cardLabel } from "./features/turn-games/uno/engine.js";
+
 // Utils
 export * from "./utils/macro-engine.js";
 export * from "./utils/xml-wrapper.js";

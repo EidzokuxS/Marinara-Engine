@@ -1,0 +1,268 @@
+// ──────────────────────────────────────────────
+// Turn-Game Runner (game-agnostic)
+// ──────────────────────────────────────────────
+// Bridges the pure turn-game engines (packages/shared) to the server: resolves
+// seats from a conversation chat's participants, persists engine state, and
+// applies validated moves. Bot-seat generation (the LLM narration loop) is
+// layered on top of this in the generation pipeline; this module is the
+// deterministic core used by both the REST routes and that loop.
+import { getTurnGameEngine, type AnyTurnGameEngine, type Seat } from "@marinara-engine/shared";
+import type { DB } from "../../db/connection.js";
+import { logger } from "../../lib/logger.js";
+import { createChatsStorage } from "../storage/chats.storage.js";
+import { createCharactersStorage } from "../storage/characters.storage.js";
+import {
+  createGameEngineStateStorage,
+  type GameEngineStateRow,
+} from "../storage/game-engine-state.storage.js";
+
+export interface TurnGameStartOptions {
+  gameType: string;
+  config?: unknown;
+  /** Which of the chat's characters play (defaults to all). */
+  botCharacterIds?: string[];
+  /** Explicit seat order by seatId; unspecified seats are appended. */
+  seatOrder?: string[];
+  /** Whether the human seat goes first (default true). */
+  humanFirst?: boolean;
+  /** Optional deterministic seed (defaults to random). */
+  seed?: number;
+}
+
+export interface TurnGameOutcome {
+  ok: boolean;
+  error?: string;
+  view?: unknown;
+  events?: unknown[];
+  legalMoves?: unknown[];
+  finished?: boolean;
+  winnerSeatId?: string | null;
+  currentSeatId?: string | null;
+}
+
+interface LoadedGame {
+  row: GameEngineStateRow;
+  engine: AnyTurnGameEngine;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  state: any;
+}
+
+const HUMAN_FALLBACK_SEAT = "human";
+
+function humanSeatIdFromChat(chat: { personaId: string | null }): string {
+  return chat.personaId || HUMAN_FALLBACK_SEAT;
+}
+
+async function resolveCharacterName(
+  characters: ReturnType<typeof createCharactersStorage>,
+  characterId: string,
+): Promise<string> {
+  try {
+    const row = await characters.getById(characterId);
+    if (row?.data) {
+      const data = JSON.parse(row.data) as { name?: unknown };
+      if (typeof data.name === "string" && data.name.trim()) return data.name.trim();
+    }
+  } catch {
+    // best-effort — fall through to the id
+  }
+  return characterId;
+}
+
+async function resolveSeats(
+  db: DB,
+  chat: { personaId: string | null; characterIds: string },
+  opts: TurnGameStartOptions,
+): Promise<Seat[]> {
+  const personaId = chat.personaId || null;
+  const human: Seat = {
+    seatId: personaId || HUMAN_FALLBACK_SEAT,
+    kind: "human",
+    ...(personaId ? { personaId } : {}),
+    displayName: "You",
+  };
+
+  let allCharIds: string[] = [];
+  try {
+    const parsed = JSON.parse(chat.characterIds || "[]");
+    if (Array.isArray(parsed)) allCharIds = parsed.filter((x): x is string => typeof x === "string");
+  } catch {
+    allCharIds = [];
+  }
+
+  const botIds =
+    opts.botCharacterIds && opts.botCharacterIds.length > 0
+      ? opts.botCharacterIds.filter((id) => allCharIds.includes(id))
+      : allCharIds;
+
+  const characters = createCharactersStorage(db);
+  const bots: Seat[] = [];
+  for (const id of botIds) {
+    bots.push({ seatId: id, kind: "bot", characterId: id, displayName: await resolveCharacterName(characters, id) });
+  }
+
+  let seats = opts.humanFirst === false ? [...bots, human] : [human, ...bots];
+
+  if (opts.seatOrder && opts.seatOrder.length > 0) {
+    const bySeat = new Map(seats.map((s) => [s.seatId, s]));
+    const ordered: Seat[] = [];
+    for (const id of opts.seatOrder) {
+      const seat = bySeat.get(id);
+      if (seat) {
+        ordered.push(seat);
+        bySeat.delete(id);
+      }
+    }
+    for (const seat of bySeat.values()) ordered.push(seat);
+    if (ordered.length > 0) seats = ordered;
+  }
+
+  return seats;
+}
+
+async function loadGame(db: DB, chatId: string): Promise<LoadedGame | null> {
+  const storage = createGameEngineStateStorage(db);
+  const row = await storage.getLatest(chatId);
+  if (!row) return null;
+  const engine = getTurnGameEngine(row.gameType);
+  if (!engine) {
+    logger.warn("Active game in chat %s has unknown gameType %s", chatId, row.gameType);
+    return null;
+  }
+  try {
+    return { row, engine, state: JSON.parse(row.state) };
+  } catch (err) {
+    logger.error(err, "Failed to parse game_engine_state for chat %s", chatId);
+    return null;
+  }
+}
+
+async function viewerSeatForChat(db: DB, chatId: string): Promise<string> {
+  const chat = await createChatsStorage(db).getById(chatId);
+  return chat ? humanSeatIdFromChat(chat) : HUMAN_FALLBACK_SEAT;
+}
+
+/** Start a new game in `chatId`. Clears any prior game for the chat. */
+export async function startTurnGame(db: DB, chatId: string, opts: TurnGameStartOptions): Promise<TurnGameOutcome> {
+  const engine = getTurnGameEngine(opts.gameType);
+  if (!engine) return { ok: false, error: `Unknown game type: ${opts.gameType}` };
+
+  const chats = createChatsStorage(db);
+  const chat = await chats.getById(chatId);
+  if (!chat) return { ok: false, error: "Chat not found." };
+
+  const seats = await resolveSeats(db, chat, opts);
+  if (seats.length < engine.minPlayers) {
+    return { ok: false, error: `${engine.label} needs at least ${engine.minPlayers} players (got ${seats.length}).` };
+  }
+  if (seats.length > engine.maxPlayers) {
+    return { ok: false, error: `${engine.label} allows at most ${engine.maxPlayers} players (got ${seats.length}).` };
+  }
+
+  const config = engine.normalizeConfig(opts.config ?? engine.defaultConfig());
+  const seed = Number.isFinite(opts.seed) ? Number(opts.seed) : Math.floor(Math.random() * 0x7fffffff);
+
+  let state: unknown;
+  try {
+    state = engine.setup(config, seats, seed);
+  } catch (err) {
+    logger.error(err, "Turn-game setup failed for chat %s (%s)", chatId, opts.gameType);
+    return { ok: false, error: "Failed to set up the game." };
+  }
+
+  const storage = createGameEngineStateStorage(db);
+  await storage.deleteForChat(chatId);
+  await storage.create({
+    chatId,
+    messageId: "",
+    swipeIndex: 0,
+    gameType: engine.gameType,
+    schemaVersion: engine.schemaVersion,
+    state: JSON.stringify(state),
+    committed: true,
+  });
+
+  const viewer = humanSeatIdFromChat(chat);
+  const terminal = engine.isTerminal(state);
+  return {
+    ok: true,
+    view: engine.publicView(state, viewer),
+    finished: terminal.done,
+    winnerSeatId: terminal.winnerSeatId ?? null,
+    currentSeatId: engine.currentSeat(state),
+  };
+}
+
+/** Apply a move for `seatId` (defaults to the human seat). */
+export async function applyTurnGameMove(
+  db: DB,
+  chatId: string,
+  rawMove: unknown,
+  seatId?: string,
+): Promise<TurnGameOutcome> {
+  const loaded = await loadGame(db, chatId);
+  if (!loaded) return { ok: false, error: "No active game in this chat." };
+  const { row, engine, state } = loaded;
+
+  const viewer = seatId ?? (await viewerSeatForChat(db, chatId));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const result = engine.applyMove(state, viewer, rawMove as any);
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      error: result.error,
+      legalMoves: result.legalMoves,
+      view: engine.publicView(state, viewer),
+      currentSeatId: engine.currentSeat(state),
+    };
+  }
+
+  const storage = createGameEngineStateStorage(db);
+  const serialized = JSON.stringify(result.state);
+  // While unanchored to a narration message, keep a single live row.
+  if (row.messageId === "") {
+    await storage.updateStateById(row.id, serialized, true);
+  } else {
+    await storage.create({
+      chatId,
+      messageId: "",
+      swipeIndex: 0,
+      gameType: engine.gameType,
+      schemaVersion: engine.schemaVersion,
+      state: serialized,
+      committed: true,
+    });
+  }
+
+  const terminal = engine.isTerminal(result.state);
+  return {
+    ok: true,
+    view: engine.publicView(result.state, viewer),
+    events: result.events,
+    finished: terminal.done,
+    winnerSeatId: terminal.winnerSeatId ?? null,
+    currentSeatId: engine.currentSeat(result.state),
+  };
+}
+
+/** Read-only board view for a viewer (defaults to the human seat). */
+export async function getTurnGameView(db: DB, chatId: string, seatId?: string): Promise<unknown | null> {
+  const loaded = await loadGame(db, chatId);
+  if (!loaded) return null;
+  const { engine, state } = loaded;
+  const viewer = seatId ?? (await viewerSeatForChat(db, chatId));
+  return engine.publicView(state, viewer);
+}
+
+/** True when an unfinished game exists for the chat (for tool-scoping / autonomous suppression). */
+export async function getActiveTurnGame(db: DB, chatId: string): Promise<LoadedGame | null> {
+  const loaded = await loadGame(db, chatId);
+  if (!loaded) return null;
+  return loaded.engine.isTerminal(loaded.state).done ? null : loaded;
+}
+
+/** End and remove the game for a chat. */
+export async function resignTurnGame(db: DB, chatId: string): Promise<void> {
+  await createGameEngineStateStorage(db).deleteForChat(chatId);
+}

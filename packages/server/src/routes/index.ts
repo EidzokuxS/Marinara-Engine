@@ -47,6 +47,7 @@ import { appSettingsRoutes } from "./app-settings.routes.js";
 import { achievementsRoutes } from "./achievements.routes.js";
 import { gameRoutes } from "./game.routes.js";
 import { gameAssetsRoutes } from "./game-assets.routes.js";
+import { turnGamesRoutes } from "./turn-games.routes.js";
 import { sidecarRoutes } from "./sidecar.routes.js";
 import { ttsRoutes } from "./tts.routes.js";
 import { promptOverridesRoutes } from "./prompt-overrides.routes.js";
@@ -99,6 +100,7 @@ export async function registerRoutes(app: FastifyInstance) {
   await app.register(achievementsRoutes, { prefix: "/api/achievements" });
   await app.register(gameRoutes, { prefix: "/api/game" });
   await app.register(gameAssetsRoutes, { prefix: "/api/game-assets" });
+  await app.register(turnGamesRoutes, { prefix: "/api/turn-games" });
   await app.register(ttsRoutes, { prefix: "/api/tts" });
   await app.register(promptOverridesRoutes, { prefix: "/api/prompt-overrides" });
   await app.register(csrfDiagnosticsRoutes, { prefix: "/api/csrf" });

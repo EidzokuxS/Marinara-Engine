@@ -17,6 +17,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Loader2, ChevronUp, Settings2, Image as ImageIcon, ArrowRightLeft } from "lucide-react";
 import { ConversationMessage } from "./ConversationMessage";
 import { ConversationInput } from "./ConversationInput";
+import { UnoBoard } from "./UnoBoard";
 import { SceneBanner, EndSceneBar } from "./SceneBanner";
 import { ChatBranchSelector } from "./ChatBranchSelector";
 import { ActiveLorebookEntriesButton } from "./ActiveLorebookEntriesButton";
@@ -1250,6 +1251,9 @@ export function ConversationView({
           onAbandon={onAbandonScene}
         />
       )}
+
+      {/* ── Turn-game board (UNO, etc.) — self-hides when no game is active ── */}
+      <UnoBoard chatId={chatId} />
 
       {/* ── Input area ── */}
       <ConversationInput

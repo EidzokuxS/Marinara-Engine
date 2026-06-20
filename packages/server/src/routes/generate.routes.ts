@@ -234,6 +234,7 @@ import { registerDryRunRoute } from "./generate/dry-run-route.js";
 import { registerRetryAgentsRoute } from "./generate/retry-agents-route.js";
 import { fingerprintChatSummary } from "../services/prompt/chat-summary-fingerprint.js";
 import { sendSseEvent, startSseReply, trySendSseEvent } from "./generate/sse.js";
+import { runTurnGameBotTurns } from "../services/turn-games/turn-game-bot-runner.service.js";
 import { normalizeContextInjections } from "./generate/agent-normalizers.js";
 import {
   buildGenerationPromptPresetCandidates,
@@ -1304,6 +1305,23 @@ export async function generateRoutes(app: FastifyInstance) {
     };
 
     try {
+      // ── Turn-game bot seats (UNO, etc.): drive the active game's bot players and
+      //    short-circuit the normal conversation pipeline. Gated by an explicit
+      //    flag so it can never affect a regular chat/roleplay generation. ──
+      if (input.turnGameBots && requestChatMode === "conversation") {
+        await runTurnGameBotTurns({
+          db: app.db,
+          chatId: input.chatId,
+          conn,
+          baseUrl,
+          reply,
+          signal: abortController.signal,
+        });
+        generationComplete = true;
+        sendSseEvent(reply, { type: "done", data: "" });
+        return;
+      }
+
       // Get chat messages
       const allChatMessages = await chats.listMessages(input.chatId);
       const chatMode = requestChatMode;

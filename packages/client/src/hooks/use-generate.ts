@@ -372,6 +372,7 @@ import { useChatStore } from "../stores/chat.store";
 import { useAgentStore } from "../stores/agent.store";
 import { useGameModeStore } from "../stores/game-mode.store";
 import { useGameStateStore } from "../stores/game-state.store";
+import { useUnoGameStore } from "../stores/uno-game.store";
 import { useTranslationStore } from "../stores/translation.store";
 import { useUIStore } from "../stores/ui.store";
 import {
@@ -910,6 +911,8 @@ export function useGenerate() {
       impersonateConnectionId?: string;
       impersonateBlockAgents?: boolean;
       impersonatePromptTemplate?: string;
+      /** When true, this generation drives the active turn-game's bot seats instead of a chat reply. */
+      turnGameBots?: boolean;
     }) => {
       // Prevent concurrent generations for the same chat. Different chats may
       // keep generating in the background while the user navigates elsewhere.
@@ -1675,6 +1678,12 @@ export function useGenerate() {
               console.warn(`[Generate] ${event.type} received:`, patch);
               if (!isActiveChat()) break;
               applyGameStatePatchToStore(params.chatId, patch, gameStatePatchAnchor);
+              break;
+            }
+
+            case "uno_state_patch": {
+              if (!isActiveChat()) break;
+              useUnoGameStore.getState().setUno(event.data as never, params.chatId);
               break;
             }
 
@@ -2620,6 +2629,11 @@ export function useGenerate() {
               if (patch && Object.keys(patch).length > 0) trackerPatchCount += 1;
               if (!isActiveChat()) break;
               applyGameStatePatchToStore(chatId, patch);
+              break;
+            }
+            case "uno_state_patch": {
+              if (!isActiveChat()) break;
+              useUnoGameStore.getState().setUno(event.data as never, chatId);
               break;
             }
             case "game_map_update": {
