@@ -34,7 +34,15 @@ export const characterBookEntrySchema = z.object({
   selective: z.boolean().default(false),
   secondary_keys: z.array(z.string()).default([]),
   constant: z.boolean().default(false),
-  position: z.enum(["before_char", "after_char"]).catch("before_char").default("before_char"),
+  position: z
+    .union([
+      z.enum(["before_char", "after_char", "at_depth", "depth"]),
+      z.number().int().min(0).max(6),
+    ])
+    .catch("before_char")
+    .default("before_char"),
+  depth: z.number().optional(),
+  role: z.union([z.enum(["system", "user", "assistant"]), z.number().int().min(0).max(2)]).optional(),
 });
 
 export const characterBookSchema = z.object({

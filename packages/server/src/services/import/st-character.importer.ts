@@ -9,7 +9,13 @@ import { createLorebooksStorage } from "../storage/lorebooks.storage.js";
 import { createRegexScriptsStorage } from "../storage/regex-scripts.storage.js";
 import { importSTLorebook } from "./st-lorebook.importer.js";
 import { isPatternSafe } from "@marinara-engine/shared";
-import type { CharacterData, CreateRegexScriptInput, RegexPlacement } from "@marinara-engine/shared";
+import type {
+  CharacterBookEntryPosition,
+  CharacterBookEntryRole,
+  CharacterData,
+  CreateRegexScriptInput,
+  RegexPlacement,
+} from "@marinara-engine/shared";
 import { existsSync, mkdirSync } from "fs";
 import { unlink, writeFile } from "fs/promises";
 import { join } from "path";
@@ -534,6 +540,25 @@ function selectBestCharacterBook(...books: unknown[]): unknown {
   return best;
 }
 
+function normalizeCharacterBookPosition(value: unknown): CharacterBookEntryPosition {
+  if (typeof value === "string") {
+    if (value === "after_char" || value === "at_depth" || value === "depth") return value;
+    return "before_char";
+  }
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 6) {
+    return value as CharacterBookEntryPosition;
+  }
+  return "before_char";
+}
+
+function normalizeCharacterBookRole(value: unknown): CharacterBookEntryRole | undefined {
+  if (value === "system" || value === "user" || value === "assistant") return value;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 2) {
+    return value as CharacterBookEntryRole;
+  }
+  return undefined;
+}
+
 function buildCardSpecMetadata(raw: Record<string, unknown>) {
   const spec = typeof raw.spec === "string" ? raw.spec : null;
   const specVersion = typeof raw.spec_version === "string" ? raw.spec_version : null;
@@ -668,13 +693,9 @@ function normalizeCharacterBook(raw: unknown): CharacterData["character_book"] {
   const book = raw as Record<string, unknown>;
 
   const entries = getCharacterBookEntries(book).map((e, i) => {
-    const posRaw = e.position;
-    let position: "before_char" | "after_char" = "before_char";
-    if (typeof posRaw === "string") {
-      position = posRaw === "after_char" ? "after_char" : "before_char";
-    } else if (typeof posRaw === "number") {
-      position = posRaw === 1 ? "after_char" : "before_char";
-    }
+    const position = normalizeCharacterBookPosition(e.position);
+    const depth = typeof e.depth === "number" && Number.isFinite(e.depth) ? e.depth : null;
+    const role = normalizeCharacterBookRole(e.role);
     const title = firstNonEmptyString(e.comment, e.name) ?? `Entry ${i + 1}`;
 
     return {
@@ -692,6 +713,8 @@ function normalizeCharacterBook(raw: unknown): CharacterData["character_book"] {
       selective: Boolean(e.selective ?? false),
       constant: Boolean(e.constant ?? false),
       position,
+      ...(depth !== null ? { depth } : {}),
+      ...(role !== undefined ? { role } : {}),
     };
   });
 

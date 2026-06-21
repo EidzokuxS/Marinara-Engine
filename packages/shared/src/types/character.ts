@@ -78,6 +78,20 @@ export interface CharacterBook {
   entries: CharacterBookEntry[];
 }
 
+export type CharacterBookEntryPosition =
+  | "before_char"
+  | "after_char"
+  | "at_depth"
+  | "depth"
+  | 0
+  | 1
+  | 2
+  | 3
+  | 4
+  | 5
+  | 6;
+export type CharacterBookEntryRole = "system" | "user" | "assistant" | 0 | 1 | 2;
+
 /** A single entry in a character book. */
 export interface CharacterBookEntry {
   keys: string[];
@@ -93,7 +107,9 @@ export interface CharacterBookEntry {
   selective: boolean;
   secondary_keys: string[];
   constant: boolean;
-  position: "before_char" | "after_char";
+  position: CharacterBookEntryPosition;
+  depth?: number;
+  role?: CharacterBookEntryRole;
 }
 
 /** Our internal Character representation (extends V2 with engine-specific fields). */
