@@ -867,6 +867,11 @@ export async function lorebooksRoutes(app: FastifyInstance) {
       ].join(", ");
       return `${e.name ?? ""}${keys ? ` [${keys}]` : ""}\n${e.content ?? ""}`.trim();
     });
+    const existingEmbeddingDimension = body.onlyMissing
+      ? ((allEntries as Array<Record<string, unknown>>)
+          .map((entry) => entry.embedding)
+          .find((embedding): embedding is unknown[] => Array.isArray(embedding) && embedding.length > 0)?.length ?? null)
+      : null;
 
     // Batch embed (most APIs support multiple texts per call)
     const BATCH_SIZE = 50;
@@ -874,7 +879,31 @@ export async function lorebooksRoutes(app: FastifyInstance) {
     for (let i = 0; i < texts.length; i += BATCH_SIZE) {
       const batchTexts = texts.slice(i, i + BATCH_SIZE);
       const batchEntries = entries.slice(i, i + BATCH_SIZE);
-      const embeddings = await provider.embed(batchTexts, embeddingModel);
+      let embeddings: number[][];
+      try {
+        embeddings = await provider.embed(batchTexts, embeddingModel);
+      } catch (error) {
+        logger.warn(error, "[lorebooks] Embedding batch failed");
+        return reply.status(502).send({
+          error: error instanceof Error ? error.message : "Lorebook embedding request failed",
+        });
+      }
+      if (embeddings.length !== batchTexts.length) {
+        return reply.status(502).send({
+          error: `Lorebook embedding request returned ${embeddings.length} vectors for ${batchTexts.length} entries.`,
+        });
+      }
+      const batchEmbeddingDimension = embeddings.find((embedding) => embedding.length > 0)?.length ?? null;
+      if (
+        existingEmbeddingDimension &&
+        batchEmbeddingDimension &&
+        existingEmbeddingDimension !== batchEmbeddingDimension
+      ) {
+        return reply.status(409).send({
+          error:
+            "Embedding dimensions changed. Re-vectorize all entries instead of only missing entries before switching embedding models.",
+        });
+      }
       for (let j = 0; j < batchEntries.length; j++) {
         const entry = batchEntries[j] as Record<string, unknown>;
         if (embeddings[j]) {

@@ -37,6 +37,16 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return denom === 0 ? 0 : dot / denom;
 }
 
+function parseStoredEmbedding(value: string | null): number[] | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? (parsed as number[]) : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Public API ──
 
 export interface RecalledMemory {
@@ -61,21 +71,20 @@ export async function embedMemoryRecallTexts(
   texts: string[],
   options: MemoryRecallEmbeddingOptions = {},
 ): Promise<number[][]> {
+  if (options.embeddingSource) {
+    const configuredEmbeddings = await options.embeddingSource.embed(texts);
+    if (configuredEmbeddings) {
+      logger.debug("[memory-recall] Used configured embedding source %s", options.embeddingSource.label);
+      return configuredEmbeddings;
+    }
+    return [];
+  }
+
   const localEmbedder = options.localEmbedder ?? localEmbed;
   const localEmbeddings = await localEmbedder(texts);
   if (localEmbeddings) return localEmbeddings;
 
-  if (!options.embeddingSource) {
-    logger.warn("[memory-recall] Local embeddings are unavailable and no embedding connection is configured");
-    return [];
-  }
-
-  const fallbackEmbeddings = await options.embeddingSource.embed(texts);
-  if (fallbackEmbeddings) {
-    logger.debug("[memory-recall] Used configured embedding source %s", options.embeddingSource.label);
-    return fallbackEmbeddings;
-  }
-
+  logger.warn("[memory-recall] Local embeddings are unavailable and no embedding connection is configured");
   return [];
 }
 
@@ -95,7 +104,7 @@ export async function chunkAndEmbedMessages(
   const lastChunk = await db
     .select({ lastMessageAt: memoryChunks.lastMessageAt })
     .from(memoryChunks)
-    .where(and(eq(memoryChunks.chatId, chatId), isNull(memoryChunks.sourceChatId)))
+    .where(and(eq(memoryChunks.chatId, chatId), isNull(memoryChunks.sourceChatId), isNotNull(memoryChunks.embedding)))
     .orderBy(desc(memoryChunks.lastMessageAt))
     .limit(1);
 
@@ -154,6 +163,36 @@ export async function chunkAndEmbedMessages(
   // Embed all chunks using local model
   const texts = chunksToCreate.map((c) => c.content);
   const embeddings = await embedMemoryRecallTexts(texts, options);
+  if (
+    embeddings.length !== chunksToCreate.length ||
+    embeddings.some((embedding) => !Array.isArray(embedding) || embedding.length === 0)
+  ) {
+    logger.warn(
+      "[memory-recall] Skipping %d memory chunk(s) for chat %s because embedding generation returned %d/%d usable vectors",
+      chunksToCreate.length,
+      chatId,
+      embeddings.filter((embedding) => Array.isArray(embedding) && embedding.length > 0).length,
+      chunksToCreate.length,
+    );
+    return;
+  }
+
+  const embeddingDimension = embeddings[0]!.length;
+  const existingEmbeddedChunk = await db
+    .select({ embedding: memoryChunks.embedding })
+    .from(memoryChunks)
+    .where(and(eq(memoryChunks.chatId, chatId), isNull(memoryChunks.sourceChatId), isNotNull(memoryChunks.embedding)))
+    .limit(1);
+  const existingEmbedding = parseStoredEmbedding(existingEmbeddedChunk[0]?.embedding ?? null);
+  if (Array.isArray(existingEmbedding) && existingEmbedding.length > 0 && existingEmbedding.length !== embeddingDimension) {
+    logger.warn(
+      "[memory-recall] Skipping memory chunk insert for chat %s because embedding dimension changed from %d to %d. Rebuild memories before mixing embedding models.",
+      chatId,
+      existingEmbedding.length,
+      embeddingDimension,
+    );
+    return;
+  }
 
   // Store chunks
   const timestamp = now();
@@ -163,7 +202,7 @@ export async function chunkAndEmbedMessages(
       id: newId(),
       chatId,
       content: chunk.content,
-      embedding: embeddings[i] ? JSON.stringify(embeddings[i]) : null,
+      embedding: JSON.stringify(embeddings[i]!),
       messageCount: chunk.messageCount,
       firstMessageAt: chunk.firstMessageAt,
       lastMessageAt: chunk.lastMessageAt,

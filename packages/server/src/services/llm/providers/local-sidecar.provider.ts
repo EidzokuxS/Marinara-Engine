@@ -7,7 +7,7 @@ import { resolveSidecarRequestModel } from "../../sidecar/sidecar-request-model.
 import { getEmbeddingRequestTimeoutMs } from "../../../config/runtime-config.js";
 
 function isNotFoundError(error: unknown): boolean {
-  return error instanceof Error && /\(404\)|\b404\b/.test(error.message);
+  return error instanceof Error && /\(404\)|\b404\b|\(501\)|\b501\b|not enabled|not supported/i.test(error.message);
 }
 
 export class LocalSidecarProvider extends BaseLLMProvider {
@@ -74,7 +74,16 @@ export class LocalSidecarProvider extends BaseLLMProvider {
   }
 
   async embed(texts: string[], _model: string): Promise<number[][]> {
-    const baseUrl = await sidecarProcessService.ensureReady({ forceStart: true });
+    if (sidecarModelService.getResolvedBackend() === "mlx") {
+      throw new Error("Local sidecar embeddings are not supported on the MLX backend.");
+    }
+    if (!sidecarModelService.isEnabled()) {
+      throw new Error(
+        "Local sidecar embeddings require the local model to be enabled for trackers or game scene analysis.",
+      );
+    }
+
+    const baseUrl = await sidecarProcessService.ensureReady();
     const requestModel = this.getRequestModel();
 
     try {
