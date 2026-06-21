@@ -21,6 +21,7 @@ const EXPRESSION_AGENT_CONTEXT_CHAR_LIMIT = 1200;
 const EXPRESSION_AGENT_RESPONSE_CHAR_LIMIT = 6000;
 const CHARACTER_LORE_DESCRIPTION_LIMIT = 2000;
 const CHARACTER_LORE_FIELD_LIMIT = 1200;
+const DEFAULT_AGENT_TEMPERATURE = 0.3;
 
 /** Strip HTML/XML-style tags (e.g. <div style="..."> <br> <speaker>) from text to save tokens. */
 function stripHtmlTags(text: string): string {
@@ -48,6 +49,7 @@ export interface AgentExecConfig {
   promptTemplate: string;
   connectionId: string | null;
   settings: Record<string, unknown>;
+  customParameters?: Record<string, unknown>;
 }
 
 /** Optional tool context for agents that need function calling. */
@@ -198,6 +200,18 @@ function normalizeAgentMaxTokens(value: unknown, fallback = DEFAULT_AGENT_MAX_TO
   return Math.max(MIN_AGENT_MAX_TOKENS, Math.trunc(parsed));
 }
 
+function normalizeAgentTemperature(value: unknown, fallback = DEFAULT_AGENT_TEMPERATURE): number {
+  const parsed = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.min(2, parsed));
+}
+
+function agentCustomParameters(config: AgentExecConfig): Record<string, unknown> | undefined {
+  return config.customParameters && Object.keys(config.customParameters).length > 0
+    ? config.customParameters
+    : undefined;
+}
+
 function applyProviderMaxTokensOverride(provider: BaseLLMProvider, maxTokens: number): number {
   return provider.maxTokensOverrideValue !== null ? Math.min(maxTokens, provider.maxTokensOverrideValue) : maxTokens;
 }
@@ -296,9 +310,10 @@ export async function executeAgent(
             : buildStandardAgentMessages(config, template, context);
 
     // Agents use lower temperature for reliability
-    const temperature = (config.settings.temperature as number) ?? 0.3;
+    const temperature = normalizeAgentTemperature(config.settings.temperature);
     const maxTokens = applyProviderMaxTokensOverride(provider, normalizeAgentMaxTokens(config.settings.maxTokens));
     const streamResponses = context.streaming !== false;
+    const customParameters = agentCustomParameters(config);
 
     // If tools are available, use the tool call loop.
     // `await` so a rethrow from the tool loop is caught by this function's
@@ -338,6 +353,7 @@ export async function executeAgent(
       model,
       temperature,
       maxTokens,
+      customParameters,
       stream: streamResponses,
       onToken: streamResponses
         ? (chunk) => {
@@ -380,6 +396,7 @@ export async function executeAgent(
         model,
         temperature,
         maxTokens,
+        customParameters,
         stream: streamResponses,
         onToken: streamResponses
           ? (chunk) => {
@@ -427,7 +444,7 @@ export async function executeAgent(
       ...agentDebugBase(
         config,
         model,
-        (config.settings.temperature as number) ?? 0.3,
+        normalizeAgentTemperature(config.settings.temperature),
         normalizeAgentMaxTokens(config.settings.maxTokens),
       ),
       messageCount: 0,
@@ -458,6 +475,7 @@ async function executeAgentWithTools(
   const loopMessages = [...initialMessages];
   let totalTokens = 0;
   const debugAgentsEnabled = isDebugAgentsEnabled() && logger.isLevelEnabled("debug");
+  const customParameters = agentCustomParameters(config);
 
   for (let round = 0; round < maxToolRounds; round++) {
     emitAgentDebug(context, {
@@ -472,6 +490,7 @@ async function executeAgentWithTools(
       model,
       temperature,
       maxTokens,
+      customParameters,
       stream: streamResponses,
       tools: toolContext.tools,
       signal: context.signal,
@@ -552,6 +571,7 @@ async function executeAgentWithTools(
     model,
     temperature,
     maxTokens,
+    customParameters,
     stream: streamResponses,
     signal: context.signal,
   });
@@ -651,7 +671,8 @@ export async function executeAgentBatch(
 
   const startTime = Date.now();
   const perAgentTokens = configs.map((c) => normalizeAgentMaxTokens(c.settings.maxTokens));
-  const temperature = Math.min(...configs.map((c) => (c.settings.temperature as number) ?? 0.3));
+  const temperature = Math.min(...configs.map((c) => normalizeAgentTemperature(c.settings.temperature)));
+  const customParameters = agentCustomParameters(configs[0]!);
   const rawBatchMaxTokens = perAgentTokens.reduce((sum, tokens) => sum + tokens, 0);
   const batchMaxTokens = applyProviderMaxTokensOverride(provider, rawBatchMaxTokens);
 
@@ -701,6 +722,7 @@ export async function executeAgentBatch(
       model,
       temperature,
       maxTokens: batchMaxTokens,
+      customParameters,
       stream: streamResponses,
       onToken: streamResponses
         ? (chunk) => {

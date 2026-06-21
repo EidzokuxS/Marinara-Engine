@@ -23,6 +23,7 @@ import {
   resolveAgentConnectionId,
   type AgentConnectionWarning,
 } from "../../routes/generate/agent-connection-guards.js";
+import { parseStoredGenerationParameters } from "../../routes/generate/generate-route-utils.js";
 import {
   applyTextRewriteAgentChatSettings,
   normalizeProseGuardianPromptTemplate,
@@ -44,6 +45,7 @@ type ResolveAgentPipelineAgentsArgs = {
   agentPromptTemplateSelections: Record<string, string>;
   chatProvider: BaseLLMProvider;
   chatModel: string;
+  chatCustomParameters: Record<string, unknown>;
   chatMaxParallelJobs: number;
   activeMusicPlayerSource?: "spotify" | "youtube" | null;
   chatMetadata?: Record<string, unknown>;
@@ -53,6 +55,7 @@ type ResolveAgentPipelineAgentsArgs = {
 type AgentProviderCacheEntry = {
   provider: BaseLLMProvider;
   model: string;
+  customParameters: Record<string, unknown>;
   maxParallelJobs: number;
 };
 
@@ -114,12 +117,17 @@ function getAgentFallbackPrompt(agentType: string, settings: Record<string, unkn
   return getDefaultAgentPrompt(agentType);
 }
 
+function resolveConnectionCustomParameters(connection: { defaultParameters?: unknown }): Record<string, unknown> {
+  return parseStoredGenerationParameters(connection.defaultParameters)?.customParameters ?? {};
+}
+
 async function resolveAgentConnectionProvider(args: {
   connections: ConnectionsStore;
   agentProviderCache: Map<string, AgentProviderCacheEntry>;
   connectionId: string | null;
   fallbackProvider: BaseLLMProvider;
   fallbackModel: string;
+  fallbackCustomParameters: Record<string, unknown>;
   fallbackMaxParallelJobs: number;
   resolveBaseUrl(connection: { baseUrl: string | null; provider: string }): string;
 }): Promise<AgentConnectionResolution> {
@@ -128,6 +136,7 @@ async function resolveAgentConnectionProvider(args: {
       entry: {
         provider: args.fallbackProvider,
         model: args.fallbackModel,
+        customParameters: args.fallbackCustomParameters,
         maxParallelJobs: args.fallbackMaxParallelJobs,
       },
     };
@@ -169,6 +178,7 @@ async function resolveAgentConnectionProvider(args: {
       agentConn.maxTokensOverride,
     ),
     model,
+    customParameters: resolveConnectionCustomParameters(agentConn),
     maxParallelJobs: Number(agentConn.maxParallelJobs) || 1,
   };
   args.agentProviderCache.set(args.connectionId, resolved);
@@ -185,6 +195,7 @@ export async function resolveAgentPipelineAgents({
   agentPromptTemplateSelections,
   chatProvider,
   chatModel,
+  chatCustomParameters,
   chatMaxParallelJobs,
   activeMusicPlayerSource,
   chatMetadata,
@@ -211,6 +222,7 @@ export async function resolveAgentPipelineAgents({
     agentProviderCache.set(LOCAL_SIDECAR_CONNECTION_ID, {
       provider: getLocalSidecarProvider(),
       model: LOCAL_SIDECAR_MODEL,
+      customParameters: {},
       maxParallelJobs: 1,
     });
   }
@@ -286,6 +298,7 @@ export async function resolveAgentPipelineAgents({
       connectionId: effectiveConnectionId,
       fallbackProvider: chatProvider,
       fallbackModel: chatModel,
+      fallbackCustomParameters: chatCustomParameters,
       fallbackMaxParallelJobs: chatMaxParallelJobs,
       resolveBaseUrl,
     });
@@ -314,6 +327,7 @@ export async function resolveAgentPipelineAgents({
       settings,
       provider: resolvedProvider.entry.provider,
       model: resolvedProvider.entry.model,
+      customParameters: resolvedProvider.entry.customParameters,
       maxParallelJobs: resolvedProvider.entry.maxParallelJobs,
     });
   }
@@ -340,6 +354,7 @@ export async function resolveAgentPipelineAgents({
       connectionId: defaultAgentConn?.id ?? null,
       fallbackProvider: chatProvider,
       fallbackModel: chatModel,
+      fallbackCustomParameters: chatCustomParameters,
       fallbackMaxParallelJobs: chatMaxParallelJobs,
       resolveBaseUrl,
     });
@@ -385,6 +400,7 @@ export async function resolveAgentPipelineAgents({
       settings: builtInSettings,
       provider: builtInConnection.entry.provider,
       model: builtInConnection.entry.model,
+      customParameters: builtInConnection.entry.customParameters,
       maxParallelJobs: builtInConnection.entry.maxParallelJobs,
     });
   }

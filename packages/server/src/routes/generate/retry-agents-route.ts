@@ -57,6 +57,7 @@ import {
   buildLockedPersonaTrackerPatch,
   isMessageHiddenFromAI,
   parseExtra,
+  parseStoredGenerationParameters,
   parseGameStateRow,
   parseSnapshotPlayerStats,
   preserveTrackerCharacterUiFields,
@@ -881,6 +882,8 @@ async function resolveRetryAgents(args: {
     conn.maxTokensOverride,
   );
   const chatConnectionMaxParallelJobs = Number(conn.maxParallelJobs) || 1;
+  const chatConnectionCustomParameters =
+    parseStoredGenerationParameters(conn.defaultParameters)?.customParameters ?? {};
   const resolvedAgents: ResolvedRetryAgent[] = [];
   const skippedLocalSidecarAgents: string[] = [];
   const defaultAgentConnectionAgents: string[] = [];
@@ -911,7 +914,13 @@ async function resolveRetryAgents(args: {
   const resolveRetryAgentConnection = async (
     connectionId: string | null,
   ): Promise<{
-    entry: { connectionId: string | null; provider: any; model: string; maxParallelJobs: number } | null;
+    entry: {
+      connectionId: string | null;
+      provider: any;
+      model: string;
+      customParameters: Record<string, unknown>;
+      maxParallelJobs: number;
+    } | null;
     unavailableReason?: string;
     connectionName?: string;
   }> => {
@@ -921,6 +930,7 @@ async function resolveRetryAgents(args: {
           connectionId: null,
           provider,
           model: conn.model,
+          customParameters: chatConnectionCustomParameters,
           maxParallelJobs: chatConnectionMaxParallelJobs,
         },
       };
@@ -932,6 +942,7 @@ async function resolveRetryAgents(args: {
           connectionId,
           provider: getLocalSidecarProvider(),
           model: LOCAL_SIDECAR_MODEL,
+          customParameters: {},
           maxParallelJobs: 1,
         },
       };
@@ -968,6 +979,7 @@ async function resolveRetryAgents(args: {
           agentConn.maxTokensOverride,
         ),
         model,
+        customParameters: parseStoredGenerationParameters(agentConn.defaultParameters)?.customParameters ?? {},
         maxParallelJobs: Number(agentConn.maxParallelJobs) || 1,
       },
     };
@@ -1031,6 +1043,7 @@ async function resolveRetryAgents(args: {
         promptTemplate: selectedPromptTemplate,
         connectionId: effectiveConnectionId,
         settings,
+        customParameters: agentConnection.entry.customParameters,
         provider: agentConnection.entry.provider,
         model: agentConnection.entry.model,
         maxParallelJobs: agentConnection.entry.maxParallelJobs,
@@ -1080,6 +1093,7 @@ async function resolveRetryAgents(args: {
         promptTemplate: selectedPromptTemplate,
         connectionId: builtInConnection.entry.connectionId,
         settings,
+        customParameters: builtInConnection.entry.customParameters,
         provider: builtInConnection.entry.provider,
         model: builtInConnection.entry.model,
         maxParallelJobs: builtInConnection.entry.maxParallelJobs,

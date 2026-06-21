@@ -3585,6 +3585,7 @@ export async function generateRoutes(app: FastifyInstance) {
           agentPromptTemplateSelections,
           chatProvider: provider,
           chatModel: conn.model,
+          chatCustomParameters: connectionParams?.customParameters ?? {},
           chatMaxParallelJobs: chatConnectionMaxParallelJobs,
           activeMusicPlayerSource,
           chatMetadata: chatMeta,
