@@ -165,8 +165,8 @@ export async function runTurnGameBotTurns(args: RunBotTurnsArgs): Promise<void> 
       {
         role: "system",
         content:
-          `${persona}\n\nYou are playing a friendly game of UNO. Choose exactly ONE legal move by calling the matching tool. ` +
-          `Never invent cards or board state. If you play a Wild or Wild Draw Four you MUST set declared_color. ` +
+          `${persona}\n\nYou are playing a friendly game of ${engine.label}. Choose exactly ONE legal move by calling the matching tool. ` +
+          `Never invent cards or board state. Follow the tool descriptions and the board instructions exactly. ` +
           `Call the tool ONLY — do not write any words, reasoning, or narration; your spoken reaction is handled separately.`,
       },
       { role: "system", content: `${view.boardSummary}\n\n${view.instructions ?? ""}` },
@@ -224,7 +224,7 @@ export async function runTurnGameBotTurns(args: RunBotTurnsArgs): Promise<void> 
       .join(" ");
 
     // ── Narration: a natural in-character turn — may banter with the table AND flavor the move ──
-    let narration = await narrateOutcome(provider, model, persona, seatName, eventSummary, recent, signal);
+    let narration = await narrateOutcome(provider, model, persona, seatName, engine.label, eventSummary, recent, signal);
     if (!narration) narration = eventSummary || `${seatName} makes a move.`;
 
     // ── Persist narration message + per-message engine snapshot ──
@@ -264,6 +264,7 @@ async function narrateOutcome(
   model: string,
   persona: string,
   name: string,
+  gameLabel: string,
   eventSummary: string,
   recent: string,
   signal?: AbortSignal,
@@ -275,9 +276,9 @@ async function narrateOutcome(
         role: "system",
         content:
           `${persona}\n\n` +
-          `You are playing UNO with friends. Speak ONE short, natural line as ${name}, fully in character. ` +
+          `You are playing ${gameLabel} with friends. Speak ONE short, natural line as ${name}, fully in character. ` +
           `You may react to the table talk and/or to your own move — like a real person at the table (a quip, a taunt, a groan, a little flourish). ` +
-          `Hard rules: do NOT list your cards, do NOT name colors or say "active color"/"matches"/"value", do NOT explain UNO rules or your strategy, do NOT describe the board state. Just talk.`,
+          `Hard rules: do NOT reveal your hand or any hidden information, do NOT recite the board state, and do NOT explain the rules or your strategy. Just talk.`,
       },
       ...(recent ? [{ role: "user" as const, content: `Recent table talk:\n${recent}` }] : []),
       { role: "user", content: `(You just ${did}.) Say your one line.` },

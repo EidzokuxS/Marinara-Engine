@@ -974,9 +974,17 @@ export const unoEngine: TurnGameEngine<UnoState, UnoMove, UnoConfig, UnoPublicVi
   },
 
   describeForModel(state, seatId): ModelTurnView<UnoMove> {
+    // The internal `draw_penalty` move has no model-facing tool: the bot resolves a
+    // pending +2/+4 with `draw_card` (-> { type: "draw" }, which handleDraw routes to
+    // the penalty). Surface it to the model as `draw` so the legal-move list stays
+    // consistent with the available tools and the instruction text. The UI keeps the
+    // distinct draw_penalty action via publicView's `yourActions.canDrawPenalty`.
+    const legalMoves = enumerateLegalMoves(state, seatId).map((m) =>
+      m.type === "draw_penalty" ? ({ type: "draw" } as UnoMove) : m,
+    );
     return {
       boardSummary: buildBoardSummary(state, seatId),
-      legalMoves: enumerateLegalMoves(state, seatId),
+      legalMoves,
       instructions: buildInstructions(state, seatId),
     };
   },
