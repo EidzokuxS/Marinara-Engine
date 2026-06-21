@@ -40,10 +40,13 @@ const BACKUP_DIRS = [
   "fonts",
   "knowledge-sources",
   "game-assets",
+  "custom-emojis",
+  "custom-stickers",
   "lorebooks/images",
   "agents/images",
   "connections/images",
 ];
+const ENCRYPTION_KEY_FILENAME = ".encryption-key";
 const PROFILE_ASSET_DIRS = BACKUP_DIRS.filter((dirName) => dirName !== "storage");
 const PROFILE_IMPORT_BODY_LIMIT_BYTES = 256 * 1024 * 1024;
 const PROFILE_IMPORT_ARCHIVE_LIMIT_BYTES = 1024 * 1024 * 1024;
@@ -170,6 +173,10 @@ function sendProfileImportRequestError(reply: FastifyReply, err: ProfileImportRe
 
 function resolveBackupDir(dataDir: string, dirName: string) {
   return dirName === "storage" ? getFileStorageDir() : join(dataDir, dirName);
+}
+
+function resolvePersistedEncryptionKeyPath(dataDir: string) {
+  return assertInsideDir(dataDir, join(dataDir, ENCRYPTION_KEY_FILENAME));
 }
 
 function toSafeExportName(name: string, fallback: string) {
@@ -1604,6 +1611,9 @@ function buildBackupRestoreNotes() {
     "Marinara Engine backup",
     "",
     "This archive contains a raw filesystem backup for manual recovery.",
+    "Treat it as sensitive: full backups include local secret material such as .encryption-key when that file exists.",
+    "Restore .encryption-key together with the database/storage files to keep saved API keys decryptable.",
+    "If this install used an ENCRYPTION_KEY environment variable instead of a persisted key file, restore that environment variable separately.",
     "",
     "For one-click import inside Marinara:",
     "1. Open Settings -> Import.",
@@ -1612,6 +1622,18 @@ function buildBackupRestoreNotes() {
     "",
     "The .marinara.json importer is for individual characters, personas, lorebooks, and presets.",
   ].join("\n");
+}
+
+async function copyPersistedEncryptionKey(dataDir: string, backupDir: string) {
+  const keyPath = resolvePersistedEncryptionKeyPath(dataDir);
+  if (!existsSync(keyPath)) return;
+  await copyFile(keyPath, join(backupDir, ENCRYPTION_KEY_FILENAME));
+}
+
+async function addPersistedEncryptionKeyToZip(dataDir: string, zip: AdmZip, backupName: string) {
+  const keyPath = resolvePersistedEncryptionKeyPath(dataDir);
+  if (!existsSync(keyPath)) return;
+  zip.addFile(`${backupName}/${ENCRYPTION_KEY_FILENAME}`, await readFile(keyPath));
 }
 
 function getBackupErrorMessage(err: unknown, fallback: string) {
@@ -1663,6 +1685,7 @@ export async function backupRoutes(app: FastifyInstance) {
           }
         }
       }
+      await copyPersistedEncryptionKey(dataDir, backupDir);
 
       // 2. Copy data directories
       for (const dirName of BACKUP_DIRS) {
@@ -1732,6 +1755,7 @@ export async function backupRoutes(app: FastifyInstance) {
           }
         }
       }
+      await addPersistedEncryptionKeyToZip(dataDir, zip, backupName);
 
       const buf = zip.toBuffer();
       return reply
