@@ -37,6 +37,7 @@ import {
   type APIProvider,
 } from "@marinara-engine/shared";
 import type {
+  MariDbCommandResult,
   MariWorkspaceConnectionSummary,
   MariWorkspacePromptEvent,
   MariWorkspaceStatus,
@@ -284,13 +285,13 @@ ENFP 4w7, Choleric-Sanguine, Chaotic Neutral, Taurus. Mari's speech is typically
 Workspace:
 You can inspect and modify this local Marinara Engine workspace through hidden commands. The user never sees command syntax; Marinara strips it, executes it, then shows the resulting timeline. Use commands to gather evidence before claiming something is fixed or changed.
 
-Live app data is best handled through Marinara-aware commands. \`mari db\` is the general priority interface because it reads the running server state and carries storage knowledge such as parsed JSON fields, validation, timestamps, approval flow, journals, and cache refresh. Narrow helpers are useful when they exist because they wrap common \`mari db\` style work in a friendlier command.
+Live app data is best handled through Marinara-aware commands. Use the narrow helper first when it exists, because helpers know user-facing fields and nested storage shapes. Use \`mari db\` for generic/raw tables only after checking \`mari db schema <table>\` and nesting JSON-column edits under the actual JSON column name.
 
-Always prioritize using db commands over writing raw files to the codebase. If you need to write raw files, think why you must and if there is no cli command to help you.
+Always prioritize Mari CLI commands over writing raw files to the codebase. If you need to write raw files, think why you must and if there is no cli command to help you.
 
 Portable shell rules:
 - Do not use heredocs, command substitution, inline \`cat > file\`, \`sed -i\`, \`awk\`, \`xargs\`, \`rm\`, \`cp\`, \`mv\`, or POSIX-only environment syntax in bash commands.
-- Do not build JSON/CSS/script payloads with shell quoting. Use the write command to create a temporary file, then pass it to \`mari db ... --json-file "<path>"\`, \`mari themes ... --css-file "<path>"\`, or the relevant \`mari\` file flag.
+- Do not build JSON/CSS/script payloads with shell quoting. Use the write command to create a temporary file, then pass a relative path with no spaces, such as \`--json-file ./tmp/payload.json\`, \`--css-file ./tmp/theme.css\`, or the relevant \`mari\` file flag.
 - If a shell command fails with missing bash, bad quoting, or syntax errors, immediately retry with a simpler \`mari ...\` command or the dedicated read/grep/find/ls/edit/write commands.
 
 Command families:
@@ -298,8 +299,8 @@ Command families:
 - \`mari themes\`: synced custom themes and active theme state. Theme creation/editing benefits from a quick style-contract pass first: inspect the current/active theme, \`packages/client/src/styles/globals.css\`, built-in theme files, and the CSS variable reference so generated CSS covers the full semantic token set such as background, card, sidebar, accent, ring, glow, and component surface variables.
 - \`mari images\`: image-generation connections, HITL image prompt previews, generated/edited preview assets, and assignment/deletion for avatars, personas, lorebooks, sprites, backgrounds, and galleries.
 - \`mari wiki\`: read-only Fandom/MediaWiki discovery and page reads. Use \`mari wiki --help\` to find wikis, search pages, read summaries/source/sections, list categories, and search within a page.
-- \`mari characters\`: list, get, search, create, update, delete. Field flags: \`--name\`, \`--description\`, \`--personality\`, \`--scenario\`, \`--first-mes\`, \`--creator-notes\`, \`--comment\`; \`--backstory\` and \`--appearance\` write to \`extensions.backstory\`/\`extensions.appearance\`. Or pass \`--json\` or \`--json-file\` for the full data blob. Use \`--apply\` to save.
-- \`mari personas\`: list, active, get, search, create, update, delete. Field flags: \`--name\`, \`--description\`, \`--personality\`, \`--scenario\`, \`--backstory\`, \`--appearance\`. Use \`--apply\` to save.
+- \`mari characters\`: list, get, search, create, update, delete. Prefer this helper for character edits. Field flags: \`--name\`, \`--description\`, \`--personality\`, \`--scenario\`, \`--first-mes\`, \`--creator-notes\`, \`--comment\`; \`--backstory\` and \`--appearance\` write to \`data.extensions.backstory\`/\`data.extensions.appearance\`. Or pass \`--json\` or \`--json-file\` for one CharacterData blob. Use \`--apply\` to save.
+- \`mari personas\`: list, active, get, search, create, update, delete. Prefer this helper for persona edits. Field flags: \`--name\`, \`--description\`, \`--personality\`, \`--scenario\`, \`--backstory\`, \`--appearance\`. Use \`--apply\` to save.
 - \`mari lorebooks\`: list, get, entries, search, create, update, add-entry, link-character, unlink-character, delete. \`add-entry <lorebook-id> --name <name> --keys <k1,k2> --content <text>\`. \`link-character <lorebook-id> --character <character-id>\` adds a character link; \`unlink-character\` removes it. Use \`--apply\` to save.
 - \`mari presets\`: no dedicated helper — use \`mari db\` for \`prompt_presets\` and related tables.
 - \`mari chats\`: read-only. list (newest first), get (with message count), messages \`<chat-id> [--tail]\`, search.
@@ -311,7 +312,7 @@ Built-in help is the source of truth for exact helper syntax. Use \`mari --help\
 Raw DB row contracts to remember when a narrow helper is unavailable:
 - \`agent_configs.phase\` must be one of \`pre_generation\`, \`parallel\`, or \`post_processing\`. Agents do not have a global enabled/disabled state; a chat controls whether an agent runs by adding or removing that agent from its active agent list.
 - Raw text booleans such as \`custom_tools.enabled\` are stored as \`"true"\` or \`"false"\`. The CLI normalizes JSON booleans on write, but readback should show strings.
-- Prefer \`mari db patch\` for repairing existing rows so metadata such as \`createdAt\` is preserved. If using replace, include every required row field or verify the preview before applying.
+- Prefer narrow helpers over \`mari db patch\` when editing characters, personas, lorebooks, themes, images, agents, or tools. Generic \`mari db patch\` only accepts real table columns; app-visible nested fields must be under JSON columns such as \`data.extensions.appearance\`, not top-level \`appearance\`. Unknown raw columns are blocked.
 
 Workspace files are useful for learning how Marinara works, or finding content YOU CAN NOT FIND WITH DB CLI COMMANDS. USE THOSE FIRST.
 
@@ -394,6 +395,50 @@ function compactTraceText(value: string, limit = 2400): string {
 
 function compactOutput(value: string, limit = COMMAND_OUTPUT_LIMIT): string {
   return value.length > limit ? `${value.slice(0, limit)}\n… output truncated at ${limit} characters …` : value;
+}
+
+function stringifyOutput(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function compactMutationResult(result: MariDbCommandResult): MariDbCommandResult | Record<string, unknown> {
+  if (!isRecord(result) || !isRecord(result.summary)) return result;
+  const summary = result.summary as Record<string, unknown>;
+  const preview = Array.isArray(summary.preview) ? summary.preview : [];
+  const saved = result.mode === "apply" && result.ok === true;
+  return {
+    ok: result.ok,
+    mode: result.mode,
+    saved,
+    status: result.mode === "dry-run" ? "dry_run_only" : saved ? "applied" : result.ok === false ? "failed" : "ok",
+    message:
+      result.mode === "dry-run"
+        ? "Preview only: no changes were saved. Re-run the same command with --apply after user approval to persist it."
+        : saved
+          ? "Applied and saved. Verify the resulting state with a read command before claiming user-visible success."
+          : undefined,
+    command: typeof result.command === "string" ? compactTraceText(result.command, 500) : result.command,
+    summary: {
+      matchedRows: summary.matchedRows,
+      affectedRows: summary.affectedRows,
+      insertedRows: summary.insertedRows,
+      updatedRows: summary.updatedRows,
+      replacedRows: summary.replacedRows,
+      deletedRows: summary.deletedRows,
+      affectedTables: summary.affectedTables,
+      preview: preview.slice(0, 5),
+      truncated: summary.truncated === true || preview.length > 5,
+    },
+    validation: result.validation,
+    approval: result.approval,
+    journalPath: result.journalPath,
+    error: result.error,
+  };
 }
 
 function compactTraceValue(value: unknown, limit = 2000, depth = 0): unknown {
@@ -925,6 +970,132 @@ function isReadOnlyWorkspaceCommand(command: WorkspaceCommandCall): boolean {
   return command.name === "read" || command.name === "grep" || command.name === "find" || command.name === "ls";
 }
 
+function visibleTextRequestsUserApproval(text: string): boolean {
+  const normalized = text.toLowerCase().replace(/\s+/g, " ");
+  return (
+    /\b(say|reply|tell me)\b.{0,40}\b(apply it|apply|approve|approved|go ahead|yes|save it)\b/.test(normalized) ||
+    /\b(do you want me|should i|want me to)\b.{0,80}\b(apply|save|edit|update|patch|change|write)\b/.test(normalized) ||
+    /\b(need|waiting for|wait for)\b.{0,40}\b(approval|confirmation|permission)\b/.test(normalized) ||
+    /\bready to\b.{0,30}\b(apply|save|patch|update)\b/.test(normalized)
+  );
+}
+
+function bashLooksMutating(command: string): boolean {
+  const normalized = command.toLowerCase();
+  return (
+    /\b--apply\b/.test(normalized) ||
+    /\bmari\s+db\s+(insert|patch|replace|delete|transform)\b/.test(normalized) ||
+    /\bmari\s+(characters?|personas?|lorebooks?)\s+(create|update|delete|add-entry|link-character|unlink-character)\b/.test(normalized) ||
+    /\bmari\s+themes\s+(create|update|set-active)\b/.test(normalized) ||
+    /\bmari\s+images\s+(generate|edit|assign|delete)\b/.test(normalized)
+  );
+}
+
+function isMutatingWorkspaceCommand(command: WorkspaceCommandCall): boolean {
+  if (command.name === "edit" || command.name === "write") return true;
+  if (command.name !== "bash") return false;
+  const rawCommand = command.arguments.command;
+  return typeof rawCommand === "string" && bashLooksMutating(rawCommand);
+}
+
+const DIRECT_MARI_PATH_FLAGS = new Set([
+  "--json-file",
+  "--file",
+  "--css-file",
+  "--image",
+  "--image-file",
+  "--avatar-file",
+  "--path",
+]);
+
+function shellLikeSplit(command: string): string[] | null {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  for (const char of command) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = null;
+      else current += char;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+  if (quote || escaped) return null;
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+function commandHasShellOperators(command: string): boolean {
+  return /(^|\s)(?:&&|\|\||[|;<>])/.test(command);
+}
+
+function normalizeMariPathFlagArgs(argv: string[], cwd: string): string[] {
+  const out: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]!;
+    out.push(token);
+    const equalsIndex = token.indexOf("=");
+    const inlineFlag = equalsIndex > 0 ? token.slice(0, equalsIndex) : null;
+    const inlineValue = equalsIndex > 0 ? token.slice(equalsIndex + 1) : null;
+    if (inlineFlag && inlineValue !== null && DIRECT_MARI_PATH_FLAGS.has(inlineFlag)) {
+      const candidates = [inlineValue];
+      let consumed = 0;
+      for (let cursor = index + 1; cursor < argv.length && !argv[cursor]!.startsWith("--"); cursor += 1) {
+        candidates.push(argv[cursor]!);
+        const joined = candidates.join(" ");
+        if (existsSync(resolve(cwd, joined))) consumed = cursor - index;
+      }
+      if (consumed > 0) {
+        out[out.length - 1] = `${inlineFlag}=${candidates.slice(0, consumed + 1).join(" ")}`;
+        index += consumed;
+      }
+      continue;
+    }
+    if (!DIRECT_MARI_PATH_FLAGS.has(token) || index + 1 >= argv.length) continue;
+    const candidates: string[] = [];
+    let consumed = 0;
+    for (let cursor = index + 1; cursor < argv.length && !argv[cursor]!.startsWith("--"); cursor += 1) {
+      candidates.push(argv[cursor]!);
+      const joined = candidates.join(" ");
+      if (existsSync(resolve(cwd, joined))) consumed = cursor - index;
+    }
+    if (consumed > 0) {
+      out.push(candidates.slice(0, consumed).join(" "));
+      index += consumed;
+    }
+  }
+  return out;
+}
+
+function parseDirectMariArgv(command: string, cwd: string): string[] | null {
+  const trimmed = command.trim();
+  if (!/^mari(?:\s|$)/.test(trimmed) || commandHasShellOperators(trimmed)) return null;
+  const tokens = shellLikeSplit(trimmed);
+  if (!tokens || tokens[0] !== "mari") return null;
+  return normalizeMariPathFlagArgs(tokens.slice(1), cwd);
+}
+
 export class ProfessorMariWorkspaceService {
   private enabled = true;
   private workspaceRoot = getMonorepoRoot();
@@ -1022,7 +1193,18 @@ export class ProfessorMariWorkspaceService {
         };
 
         const rawContent = result.content ?? "";
-        const action = parseAssistantWorkspaceAction(rawContent, result.toolCalls);
+        const parsedAction = parseAssistantWorkspaceAction(rawContent, result.toolCalls);
+        const shouldDeferMutations =
+          parsedAction.visibleText &&
+          visibleTextRequestsUserApproval(parsedAction.visibleText) &&
+          parsedAction.commands.some(isMutatingWorkspaceCommand);
+        const action = shouldDeferMutations ? { ...parsedAction, commands: [] } : parsedAction;
+        if (shouldDeferMutations) {
+          const content =
+            "Deferred hidden mutating workspace commands because the assistant asked the user for approval in the same turn.";
+          appendTraceStatus(workspaceTrace, content);
+          args.onEvent({ type: "status", data: { content, kind: "info", level: "warning" } });
+        }
         if (action.visibleText) {
           assistantText = appendVisibleText(assistantText, action.visibleText);
           appendTraceText(workspaceTrace, `${action.visibleText}\n`);
@@ -1310,6 +1492,27 @@ ${sections.join("\n\n")}
     return normalizeSlashPath(rel);
   }
 
+  private storageTableReadWarning(absolute: string): string | null {
+    const tablesRoot = resolve(getFileStorageDir(), "tables");
+    if (!isWithin(tablesRoot, absolute) || !absolute.endsWith(".json")) return null;
+    return [
+      "Warning: this is a raw file-backed storage table, not parsed app data.",
+      "JSON columns in this file are intentionally serialized strings.",
+      "Use mari db, mari characters get/search, mari personas, or mari lorebooks for parsed data, and never pass a storage table file to --json-file.",
+    ].join(" ");
+  }
+
+  private storageTableJsonFileIssue(command: string): string | null {
+    if (!/\bmari\b/i.test(command) || !/--(?:json-file|file)\b/i.test(command)) return null;
+    const normalized = normalizeSlashPath(command);
+    const tablesRoot = normalizeSlashPath(resolve(getFileStorageDir(), "tables"));
+    const tablesRel = normalizeSlashPath(relative(this.workspaceRoot, resolve(getFileStorageDir(), "tables")));
+    if (!normalized.includes("data/storage/tables/") && !normalized.includes(tablesRoot) && !normalized.includes(tablesRel)) {
+      return null;
+    }
+    return "Do not pass DATA_DIR/storage/tables/*.json to mari --json-file/--file. Those are full raw table exports; create a temp file containing one row/card payload instead.";
+  }
+
   private async commandRead(args: Record<string, unknown>): Promise<string> {
     const filePath = this.resolveWorkspacePath(stringArg(args, "path"));
     const stats = await stat(filePath);
@@ -1327,9 +1530,12 @@ ${sections.join("\n\n")}
     return [
       `File: ${this.displayPath(filePath)}`,
       `Lines: ${offset}-${endLine} of ${lines.length}${truncated ? " (truncated)" : ""}`,
+      this.storageTableReadWarning(filePath),
       "",
       selected.map((line, index) => `${offset + index}: ${line}`).join("\n"),
-    ].join("\n");
+    ]
+      .filter((part): part is string => part !== null)
+      .join("\n");
   }
 
   private async commandLs(args: Record<string, unknown>): Promise<string> {
@@ -1487,6 +1693,8 @@ ${sections.join("\n\n")}
     if (compatibilityIssue) throw new Error(compatibilityIssue);
     const storageIssue = this.storageMutationIssue(command);
     if (storageIssue) throw new Error(storageIssue);
+    const storageTableJsonIssue = this.storageTableJsonFileIssue(command);
+    if (storageTableJsonIssue) throw new Error(storageTableJsonIssue);
     const timeoutSeconds = numberArg(
       args,
       "timeout",
@@ -1496,6 +1704,8 @@ ${sections.join("\n\n")}
     );
     const mariCliBinDir = await this.ensureMariCliShim();
     const env = this.withMariRuntimeEnv({ ...process.env }, mariCliBinDir);
+    const directMariArgv = parseDirectMariArgv(command, this.workspaceRoot);
+    if (directMariArgv) return this.commandMariDirect(command, directMariArgv);
     return new Promise<string>((resolveRun, rejectRun) => {
       const shell = process.platform === "win32" ? process.env.ComSpec || "cmd.exe" : "bash";
       const shellArgs = process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-lc", command];
@@ -1543,11 +1753,34 @@ ${sections.join("\n\n")}
             stdout ? `\nstdout:\n${stdout.trimEnd()}` : "",
             stderr ? `\nstderr:\n${stderr.trimEnd()}` : "",
           ].join("\n"));
-          if (timedOut) rejectRun(new Error(output));
+          if (timedOut || exitCode !== 0) rejectRun(new Error(output));
           else resolveRun(output);
         }),
       );
     });
+  }
+
+  private async commandMariDirect(command: string, argv: string[]): Promise<string> {
+    const result = await getMariDbService(this.app.db).executeCli({
+      argv,
+      command,
+      cwd: this.workspaceRoot,
+      sessionId: SESSION_ID,
+    });
+    const printable = isRecord(result) && "output" in result && !("summary" in result)
+      ? result.output
+      : compactMutationResult(result);
+    const output = compactOutput(
+      [
+        `Command: ${command}`,
+        `Exit code: ${result.ok === false ? 1 : 0} (direct mari runtime)`,
+        "",
+        "stdout:",
+        stringifyOutput(printable),
+      ].join("\n"),
+    );
+    if (result.ok === false) throw new Error(output);
+    return output;
   }
 
   private buildLocalSidecarConnection(): WorkspaceConnection {
