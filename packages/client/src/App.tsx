@@ -10,7 +10,7 @@ import { ModelDownloadModal } from "./components/modals/ModelDownloadModal";
 import { AppDialogRenderer } from "./components/ui/AppDialogRenderer";
 import { ChibiProfessorMariEasterEgg } from "./components/ui/ChibiProfessorMariEasterEgg";
 import { CsrfOriginWarningBanner } from "./components/diagnostics/CsrfOriginWarningBanner";
-import { Toaster } from "sonner";
+import { Toaster, toast } from "sonner";
 import {
   getDefaultAppAccentColor,
   getDefaultAppBackgroundColor,
@@ -67,6 +67,8 @@ const APP_ACCENT_CUSTOM_VARIABLES = [
 const ACCENT_RGB_TICK_MS = 120;
 const ACCENT_RGB_SOLID_CYCLE_MS = 5_200;
 const ACCENT_RGB_GRADIENT_STOP_MS = 4_500;
+const TOAST_DURATION_MS = 6_000;
+const TOAST_VISIBLE_LIMIT = 3;
 
 function stripFontFamilyQuotes(family: string): string {
   const trimmed = family.trim();
@@ -534,21 +536,36 @@ export function App() {
       )}
       <AppDialogRenderer />
       <CsrfOriginWarningBanner />
-      <Toaster
-        position="top-center"
-        offset="4rem"
-        theme={theme}
-        closeButton
-        toastOptions={{
-          style: {
-            background: "var(--card)",
-            border: "1px solid var(--border)",
-            color: "var(--foreground)",
-            userSelect: "text",
-            WebkitUserSelect: "text",
-          },
+      <div
+        onClickCapture={(event) => {
+          if (!(event.target instanceof Element)) return;
+          if (
+            event.target.closest(
+              "[data-close-button],button[aria-label^='Close'],button[aria-label^='Dismiss']",
+            )
+          ) {
+            toast.dismiss();
+          }
         }}
-      />
+      >
+        <Toaster
+          position="top-center"
+          offset="4rem"
+          theme={theme}
+          closeButton
+          duration={TOAST_DURATION_MS}
+          visibleToasts={TOAST_VISIBLE_LIMIT}
+          toastOptions={{
+            style: {
+              background: "var(--card)",
+              border: "1px solid var(--border)",
+              color: "var(--foreground)",
+              userSelect: "text",
+              WebkitUserSelect: "text",
+            },
+          }}
+        />
+      </div>
     </>
   );
 }

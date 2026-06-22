@@ -13,7 +13,7 @@ import {
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { useQueries, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import {
   useChatMessages,
   useChatMessageCount,
@@ -29,6 +29,7 @@ import {
   useUpdateChatMetadata,
   useBranchChat,
   useChats,
+  chatKeys,
 } from "../../hooks/use-chats";
 
 import { useChatStore } from "../../stores/chat.store";
@@ -98,6 +99,14 @@ const BUILT_IN_AGENT_ID_SET = new Set(BUILT_IN_AGENTS.map((agent) => agent.id));
 const BUILT_IN_TRACKER_AGENT_ID_SET = new Set(
   BUILT_IN_AGENTS.filter((agent) => agent.category === "tracker" && !agent.libraryHidden).map((agent) => agent.id),
 );
+
+function flattenLoadedMessagePages<T>(pages: T[][] | undefined, pageSize: number): T[] | undefined {
+  if (!pages) return undefined;
+  if (pageSize > 0 && pages.length === 1 && pages[0] && pages[0].length > pageSize) {
+    return pages[0].slice(-pageSize);
+  }
+  return [...pages].reverse().flat();
+}
 
 const normalizeSpriteDisplayValue = (value: unknown, fallback: number, min: number, max: number): number => {
   const numeric = typeof value === "number" ? value : Number(value);
@@ -420,9 +429,21 @@ export function ChatArea() {
     refetch: refetchMessages,
   } = useChatMessages(activeChatId, messagePageSize, !!chat);
   const messages = useMemo<MessageWithSwipes[] | undefined>(
-    () => (msgData ? [...msgData.pages].reverse().flat() : undefined),
-    [msgData],
+    () => flattenLoadedMessagePages(msgData?.pages, messagePageSize),
+    [messagePageSize, msgData?.pages],
   );
+  const newestMessagePageLength = msgData?.pages[0]?.length ?? 0;
+  useEffect(() => {
+    if (!activeChatId || messagePageSize <= 0 || newestMessagePageLength <= messagePageSize) return;
+    queryClient.setQueryData<InfiniteData<MessageWithSwipes[]>>(chatKeys.messages(activeChatId), (old) => {
+      const firstPage = old?.pages[0];
+      if (!old || !firstPage || firstPage.length <= messagePageSize) return old;
+      return {
+        ...old,
+        pages: [firstPage.slice(-messagePageSize), ...old.pages.slice(1)],
+      };
+    });
+  }, [activeChatId, messagePageSize, newestMessagePageLength, queryClient]);
   const { data: messageCountData } = useChatMessageCount(activeChatId);
   const totalMessageCount = messageCountData?.count ?? messages?.length ?? 0;
   const loadedMessageCount = messages?.length ?? 0;
@@ -448,7 +469,7 @@ export function ChatArea() {
     });
     return map;
   }, [messageOffset, messages]);
-  const { data: allCharacters } = useCharacters();
+  const { data: allCharacters } = useCharacters({ includeBuiltIn: true });
   const { data: allPersonas } = usePersonas();
   const deleteMessage = useDeleteMessage(activeChatId);
   const deleteMessages = useDeleteMessages(activeChatId);
@@ -2204,9 +2225,7 @@ export function ChatArea() {
             onCloseSettings={handleCloseSettingsPanel}
             onCloseFiles={() => setFilesOpen(false)}
             onCloseGallery={handleCloseGalleryPanel}
-            onIllustrate={() => {
-              void retryAgents(activeChatId, ["illustrator"]);
-            }}
+            onIllustrate={() => retryAgents(activeChatId, ["illustrator"])}
             onWizardFinish={() => {
               setWizardOpen(false);
               handleOpenSettingsPanel();
@@ -2405,9 +2424,7 @@ export function ChatArea() {
           onCloseSettings={handleCloseSettingsPanel}
           onCloseFiles={() => setFilesOpen(false)}
           onCloseGallery={handleCloseGalleryPanel}
-          onIllustrate={() => {
-            void retryAgents(activeChatId, ["illustrator"]);
-          }}
+          onIllustrate={() => retryAgents(activeChatId, ["illustrator"])}
           onWizardFinish={() => {
             setWizardOpen(false);
             handleOpenSettingsPanel();

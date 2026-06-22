@@ -159,8 +159,10 @@ import {
   getChatModeCapabilities,
   LIMITS,
   MIN_AGENT_MAX_TOKENS,
+  PROFESSOR_MARI_ID,
   estimateAgentLoadCost,
   getAgentPromptTemplateOptions,
+  includesTextForMatch,
   AGENT_COST_HIGH_CALLS,
   AGENT_COST_HIGH_TOKENS,
   CONVERSATION_COMMAND_KEYS,
@@ -269,8 +271,7 @@ function getAgentSettingsMenuId(chatId: string, agentId: string): string {
 
 function renderRoleplayAgentMenuIcon(agentId: string, variant: "card" | "chip" = "card"): React.ReactNode {
   const size = variant === "chip" ? "0.6875rem" : "0.75rem";
-  const className =
-    variant === "chip" ? "shrink-0 text-[var(--primary)]" : "mt-0.5 shrink-0 text-[var(--primary)]";
+  const className = variant === "chip" ? "shrink-0 text-[var(--primary)]" : "mt-0.5 shrink-0 text-[var(--primary)]";
   switch (agentId) {
     case "lorebook-keeper":
       return <BookOpen size={size} className={className} />;
@@ -604,7 +605,7 @@ export function ChatSettingsDrawer({
   const openToolDetail = useUIStore((s) => s.openToolDetail);
   const openPresetDetail = useUIStore((s) => s.openPresetDetail);
 
-  const { data: allCharacters } = useCharacters();
+  const { data: allCharacters } = useCharacters({ includeBuiltIn: true });
   const { data: characterGroups } = useCharacterGroups();
   const { data: lorebooks } = useLorebooks();
   const { data: presets } = usePresets();
@@ -631,7 +632,12 @@ export function ChatSettingsDrawer({
     [promptPresetOptions],
   );
   const fallbackPromptPreset = useMemo(() => {
-    return marinaraUniversalPromptPreset ?? defaultPromptPreset ?? promptPresetOptions.find((preset) => preset.isDefault) ?? null;
+    return (
+      marinaraUniversalPromptPreset ??
+      defaultPromptPreset ??
+      promptPresetOptions.find((preset) => preset.isDefault) ??
+      null
+    );
   }, [defaultPromptPreset, marinaraUniversalPromptPreset, promptPresetOptions]);
   const hasModeCustomPrompt =
     isConversation && typeof metadata.customSystemPrompt === "string" && metadata.customSystemPrompt.trim().length > 0
@@ -868,6 +874,11 @@ export function ChatSettingsDrawer({
       ),
     [deletedBuiltInAgentTypes, metadata.activeAgentIds],
   );
+  const readLatestActiveAgentIds = useCallback(() => {
+    const latestChat = qc.getQueryData<Chat>(chatKeys.detail(chat.id));
+    const ids = latestChat ? getChatActiveAgentIds(latestChat) : [...activeAgentIds];
+    return ids.filter((id) => !deletedBuiltInAgentTypes.has(id));
+  }, [activeAgentIds, chat.id, deletedBuiltInAgentTypes, qc]);
   const activeToolIds: string[] = metadata.activeToolIds ?? [];
   const spotifyActive = activeAgentIds.includes("spotify");
   const gameLorebookKeeperLorebook = gameLorebookKeeperLorebookId
@@ -1425,6 +1436,10 @@ export function ChatSettingsDrawer({
       }>,
     [allCharacters],
   );
+  const selectableCharacters = useMemo(
+    () => characters.filter((character) => character.id !== PROFESSOR_MARI_ID),
+    [characters],
+  );
 
   const chatCharacters = useMemo(
     () =>
@@ -1886,11 +1901,6 @@ export function ChatSettingsDrawer({
   };
 
   const toggleAgent = async (agentId: string, options?: { skipDirectorRemovalWarning?: boolean }) => {
-    const readLatestActiveAgentIds = () => {
-      const latestChat = qc.getQueryData<Chat>(chatKeys.detail(chat.id));
-      const ids = latestChat ? getChatActiveAgentIds(latestChat) : [...activeAgentIds];
-      return ids.filter((id) => !deletedBuiltInAgentTypes.has(id));
-    };
     const wasRemoving = readLatestActiveAgentIds().includes(agentId);
     if (wasRemoving && agentId === "director" && !options?.skipDirectorRemovalWarning) {
       const warningMessage = await getNarrativeDirectorRemovalWarning();
@@ -2049,33 +2059,40 @@ export function ChatSettingsDrawer({
     lorebooks,
   ]);
   const showLorebookMarkerWarning =
-    !!chat.promptPresetId && !isConversation && !isGame && hasScopedOrGlobalLorebooks && !currentPromptPresetHasLorebookMarker;
+    !!chat.promptPresetId &&
+    !isConversation &&
+    !isGame &&
+    hasScopedOrGlobalLorebooks &&
+    !currentPromptPresetHasLorebookMarker;
 
   const [choiceModalPresetId, setChoiceModalPresetId] = useState<string | null>(null);
-  const setPreset = useCallback((presetId: string | null) => {
-    updateChat.mutate(
-      { id: chat.id, promptPresetId: presetId },
-      {
-        onSuccess: async () => {
-          if (!presetId) {
-            setChoiceModalPresetId(null);
-            return;
-          }
+  const setPreset = useCallback(
+    (presetId: string | null) => {
+      updateChat.mutate(
+        { id: chat.id, promptPresetId: presetId },
+        {
+          onSuccess: async () => {
+            if (!presetId) {
+              setChoiceModalPresetId(null);
+              return;
+            }
 
-          try {
-            const presetFull = await api.get<{ choiceBlocks?: unknown[] }>(`/prompts/${presetId}/full`);
-            if ((presetFull.choiceBlocks?.length ?? 0) > 0) {
-              setChoiceModalPresetId(presetId);
-            } else {
+            try {
+              const presetFull = await api.get<{ choiceBlocks?: unknown[] }>(`/prompts/${presetId}/full`);
+              if ((presetFull.choiceBlocks?.length ?? 0) > 0) {
+                setChoiceModalPresetId(presetId);
+              } else {
+                setChoiceModalPresetId(null);
+              }
+            } catch {
               setChoiceModalPresetId(null);
             }
-          } catch {
-            setChoiceModalPresetId(null);
-          }
+          },
         },
-      },
-    );
-  }, [chat.id, updateChat]);
+      );
+    },
+    [chat.id, updateChat],
+  );
 
   const setConnection = (connectionId: string | null) => {
     updateChat.mutate({ id: chat.id, connectionId });
@@ -2145,10 +2162,14 @@ export function ChatSettingsDrawer({
           .filter(Boolean);
 
         if (errorMessages.length > 0) {
-          const prefix = errorMessages[0]?.startsWith("Refused to fetch") ? "Connection failed" : "Schedule generation failed";
+          const prefix = errorMessages[0]?.startsWith("Refused to fetch")
+            ? "Connection failed"
+            : "Schedule generation failed";
           const summary = `${prefix}: ${errorMessages[0]}`;
           if (generatedCount + sharedCount + freshCount > 0) {
-            toast.error(`${summary} (${generatedCount} generated, ${sharedCount} reused, ${freshCount} already fresh).`);
+            toast.error(
+              `${summary} (${generatedCount} generated, ${sharedCount} reused, ${freshCount} already fresh).`,
+            );
           } else {
             toast.error(summary);
           }
@@ -2260,14 +2281,7 @@ export function ChatSettingsDrawer({
     if (modePromptDefaultAppliedRef.current === fallbackKey) return;
     modePromptDefaultAppliedRef.current = fallbackKey;
     updateChat.mutate({ id: chat.id, promptPresetId: fallbackPromptPreset.id });
-  }, [
-    chat.id,
-    chat.promptPresetId,
-    fallbackPromptPreset?.id,
-    open,
-    shouldApplyModePromptDefault,
-    updateChat,
-  ]);
+  }, [chat.id, chat.promptPresetId, fallbackPromptPreset?.id, open, shouldApplyModePromptDefault, updateChat]);
 
   useEffect(() => {
     setGameSpecialInstructionsDraft((metadata.gameSpecialInstructions as string) ?? "");
@@ -2289,7 +2303,6 @@ export function ChatSettingsDrawer({
       setPreset(promptPresetId);
       if (isConversation) {
         updateMeta.mutate({ id: chat.id, customSystemPrompt: null });
-        useUIStore.getState().setCustomConversationPrompt(null);
       }
       if (isGame) {
         setGamePromptDraft("");
@@ -2375,7 +2388,7 @@ export function ChatSettingsDrawer({
       await updateMeta.mutateAsync({
         id: chat.id,
         enableAgents: true,
-        activeAgentIds: Array.from(new Set([...activeAgentIds, agent.id])),
+        activeAgentIds: Array.from(new Set([...readLatestActiveAgentIds(), agent.id])),
         ...buildAgentAddMetadataPatch(agent.id, setup, metadata, {
           allowSecretPlot: supportsNarrativeDirectorSecretPlot,
         }),
@@ -2756,7 +2769,10 @@ export function ChatSettingsDrawer({
             const tokenEst = agentLoadCost.tokensByType.get(agent.id);
             const promptOptions = getPromptOptionsForAgent(agent.id);
             return (
-              <div key={agent.id} className="rounded-lg bg-[var(--background)]/75 px-3 py-2 ring-1 ring-[var(--border)]">
+              <div
+                key={agent.id}
+                className="rounded-lg bg-[var(--background)]/75 px-3 py-2 ring-1 ring-[var(--border)]"
+              >
                 <div className="flex items-start gap-2.5">
                   <Sparkles size="0.875rem" className="mt-0.5 shrink-0 text-[var(--primary)]" />
                   <div className="min-w-0 flex-1">
@@ -3179,8 +3195,8 @@ export function ChatSettingsDrawer({
                     {personas
                       .filter(
                         (p) =>
-                          p.name.toLowerCase().includes(personaSearch.toLowerCase()) ||
-                          (p.comment && p.comment.toLowerCase().includes(personaSearch.toLowerCase())),
+                          includesTextForMatch(p.name, personaSearch) ||
+                          includesTextForMatch(p.comment ?? "", personaSearch),
                       )
                       .map((p) => (
                         <button
@@ -3221,8 +3237,8 @@ export function ChatSettingsDrawer({
                       ))}
                     {personas.filter(
                       (p) =>
-                        p.name.toLowerCase().includes(personaSearch.toLowerCase()) ||
-                        (p.comment && p.comment.toLowerCase().includes(personaSearch.toLowerCase())),
+                        includesTextForMatch(p.name, personaSearch) ||
+                        includesTextForMatch(p.comment ?? "", personaSearch),
                     ).length === 0 && (
                       <p className="px-3 py-2 text-[0.6875rem] text-[var(--muted-foreground)]">
                         {personas.length === 0 ? "No personas created yet." : "No matches."}
@@ -3311,13 +3327,13 @@ export function ChatSettingsDrawer({
                   onClose={() => setShowCharPicker(false)}
                   placeholder="Search characters…"
                 >
-                  {characters
+                  {selectableCharacters
                     .filter((c) => !chatCharIds.includes(c.id))
-                    .filter((c) => {
-                      const query = charSearch.toLowerCase();
-                      const title = charTitle(c)?.toLowerCase() ?? "";
-                      return charName(c).toLowerCase().includes(query) || title.includes(query);
-                    })
+                    .filter(
+                      (c) =>
+                        includesTextForMatch(charName(c), charSearch) ||
+                        includesTextForMatch(charTitle(c) ?? "", charSearch),
+                    )
                     .map((c) => {
                       const name = charName(c);
                       const title = charTitle(c);
@@ -3437,8 +3453,8 @@ export function ChatSettingsDrawer({
                   {personas
                     .filter(
                       (p) =>
-                        p.name.toLowerCase().includes(personaSearch.toLowerCase()) ||
-                        (p.comment && p.comment.toLowerCase().includes(personaSearch.toLowerCase())),
+                        includesTextForMatch(p.name, personaSearch) ||
+                        includesTextForMatch(p.comment ?? "", personaSearch),
                     )
                     .map((p) => (
                       <button
@@ -3479,8 +3495,8 @@ export function ChatSettingsDrawer({
                     ))}
                   {personas.filter(
                     (p) =>
-                      p.name.toLowerCase().includes(personaSearch.toLowerCase()) ||
-                      (p.comment && p.comment.toLowerCase().includes(personaSearch.toLowerCase())),
+                      includesTextForMatch(p.name, personaSearch) ||
+                      includesTextForMatch(p.comment ?? "", personaSearch),
                   ).length === 0 && (
                     <p className="px-3 py-2 text-[0.6875rem] text-[var(--muted-foreground)]">
                       {personas.length === 0 ? "No personas created yet." : "No matches."}
@@ -3638,13 +3654,13 @@ export function ChatSettingsDrawer({
                   onClose={() => setShowCharPicker(false)}
                   placeholder="Search characters…"
                 >
-                  {characters
+                  {selectableCharacters
                     .filter((c) => !chatCharIds.includes(c.id))
-                    .filter((c) => {
-                      const query = charSearch.toLowerCase();
-                      const title = charTitle(c)?.toLowerCase() ?? "";
-                      return charName(c).toLowerCase().includes(query) || title.includes(query);
-                    })
+                    .filter(
+                      (c) =>
+                        includesTextForMatch(charName(c), charSearch) ||
+                        includesTextForMatch(charTitle(c) ?? "", charSearch),
+                    )
                     .map((c) => {
                       const name = charName(c);
                       const title = charTitle(c);
@@ -3684,15 +3700,15 @@ export function ChatSettingsDrawer({
                         </button>
                       );
                     })}
-                  {characters
+                  {selectableCharacters
                     .filter((c) => !chatCharIds.includes(c.id))
-                    .filter((c) => {
-                      const query = charSearch.toLowerCase();
-                      const title = charTitle(c)?.toLowerCase() ?? "";
-                      return charName(c).toLowerCase().includes(query) || title.includes(query);
-                    }).length === 0 && (
+                    .filter(
+                      (c) =>
+                        includesTextForMatch(charName(c), charSearch) ||
+                        includesTextForMatch(charTitle(c) ?? "", charSearch),
+                    ).length === 0 && (
                     <p className="px-3 py-2 text-[0.6875rem] text-[var(--muted-foreground)]">
-                      {characters.filter((c) => !chatCharIds.includes(c.id)).length === 0
+                      {selectableCharacters.filter((c) => !chatCharIds.includes(c.id)).length === 0
                         ? "All characters already added."
                         : "No matches."}
                     </p>
@@ -4752,7 +4768,7 @@ export function ChatSettingsDrawer({
                         c.id !== chat.id &&
                         (c.mode === "roleplay" || c.mode === "game") &&
                         !c.connectedChatId &&
-                        getConnectedChatDisplayName(c).toLowerCase().includes(connectionSearch.toLowerCase()),
+                        includesTextForMatch(getConnectedChatDisplayName(c), connectionSearch),
                     )
                     .map((c) => (
                       <button
@@ -4935,7 +4951,7 @@ export function ChatSettingsDrawer({
                         c.id !== chat.id &&
                         c.mode === "conversation" &&
                         !c.connectedChatId &&
-                        getConnectedChatDisplayName(c).toLowerCase().includes(connectionSearch.toLowerCase()),
+                        includesTextForMatch(getConnectedChatDisplayName(c), connectionSearch),
                     )
                     .map((c) => (
                       <button
@@ -4989,8 +5005,8 @@ export function ChatSettingsDrawer({
               <div className="space-y-2">
                 {isGame && metadata.enableAgents && (
                   <p className="px-1 text-[0.625rem] text-[var(--muted-foreground)]">
-                    Toggle scene analysis and custom agents for this game session. Roleplay-only built-ins stay hidden so
-                    the game's format doesn't break.
+                    Toggle scene analysis and custom agents for this game session. Roleplay-only built-ins stay hidden
+                    so the game's format doesn't break.
                   </p>
                 )}
                 <button
@@ -6197,19 +6213,19 @@ export function ChatSettingsDrawer({
                   </div>
                 )}
 
-                {/* Image Generation — game mode only */}
+                {/* Illustrator — game mode only */}
                 {isGame && (
                   <AgentSettingsCard
                     icon={<Image size="0.75rem" className="mt-0.5 text-[var(--primary)]" />}
-                    title="Image Generation"
-                    description="Auto-generate NPC portraits and location backgrounds during gameplay."
+                    title="Illustrator"
+                    description="Auto-generate scene illustrations, NPC portraits, and location backgrounds during gameplay."
                   >
                     <AgentSettingsToggle
-                      label="Game Image Generation"
+                      label="Game Illustrator"
                       description={
                         metadata.enableSpriteGeneration
-                          ? "Scene image generation is enabled for this game."
-                          : "Allow the game to request scene images from your image connection."
+                          ? "Illustrator is enabled for this game."
+                          : "Allow the game to request scene images, portraits, and backgrounds from your image connection."
                       }
                       enabled={!!metadata.enableSpriteGeneration}
                       onToggle={() =>
