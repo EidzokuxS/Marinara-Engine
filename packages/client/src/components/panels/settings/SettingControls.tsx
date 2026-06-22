@@ -150,7 +150,6 @@ export function ConversationSoundSetting() {
           setGameNotificationSound(v);
           if (v) playNotificationPing();
         }}
-        help="Play when a Game turn finishes loading."
       />
       <div className="mt-1 flex items-center gap-1.5">
         <Bell size="0.75rem" className="text-[var(--muted-foreground)]" />
