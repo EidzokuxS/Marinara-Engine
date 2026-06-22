@@ -180,7 +180,7 @@ function collectRunPodReferenceImages(request: ImageGenRequest, defaults: ComfyU
 }
 
 function normalizeRunPodReferenceImageBase64(reference: string): string {
-  const dataUrlMatch = reference.trim().match(/^data:image\/(?:png|jpe?g|webp|gif);base64,([\s\S]+)$/i);
+  const dataUrlMatch = reference.trim().match(/^data:image\/(?:png|jpe?g|webp|gif|avif|bmp);base64,([\s\S]+)$/i);
   const rawBase64 = dataUrlMatch ? dataUrlMatch[1]! : reference;
   const compact = rawBase64.replace(/\s+/g, "");
   const unpadded = compact.replace(/=+$/, "");
@@ -327,6 +327,8 @@ function detectImageMimeType(base64: string): string {
   const bytes = Buffer.from(base64.slice(0, 64), "base64");
   if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return "image/gif";
+  if (bytes[0] === 0x42 && bytes[1] === 0x4d) return "image/bmp";
   if (
     bytes[0] === 0x52 &&
     bytes[1] === 0x49 &&
@@ -339,6 +341,16 @@ function detectImageMimeType(base64: string): string {
   ) {
     return "image/webp";
   }
+  const brand = bytes.subarray(8, 12).toString("ascii").toLowerCase();
+  if (
+    bytes[4] === 0x66 &&
+    bytes[5] === 0x74 &&
+    bytes[6] === 0x79 &&
+    bytes[7] === 0x70 &&
+    (brand.startsWith("avif") || brand.startsWith("avis"))
+  ) {
+    return "image/avif";
+  }
   return "image/png";
 }
 
@@ -346,11 +358,13 @@ function imageExtensionFromMimeType(mimeType: string): string {
   if (mimeType.includes("jpeg") || mimeType.includes("jpg")) return "jpg";
   if (mimeType.includes("webp")) return "webp";
   if (mimeType.includes("gif")) return "gif";
+  if (mimeType.includes("avif")) return "avif";
+  if (mimeType.includes("bmp")) return "bmp";
   return "png";
 }
 
 function decodeDataUrl(dataUrl: string): ImageGenResult {
-  const match = dataUrl.trim().match(/^data:(image\/(?:png|jpe?g|webp|gif));base64,([\s\S]+)$/i);
+  const match = dataUrl.trim().match(/^data:(image\/(?:png|jpe?g|webp|gif|avif|bmp));base64,([\s\S]+)$/i);
   if (!match) throw new Error("Invalid image data URL from RunPod output");
 
   const declaredMimeType = match[1]!.toLowerCase().replace("image/jpg", "image/jpeg");

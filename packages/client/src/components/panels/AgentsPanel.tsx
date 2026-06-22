@@ -428,6 +428,15 @@ export function AgentsPanel() {
     onDrop: finishAgentTouchDrag,
     onCancel: cancelAgentTouchDrag,
   });
+  const startAgentCardTouchDrag = useCallback(
+    (event: TouchEvent<HTMLDivElement>, agentId: string) => {
+      startAgentTouchDrag(event, agentId, {
+        allowInteractiveTarget: true,
+        sourceElement: event.currentTarget,
+      });
+    },
+    [startAgentTouchDrag],
+  );
 
   const handleExportSelectedAgents = useCallback(async () => {
     if (selectedAgents.length === 0) {
@@ -615,7 +624,7 @@ export function AgentsPanel() {
           event.dataTransfer.setData("text/plain", agent.id);
         },
         onDragEnd: () => setDraggedAgentId(null),
-        onTouchStart: (event) => startAgentTouchDrag(event, agent.id),
+        onTouchStart: (event) => startAgentCardTouchDrag(event, agent.id),
         suppressClickRef: suppressAgentClickRef,
         onDelete: async () => {
           const deleteMessage = custom
@@ -643,7 +652,7 @@ export function AgentsPanel() {
       openAgentDetail,
       selectedAgentIds,
       selectionMode,
-      startAgentTouchDrag,
+      startAgentCardTouchDrag,
       toggleAgentSelection,
     ],
   );
@@ -964,7 +973,7 @@ export function AgentsPanel() {
                     event.dataTransfer.setData("text/plain", agent.id);
                   },
                   onDragEnd: () => setDraggedAgentId(null),
-                  onTouchStart: (event) => startAgentTouchDrag(event, agent.id),
+                  onTouchStart: (event) => startAgentCardTouchDrag(event, agent.id),
                   suppressClickRef: suppressAgentClickRef,
                   onDelete: async () => {
                     const deleteMessage =
@@ -1016,7 +1025,7 @@ export function AgentsPanel() {
                   event.dataTransfer.setData("text/plain", agent.id);
                 },
                 onDragEnd: () => setDraggedAgentId(null),
-                onTouchStart: (event) => startAgentTouchDrag(event, agent.id),
+                onTouchStart: (event) => startAgentCardTouchDrag(event, agent.id),
                 suppressClickRef: suppressAgentClickRef,
                 onDelete: async () => {
                   if (

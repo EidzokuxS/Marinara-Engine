@@ -616,7 +616,8 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
   const { data: connections } = useConnections();
   const { data: presets } = usePresets();
   const { data: defaultPreset } = useDefaultPreset();
-  const { data: presetFull, isLoading: presetFullLoading } = usePresetFull(chat.promptPresetId ?? null);
+  const [selectedPromptPresetId, setSelectedPromptPresetId] = useState<string | null>(chat.promptPresetId ?? null);
+  const { data: presetFull, isLoading: presetFullLoading } = usePresetFull(selectedPromptPresetId);
   const { data: allCharacters } = useCharacters();
   const { data: allPersonas } = usePersonas();
   const updateChat = useUpdateChat();
@@ -627,6 +628,10 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
   const [generateSchedule, setGenerateSchedule] = useState(false);
   const [showChoiceModal, setShowChoiceModal] = useState(false);
   const [promptPresetTouched, setPromptPresetTouched] = useState(false);
+
+  useEffect(() => {
+    setSelectedPromptPresetId(chat.promptPresetId ?? null);
+  }, [chat.id, chat.promptPresetId]);
 
   // Track whether the user has manually edited the chat name.
   // If not, auto-rename to match the selected character name(s).
@@ -759,6 +764,7 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
   const setPreset = useCallback(
     (presetId: string | null) => {
       setPromptPresetTouched(true);
+      setSelectedPromptPresetId(presetId);
       updateChat.mutate({ id: chat.id, promptPresetId: presetId });
     },
     [chat.id, updateChat],
@@ -766,6 +772,7 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
 
   useEffect(() => {
     if (!promptPresetTouched && !chat.promptPresetId && defaultPreset?.id) {
+      setSelectedPromptPresetId(defaultPreset.id);
       updateChat.mutate({ id: chat.id, promptPresetId: defaultPreset.id });
     }
   }, [chat.id, chat.promptPresetId, defaultPreset?.id, promptPresetTouched, updateChat]);
@@ -791,12 +798,12 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
     setStep((value) => Math.max(0, value - 1));
   }, []);
   const goNext = useCallback(() => {
-    if (currentStep.key === "prompt" && chat.promptPresetId && presetFull?.choiceBlocks?.length) {
+    if (currentStep.key === "prompt" && selectedPromptPresetId && presetFull?.choiceBlocks?.length) {
       setShowChoiceModal(true);
       return;
     }
     setStep((value) => Math.min(CONVERSATION_STEPS.length - 1, value + 1));
-  }, [chat.promptPresetId, currentStep.key, presetFull?.choiceBlocks?.length]);
+  }, [currentStep.key, presetFull?.choiceBlocks?.length, selectedPromptPresetId]);
 
   const handleStartChatting = useCallback(async () => {
     if (!hasConnection || !hasCharacters) return;
@@ -905,7 +912,7 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
     <div className="space-y-2">
       <label className={WIZARD_FIELD_LABEL}>Conversation Prompt</label>
       <select
-        value={chat.promptPresetId ?? ""}
+        value={selectedPromptPresetId ?? ""}
         onChange={(event) => setPreset(event.target.value || null)}
         className={WIZARD_INPUT_CLASS}
       >
@@ -1191,7 +1198,7 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
       : currentStep.key === "participants"
         ? renderParticipantsStep()
         : renderAutomationStep();
-  const nextDisabled = currentStep.key === "prompt" && !!chat.promptPresetId && presetFullLoading;
+  const nextDisabled = currentStep.key === "prompt" && !!selectedPromptPresetId && presetFullLoading;
 
   const busyContent =
     scheduleState === "generating" ? (
@@ -1217,7 +1224,7 @@ function ConversationQuickSetup({ chat, onFinish }: ChatSetupWizardProps) {
           setShowChoiceModal(false);
           setStep((value) => Math.min(CONVERSATION_STEPS.length - 1, value + 1));
         }}
-        presetId={chat.promptPresetId ?? null}
+        presetId={selectedPromptPresetId}
         chatId={chat.id}
       />
       {!showChoiceModal && (

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Download, Pin, X } from "lucide-react";
 import type { ChatImage } from "../../hooks/use-gallery";
@@ -35,16 +36,31 @@ export function ChatImageLightbox({
   onClose,
 }: ChatImageLightboxProps) {
   const pinImage = useGalleryStore((s) => s.pinImage);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const portalRoot = typeof document !== "undefined" ? document.body : null;
   const prompt = image.prompt.trim();
   const meta = formatChatImageMeta(image);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+  }, []);
 
   if (!portalRoot) return null;
 
   return createPortal(
     <div
       className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/80 max-md:pt-[env(safe-area-inset-top)]"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Image preview"
+      tabIndex={-1}
       onClick={onClose}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          onClose();
+        }
+      }}
     >
       <div
         className="flex max-h-[90vh] w-[min(90vw,64rem)] max-w-[90vw] flex-col items-center gap-2"
@@ -88,6 +104,7 @@ export function ChatImageLightbox({
             )}
             <button
               type="button"
+              ref={closeButtonRef}
               onClick={onClose}
               aria-label="Close image"
               className="rounded-lg bg-black/60 p-2 text-white transition-colors hover:bg-black/80"

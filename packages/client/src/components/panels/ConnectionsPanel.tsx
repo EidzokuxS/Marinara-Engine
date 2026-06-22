@@ -725,6 +725,7 @@ function ConnectionFolderRow({
 
   return (
     <Reorder.Item
+      data-connection-folder-id={folder.id}
       value={folder.id}
       layout="position"
       dragListener={false}
@@ -1160,7 +1161,7 @@ export function ConnectionsPanel() {
   };
 
   return (
-    <div data-connection-folder-root className="flex min-h-full flex-col gap-2 p-3">
+    <div className="flex min-h-full flex-col gap-2 p-3">
       <input
         ref={connectionImageInputRef}
         type="file"
@@ -1340,6 +1341,7 @@ export function ConnectionsPanel() {
 
       {/* Unfiled connections */}
       <div
+        data-connection-folder-root
         onDragOver={(event) => {
           if (draggedConnectionId) {
             event.preventDefault();

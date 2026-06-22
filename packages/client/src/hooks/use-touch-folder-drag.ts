@@ -368,11 +368,11 @@ export function useTouchFolderDrag({
   const startTouchDrag = useCallback(
     (event: ReactTouchEvent<HTMLElement>, id: string, options?: StartTouchDragOptions) => {
       if (event.touches.length !== 1) return;
-      if (
-        !options?.allowInteractiveTarget &&
-        event.target instanceof Element &&
-        event.target.closest("button,a,input,textarea,select,[role='button']")
-      ) {
+      const interactiveTarget =
+        event.target instanceof Element
+          ? event.target.closest("button,a,input,textarea,select,[role='button']")
+          : null;
+      if (!options?.allowInteractiveTarget && interactiveTarget && interactiveTarget !== event.currentTarget) {
         return;
       }
       cancelTouchDrag(false);

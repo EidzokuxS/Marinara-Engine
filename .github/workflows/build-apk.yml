@@ -117,7 +117,7 @@ jobs:
             sleep 10
           done
           gh release view "$TAG" --json body -q .body > release-body.md
-          if ! grep -Eiq "Android APK notice|Termux bootstrap|WebView shell" release-body.md; then
+          if ! grep -Eiq '^> \*\*Android APK notice:\*\*' release-body.md; then
             printf '%s\n' \
               '> [!IMPORTANT]' \
               '> **Android APK notice:** The APK is a Termux bootstrap + WebView shell, not a native Android server build. It opens an already-running local Marinara server, and on first launch it can help install/start Marinara through Termux after Android prompts the user to install Termux, grant Termux command permission, and enable Termux external commands. Follow the [Android wrapper guide](https://github.com/Pasta-Devs/Marinara-Engine/blob/main/android/README.md) if Android blocks the bootstrap handoff.' \

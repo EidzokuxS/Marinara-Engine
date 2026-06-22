@@ -1636,8 +1636,8 @@ export async function chatsRoutes(app: FastifyInstance) {
         const charStore = createCharactersStorage(app.db);
 
         const preset = await presetStore.getById(presetId);
-        if (preset) {
-          const chatMode = (chat.mode as string) ?? "roleplay";
+        const chatMode = (chat.mode as string) ?? "roleplay";
+        if (preset || chatMode === "conversation" || chatMode === "game") {
           // Apply conversation-start filter
           let scopedMessages = chatMessages;
           for (let i = chatMessages.length - 1; i >= 0; i--) {
@@ -1671,11 +1671,13 @@ export async function chatsRoutes(app: FastifyInstance) {
             mappedMessages.pop();
           }
 
-          const [sections, groups, choiceBlocks] = await Promise.all([
-            presetStore.listSections(presetId),
-            presetStore.listGroups(presetId),
-            presetStore.listChoiceBlocksForPreset(presetId),
-          ]);
+          const [sections, groups, choiceBlocks] = preset
+            ? await Promise.all([
+                presetStore.listSections(presetId),
+                presetStore.listGroups(presetId),
+                presetStore.listChoiceBlocksForPreset(presetId),
+              ])
+            : [[], [], []];
 
           const allCharacterIds = resolveChatCharacterIds(chat.characterIds);
           const characterIds = resolveActiveCharacterIds(allCharacterIds, chatMeta, {
@@ -1748,10 +1750,10 @@ export async function chatsRoutes(app: FastifyInstance) {
               typeof chatMeta.customSystemPrompt === "string" && chatMeta.customSystemPrompt.trim()
                 ? (chatMeta.customSystemPrompt as string).trim()
                 : null;
-	            const selectedConversationPrompt = presetStringField(
-	              preset as Record<string, unknown>,
-	              "conversationPrompt",
-	            );
+		            const selectedConversationPrompt = presetStringField(
+		              preset as Record<string, unknown> | null,
+		              "conversationPrompt",
+		            );
 	            const conversationPromptTemplate =
 	              customPrompt ?? (selectedConversationPrompt || DEFAULT_CONVERSATION_PROMPT);
 	            const charNameList = promptMacroContext.characters.join(", ") || "Character";
@@ -1783,7 +1785,7 @@ export async function chatsRoutes(app: FastifyInstance) {
               typeof chatMeta.gameSystemPrompt === "string" && chatMeta.gameSystemPrompt.trim()
                 ? (chatMeta.gameSystemPrompt as string).trim()
                 : null;
-            const selectedGamePrompt = presetStringField(preset as Record<string, unknown>, "gamePrompt");
+            const selectedGamePrompt = presetStringField(preset as Record<string, unknown> | null, "gamePrompt");
             const gamePromptTemplate = customPrompt ?? (selectedGamePrompt || DEFAULT_GAME_SYSTEM_PROMPT);
             const renderedGamePrompt = resolveMacros(gamePromptTemplate, promptMacroContext);
             const messages = [

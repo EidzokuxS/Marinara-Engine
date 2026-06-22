@@ -6,6 +6,8 @@ import { randomUUID } from "crypto";
 import { existsSync, readFileSync } from "fs";
 import { extname, join } from "path";
 import { z } from "zod";
+import { eq } from "drizzle-orm";
+import { chats as chatsTable } from "../db/schema/index.js";
 import { logger, logDebugOverride } from "../lib/logger.js";
 import { createChatsStorage } from "../services/storage/chats.storage.js";
 import { createConnectionsStorage } from "../services/storage/connections.storage.js";
@@ -141,6 +143,7 @@ import {
   type ImageGenerationSize,
 } from "../services/image/image-generation-settings.js";
 import { createPromptOverridesStorage } from "../services/storage/prompt-overrides.storage.js";
+import { now } from "../utils/id-generator.js";
 import {
   buildGameSpotifySceneQuery,
   getGameSpotifyCandidates,
@@ -3724,9 +3727,16 @@ export async function gameRoutes(app: FastifyInstance) {
     if (!setupConfig) throw new Error("No setup config found");
     if (promptPresetId !== undefined) {
       const selectedPromptPresetId = promptPresetId || null;
-      await chats.update(chatId, { promptPresetId: selectedPromptPresetId });
       setupConfig = { ...setupConfig, promptPresetId: selectedPromptPresetId };
       meta.gameSetupConfig = setupConfig;
+      await app.db
+        .update(chatsTable)
+        .set({
+          promptPresetId: selectedPromptPresetId,
+          metadata: JSON.stringify(meta),
+          updatedAt: now(),
+        })
+        .where(eq(chatsTable.id, chatId));
     }
     const customHudWidgets = sanitizeGameHudWidgets(setupConfig.customHudWidgets);
 

@@ -62,7 +62,7 @@ export function SelectionActionBar({
   if (isPanelFooter) {
     return (
       <>
-        <div aria-hidden="true" className="h-24 shrink-0" />
+        <div aria-hidden="true" className="h-[calc(6rem+env(safe-area-inset-bottom))] shrink-0" />
         {actionBar}
       </>
     );

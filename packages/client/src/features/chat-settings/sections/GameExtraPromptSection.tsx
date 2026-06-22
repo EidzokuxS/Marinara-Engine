@@ -23,7 +23,7 @@ interface GameExtraPromptSectionProps {
   onExpandedChange: (expanded: boolean) => void;
   onValueChange: (value: string) => void;
   onSpecialInstructionsChange: (value: string) => void;
-  onPromptPresetChange: (presetId: string) => void;
+  onPromptPresetChange: (presetId: string | null) => void;
   onOpenPromptPreset: () => void;
 }
 
@@ -76,19 +76,17 @@ export function GameExtraPromptSection({
             <div className="flex items-center gap-1.5">
               <select
                 value={promptPresetId ?? ""}
-                onChange={(event) => onPromptPresetChange(event.target.value)}
+                onChange={(event) => onPromptPresetChange(event.target.value || null)}
                 disabled={promptPresets.length === 0}
                 className="min-w-0 flex-1 rounded-lg bg-[var(--secondary)] px-3 py-2 text-xs outline-none ring-1 ring-[var(--border)] transition-shadow focus:ring-[var(--primary)]/40 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {promptPresets.length === 0 ? (
-                  <option value="">No presets available</option>
-                ) : (
+                <option value="">{promptPresets.length === 0 ? "No presets available" : "Default game prompt"}</option>
+                {promptPresets.length > 0 &&
                   promptPresets.map((preset) => (
                     <option key={preset.id} value={preset.id}>
                       {preset.name}
                     </option>
-                  ))
-                )}
+                  ))}
               </select>
               <button
                 type="button"
@@ -106,11 +104,15 @@ export function GameExtraPromptSection({
             <div className="min-w-0">
               <span className="block text-[0.6875rem] font-medium text-[var(--foreground)]">Game Prompt</span>
               <span className="block text-[0.625rem] text-[var(--muted-foreground)]">
-                {storedValue ? "Using chat-local edit" : `From ${selectedPresetName ?? "selected preset"}`}
+                {storedValue
+                  ? "Using chat-local edit"
+                  : promptPresetId
+                    ? `From ${selectedPresetName ?? "selected preset"}`
+                    : "Using default game prompt"}
               </span>
             </div>
             <span className="shrink-0 rounded-full bg-[var(--background)] px-2 py-0.5 text-[0.5625rem] font-medium text-[var(--muted-foreground)] ring-1 ring-[var(--border)]">
-              {storedValue ? "Custom" : "Preset"}
+              {storedValue ? "Custom" : promptPresetId ? "Preset" : "Default"}
             </span>
           </div>
           <div className="flex gap-1.5">

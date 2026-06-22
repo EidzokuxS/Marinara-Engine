@@ -615,7 +615,12 @@ export function ChatSettingsDrawer({
   const isRoleplayMode = chatMode === "roleplay" || chatMode === "visual_novel";
   const supportsNarrativeDirectorSecretPlot = chatMode === "roleplay";
   const modeCapabilities = useMemo(() => getChatModeCapabilities(chatMode), [chatMode]);
+  const metadata = useMemo(
+    () => (typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {})),
+    [chat.metadata],
+  );
   const { data: currentPromptPresetFull } = usePresetFull(isRoleplayMode ? (chat.promptPresetId ?? null) : null);
+  const promptPresetOptionsLoaded = Array.isArray(presets);
   const promptPresetOptions = useMemo(() => (presets ?? []) as PromptPreset[], [presets]);
   const marinaraUniversalPromptPreset = useMemo(
     () =>
@@ -628,7 +633,13 @@ export function ChatSettingsDrawer({
   const fallbackPromptPreset = useMemo(() => {
     return marinaraUniversalPromptPreset ?? defaultPromptPreset ?? promptPresetOptions.find((preset) => preset.isDefault) ?? null;
   }, [defaultPromptPreset, marinaraUniversalPromptPreset, promptPresetOptions]);
-  const effectiveModePromptPresetId = chat.promptPresetId ?? fallbackPromptPreset?.id ?? null;
+  const hasModeCustomPrompt =
+    isConversation && typeof metadata.customSystemPrompt === "string" && metadata.customSystemPrompt.trim().length > 0
+      ? true
+      : isGame && typeof metadata.gameSystemPrompt === "string" && metadata.gameSystemPrompt.trim().length > 0;
+  const shouldApplyModePromptDefault = (isConversation || isGame) && promptPresetOptionsLoaded && !hasModeCustomPrompt;
+  const effectiveModePromptPresetId =
+    chat.promptPresetId ?? (shouldApplyModePromptDefault ? (fallbackPromptPreset?.id ?? null) : null);
   const selectedModePromptPreset = useMemo(() => {
     if (!effectiveModePromptPresetId) return null;
     return (
@@ -663,10 +674,6 @@ export function ChatSettingsDrawer({
     [chat.characterIds],
   );
 
-  const metadata = useMemo(
-    () => (typeof chat.metadata === "string" ? JSON.parse(chat.metadata) : (chat.metadata ?? {})),
-    [chat.metadata],
-  );
   const gameWidgetSource = useMemo<HudWidget[]>(() => {
     const persistedWidgets = normalizeGameHudWidgets(metadata.gameWidgetState);
     if (persistedWidgets.length > 0 || Array.isArray(metadata.gameWidgetState)) return persistedWidgets;
@@ -2044,7 +2051,8 @@ export function ChatSettingsDrawer({
   const showLorebookMarkerWarning =
     !!chat.promptPresetId && !isConversation && !isGame && hasScopedOrGlobalLorebooks && !currentPromptPresetHasLorebookMarker;
 
-  const setPreset = (presetId: string | null) => {
+  const [choiceModalPresetId, setChoiceModalPresetId] = useState<string | null>(null);
+  const setPreset = useCallback((presetId: string | null) => {
     updateChat.mutate(
       { id: chat.id, promptPresetId: presetId },
       {
@@ -2067,7 +2075,7 @@ export function ChatSettingsDrawer({
         },
       },
     );
-  };
+  }, [chat.id, updateChat]);
 
   const setConnection = (connectionId: string | null) => {
     updateChat.mutate({ id: chat.id, connectionId });
@@ -2097,7 +2105,6 @@ export function ChatSettingsDrawer({
   const [charSearch, setCharSearch] = useState("");
   const [lbSearch, setLbSearch] = useState("");
   const [toolSearch, setToolSearch] = useState("");
-  const [choiceModalPresetId, setChoiceModalPresetId] = useState<string | null>(null);
   const [agentAddPreview, setAgentAddPreview] = useState<AgentAddPreview | null>(null);
   const [agentAddCadenceInputFocused, setAgentAddCadenceInputFocused] = useState(false);
   const [addingAgentToChat, setAddingAgentToChat] = useState(false);
@@ -2247,12 +2254,19 @@ export function ChatSettingsDrawer({
   }, [chat.id]);
 
   useEffect(() => {
-    if (!open || (!isConversation && !isGame) || chat.promptPresetId || !fallbackPromptPreset?.id) return;
+    if (!open || !shouldApplyModePromptDefault || chat.promptPresetId || !fallbackPromptPreset?.id) return;
     const fallbackKey = `${chat.id}:${fallbackPromptPreset.id}`;
     if (modePromptDefaultAppliedRef.current === fallbackKey) return;
     modePromptDefaultAppliedRef.current = fallbackKey;
     updateChat.mutate({ id: chat.id, promptPresetId: fallbackPromptPreset.id });
-  }, [chat.id, chat.promptPresetId, fallbackPromptPreset?.id, isConversation, isGame, open, updateChat]);
+  }, [
+    chat.id,
+    chat.promptPresetId,
+    fallbackPromptPreset?.id,
+    open,
+    shouldApplyModePromptDefault,
+    updateChat,
+  ]);
 
   useEffect(() => {
     setGameSpecialInstructionsDraft((metadata.gameSpecialInstructions as string) ?? "");
@@ -2267,9 +2281,11 @@ export function ChatSettingsDrawer({
   }, [chat.id, spotifyArtist]);
 
   const handleModePromptPresetChange = useCallback(
-    (promptPresetId: string) => {
-      if (!promptPresetId) return;
-      updateChat.mutate({ id: chat.id, promptPresetId });
+    (promptPresetId: string | null) => {
+      if (!promptPresetId && fallbackPromptPreset?.id) {
+        modePromptDefaultAppliedRef.current = `${chat.id}:${fallbackPromptPreset.id}`;
+      }
+      setPreset(promptPresetId);
       if (isConversation) {
         updateMeta.mutate({ id: chat.id, customSystemPrompt: null });
         useUIStore.getState().setCustomConversationPrompt(null);
@@ -2279,7 +2295,7 @@ export function ChatSettingsDrawer({
         updateMeta.mutate({ id: chat.id, gameSystemPrompt: null });
       }
     },
-    [chat.id, isConversation, isGame, updateChat, updateMeta],
+    [chat.id, fallbackPromptPreset?.id, isConversation, isGame, setPreset, updateMeta],
   );
 
   const openSelectedModePromptPreset = useCallback(() => {

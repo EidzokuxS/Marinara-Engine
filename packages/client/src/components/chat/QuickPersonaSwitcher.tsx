@@ -140,6 +140,18 @@ export function QuickPersonaSwitcher({ className }: { className?: string }) {
     return () => document.removeEventListener("pointerdown", handler);
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => {
+      const menu = menuRef.current;
+      const focusTarget =
+        menu?.querySelector<HTMLElement>('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])') ??
+        menu;
+      focusTarget?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
+
   // Position menu above button
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   useEffect(() => {
@@ -236,7 +248,17 @@ export function QuickPersonaSwitcher({ className }: { className?: string }) {
         createPortal(
           <div
             ref={menuRef}
+            role="menu"
+            aria-label="Personas"
+            tabIndex={-1}
             onPointerDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                setOpen(false);
+                btnRef.current?.focus();
+              }
+            }}
             className="fixed z-[9999] flex min-w-[280px] max-w-[340px] max-h-[400px] flex-col overflow-hidden rounded-xl border border-foreground/10 bg-[var(--card)] shadow-2xl"
             style={pos ? { left: pos.left, top: pos.top } : { visibility: "hidden" as const }}
           >

@@ -553,7 +553,7 @@ export function SpotifyMiniPlayer({
     dismissDjMariToast();
     djMariToastRef.current = toast.custom(
       () => (
-        <div className="flex max-w-[22rem] items-center gap-3 pr-3 text-[var(--foreground)]">
+        <div className="flex max-w-[22rem] items-center gap-3 pr-1 text-[var(--foreground)]">
           <img
             src={DOTTOR_SUPPORT_GIF}
             alt=""
@@ -561,6 +561,14 @@ export function SpotifyMiniPlayer({
             draggable={false}
           />
           <p className="text-sm font-medium leading-snug">DJ Mari is composing a playlist for you, hold on tight!</p>
+          <button
+            type="button"
+            onClick={dismissDjMariToast}
+            className="rounded-full p-1 text-foreground/45 transition-colors hover:bg-foreground/10 hover:text-foreground"
+            aria-label="Dismiss DJ Mari playlist toast"
+          >
+            <X size="0.75rem" />
+          </button>
         </div>
       ),
       { duration: Infinity, position: "bottom-right" },

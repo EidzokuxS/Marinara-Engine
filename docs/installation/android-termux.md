@@ -19,7 +19,7 @@ Install **Termux** from [F-Droid](https://f-droid.org/en/packages/com.termux/). 
 5. Grant **Run commands in Termux environment** when Android asks.
 6. If Termux blocks external commands, paste the copied `allow-external-apps` command into Termux once, then tap **Start setup in Termux** again.
 7. Wait for the Termux launcher to install dependencies, build Marinara Engine, and start the server.
-8. Return to **Marinara Engine**. The APK retries until `http://127.0.0.1:7860` is ready.
+8. Return to **Marinara Engine**. The APK retries until `http://127.0.0.1:<PORT>` is ready.
 
 ### Manual Termux Install
 
@@ -41,7 +41,7 @@ The Termux launcher installs dependencies, builds the app, prepares local file-b
 
 > **Note:** The first run takes a few minutes because it builds the app on your device. Subsequent runs are much faster.
 
-After installation, open **<http://127.0.0.1:7860>** in your Android browser, or install the PWA from the "Add to Home Screen" prompt for a more native experience.
+After installation, open **`http://127.0.0.1:<PORT>`** in your Android browser, or install the PWA from the "Add to Home Screen" prompt for a more native experience.
 
 ## Starting the App Again
 

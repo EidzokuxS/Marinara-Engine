@@ -1371,10 +1371,7 @@ export function ConnectionEditor() {
                       </p>
                       <input
                         value={localModel}
-                        onChange={(e) => {
-                          setLocalModel(e.target.value);
-                          markDirty();
-                        }}
+                        onChange={(e) => handleManualModelChange(e.target.value)}
                         className="w-full rounded-lg bg-[var(--secondary)] px-3 py-2 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-sky-400/50"
                         placeholder="model-name-or-path"
                       />
@@ -1425,10 +1422,7 @@ export function ConnectionEditor() {
                       No models found. Try a different search or type the model ID below.
                       <input
                         value={localModel}
-                        onChange={(e) => {
-                          setLocalModel(e.target.value);
-                          markDirty();
-                        }}
+                        onChange={(e) => handleManualModelChange(e.target.value)}
                         className="mt-2 w-full rounded-lg bg-[var(--secondary)] px-3 py-2 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-sky-400/50"
                         placeholder="Custom model ID…"
                       />

@@ -127,7 +127,10 @@ export function resolvePromptIdleDuration(
 
   for (const message of messages) {
     if (excludeMessageId && message.id === excludeMessageId) continue;
-    const timestamp = timestampToMillis(message.createdAt) ?? timestampToMillis(message.updatedAt);
+    const createdAt = timestampToMillis(message.createdAt);
+    const updatedAt = timestampToMillis(message.updatedAt);
+    const timestamp =
+      createdAt !== null && updatedAt !== null ? Math.max(createdAt, updatedAt) : (createdAt ?? updatedAt);
     if (timestamp === null) continue;
     if (latestTimestamp === null || timestamp > latestTimestamp) latestTimestamp = timestamp;
   }

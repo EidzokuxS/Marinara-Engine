@@ -543,7 +543,7 @@ export function AgentEditor() {
       setLocalName(builtIn ? builtIn.name : dbConfig.name);
       setLocalDescription(dbConfig.description);
       setLocalPhase(normalizeAgentPhaseForType(agentType, dbConfig.phase));
-      setLocalConnectionId(dbConfig.connectionId ?? "");
+      setLocalConnectionId(normalizeTextConnectionOverride(dbConfig.connectionId));
       const settings = mergeBuiltInAgentSettings(agentType, dbConfig.settings);
       const promptTemplateSource = settings.promptTemplates ?? defaultSettings.promptTemplates;
       setLocalAuthor(
@@ -1431,8 +1431,9 @@ export function AgentEditor() {
         <div className="flex items-center gap-2 bg-amber-500/10 px-4 py-2 text-xs text-amber-400">
           <AlertCircle size="0.8125rem" />
           <span className="flex-1">
-            {isKnowledgeRouterAgent ? "Knowledge Retrieval" : "Knowledge Router"} is also configured. Both agents will
-            run in parallel and inject overlapping context. Consider disabling one for cleaner prompts.
+            {isKnowledgeRouterAgent ? "Knowledge Retrieval" : "Knowledge Router"} is also configured. Both agents can
+            run in parallel if a chat enables both, injecting overlapping context. Consider enabling only one for cleaner
+            prompts.
           </span>
         </div>
       )}
