@@ -465,14 +465,14 @@ export function LorebookEntryRow({
 
       {/* ── Compact row ── */}
       <div
-        className="group flex cursor-pointer items-center gap-1 px-2 py-1.5 sm:gap-2"
+        className="group flex min-w-0 cursor-pointer items-center gap-0.5 px-1.5 py-1.5 sm:gap-2 sm:px-2"
         onClick={selectionMode ? onToggleSelected : onToggleExpand}
       >
         {/* Drag handle */}
         <button
           type="button"
           className={cn(
-            "shrink-0 rounded p-0.5 text-[var(--muted-foreground)] transition-colors",
+            "flex h-6 w-4 shrink-0 items-center justify-center rounded p-0 text-[var(--muted-foreground)] transition-colors sm:h-auto sm:w-auto sm:p-0.5",
             draggable
               ? "cursor-grab hover:bg-[var(--accent)] hover:text-[var(--foreground)] active:cursor-grabbing"
               : "cursor-not-allowed opacity-40",
@@ -501,7 +501,7 @@ export function LorebookEntryRow({
               onToggleSelected?.();
             }}
             className={cn(
-              "flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--ring)]",
+              "flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--ring)] sm:h-7 sm:w-7",
               isSelected
                 ? "mari-chrome-accent-surface mari-accent-animated ring-1"
                 : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
@@ -515,7 +515,7 @@ export function LorebookEntryRow({
         <button
           type="button"
           aria-label={isExpanded ? "Collapse entry" : "Expand entry"}
-          className="shrink-0 rounded p-0.5 text-[var(--muted-foreground)] transition-transform hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+          className="flex h-6 w-4 shrink-0 items-center justify-center rounded p-0 text-[var(--muted-foreground)] transition-transform hover:bg-[var(--accent)] hover:text-[var(--foreground)] sm:h-auto sm:w-auto sm:p-0.5"
           onClick={(e) => {
             e.stopPropagation();
             onToggleExpand();
@@ -525,7 +525,7 @@ export function LorebookEntryRow({
         </button>
 
         <div
-          className="shrink-0"
+          className="-mx-1 shrink-0 sm:mx-0"
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
@@ -545,7 +545,7 @@ export function LorebookEntryRow({
           title={localUseRegex ? "Regex key matching enabled" : "Plain-text key matching"}
           onClick={handleUseRegexToggle}
           className={cn(
-            "shrink-0 rounded p-0.5 transition-colors",
+            "shrink-0 rounded p-0 transition-colors sm:p-0.5",
             localUseRegex
               ? "bg-orange-400/15 text-orange-300 ring-1 ring-orange-400/25"
               : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
@@ -560,7 +560,7 @@ export function LorebookEntryRow({
           type="button"
           onClick={handleStatusMenuToggle}
           className={cn(
-            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]",
+            "flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)] sm:h-7 sm:w-7",
             showStatusMenu && "bg-[var(--accent)]",
           )}
           aria-label={`Entry type: ${STATUS_LABEL[localStatus]}. Choose entry type.`}
@@ -646,13 +646,13 @@ export function LorebookEntryRow({
           }}
           onClick={(e) => e.stopPropagation()}
           placeholder="Untitled entry"
-          className="min-w-[4rem] flex-1 truncate rounded bg-transparent px-1 text-sm font-medium outline-none transition-colors hover:bg-[var(--accent)]/40 focus:bg-[var(--accent)]/40 focus:ring-1 focus:ring-[var(--ring)] sm:min-w-[7rem]"
+          className="min-w-0 flex-1 truncate rounded bg-transparent px-1 text-sm font-medium outline-none transition-colors hover:bg-[var(--accent)]/40 focus:bg-[var(--accent)]/40 focus:ring-1 focus:ring-[var(--ring)] sm:min-w-[7rem]"
         />
 
         <button
           type="button"
           className={cn(
-            "relative inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[0.625rem] ring-1 transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--ring)]",
+            "relative inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[0.625rem] ring-1 transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--ring)] sm:h-6 sm:w-6",
             isVectorExcluded
               ? "bg-[var(--destructive)]/10 text-[var(--destructive)] ring-[var(--destructive)]/20"
               : isVectorized
@@ -692,7 +692,7 @@ export function LorebookEntryRow({
             title="Entry quick controls"
             onClick={() => setShowMobileControls((current) => !current)}
             className={cn(
-              "flex h-7 w-7 items-center justify-center rounded-md text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]",
+              "flex h-6 w-6 items-center justify-center rounded-md text-[var(--muted-foreground)] ring-1 ring-[var(--border)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)] sm:h-7 sm:w-7",
               showMobileControls && "bg-[var(--accent)] text-[var(--foreground)]",
             )}
           >
@@ -869,7 +869,7 @@ export function LorebookEntryRow({
           title="Duplicate entry"
           disabled={duplicateDisabled}
           onClick={handleDuplicate}
-          className="shrink-0 rounded p-1 text-[var(--muted-foreground)] opacity-0 transition-all hover:bg-[var(--accent)] hover:text-[var(--foreground)] group-hover:opacity-100 disabled:cursor-not-allowed max-md:opacity-100"
+          className="shrink-0 rounded p-0.5 text-[var(--muted-foreground)] opacity-0 transition-all hover:bg-[var(--accent)] hover:text-[var(--foreground)] group-hover:opacity-100 disabled:cursor-not-allowed max-md:opacity-100 sm:p-1"
         >
           <Copy size="0.75rem" />
         </button>
@@ -879,7 +879,7 @@ export function LorebookEntryRow({
           type="button"
           aria-label="Delete entry"
           onClick={handleDelete}
-          className="shrink-0 rounded p-1 opacity-0 transition-all hover:bg-[var(--destructive)]/15 group-hover:opacity-100 max-md:opacity-100"
+          className="shrink-0 rounded p-0.5 opacity-0 transition-all hover:bg-[var(--destructive)]/15 group-hover:opacity-100 max-md:opacity-100 sm:p-1"
         >
           <Trash2 size="0.75rem" className="text-[var(--destructive)]" />
         </button>

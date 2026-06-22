@@ -197,12 +197,15 @@ export function LorebookFolderRow({
       onDrop={onDrop}
       onDragEnd={onDragEnd}
     >
-      <div className="group flex cursor-pointer items-center gap-2 px-2 py-1.5" onClick={onToggleCollapse}>
+      <div
+        className="group flex min-w-0 cursor-pointer items-center gap-0.5 px-1.5 py-1.5 sm:gap-2 sm:px-2"
+        onClick={onToggleCollapse}
+      >
         {/* Drag handle */}
         <button
           type="button"
           className={cn(
-            "shrink-0 rounded p-0.5 text-[var(--muted-foreground)] transition-colors",
+            "flex h-6 w-4 shrink-0 items-center justify-center rounded p-0 text-[var(--muted-foreground)] transition-colors sm:h-auto sm:w-auto sm:p-0.5",
             draggable
               ? "cursor-grab hover:bg-[var(--accent)] hover:text-[var(--foreground)] active:cursor-grabbing"
               : "cursor-not-allowed opacity-40",
@@ -232,7 +235,7 @@ export function LorebookFolderRow({
         <button
           type="button"
           aria-label={isCollapsed ? "Expand folder" : "Collapse folder"}
-          className="shrink-0 rounded p-0.5 text-[var(--muted-foreground)] transition-transform hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+          className="flex h-6 w-4 shrink-0 items-center justify-center rounded p-0 text-[var(--muted-foreground)] transition-transform hover:bg-[var(--accent)] hover:text-[var(--foreground)] sm:h-auto sm:w-auto sm:p-0.5"
           onClick={(e) => {
             e.stopPropagation();
             onToggleCollapse();
@@ -245,7 +248,7 @@ export function LorebookFolderRow({
         </button>
 
         <div
-          className="shrink-0"
+          className="-mx-1 shrink-0 sm:mx-0"
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
@@ -293,7 +296,7 @@ export function LorebookFolderRow({
             onClick={(e) => e.stopPropagation()}
             title="Nest this folder under another folder"
             aria-label="Parent folder"
-            className="mari-editor-field shrink-0 max-w-[7rem] truncate px-1.5 py-0.5 text-[0.625rem] text-[var(--marinara-editor-muted)]"
+            className="mari-editor-field shrink-0 max-w-[4.75rem] truncate px-1 py-0.5 text-[0.625rem] text-[var(--marinara-editor-muted)] sm:max-w-[7rem] sm:px-1.5"
           >
             <option value="">(top level)</option>
             {parentOptions.map((candidate) => (
@@ -306,7 +309,7 @@ export function LorebookFolderRow({
 
         {/* Entry count badge */}
         <span
-          className="mari-editor-chip shrink-0 px-2 py-0.5 text-[0.625rem]"
+          className="mari-editor-chip shrink-0 px-1.5 py-0.5 text-[0.625rem] sm:px-2"
           title={`${entryCount} entr${entryCount === 1 ? "y" : "ies"} in this folder`}
         >
           {entryCount}
@@ -322,7 +325,7 @@ export function LorebookFolderRow({
             e.stopPropagation();
             cloneFolder.mutate({ lorebookId, folderId: folder.id });
           }}
-          className="shrink-0 rounded p-1 opacity-0 transition-all hover:bg-[var(--accent)] group-hover:opacity-100 max-md:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
+          className="shrink-0 rounded p-0.5 opacity-0 transition-all hover:bg-[var(--accent)] group-hover:opacity-100 max-md:opacity-100 disabled:cursor-not-allowed disabled:opacity-40 sm:p-1"
         >
           <Copy size="0.75rem" className="text-[var(--muted-foreground)]" />
         </button>
@@ -332,7 +335,7 @@ export function LorebookFolderRow({
           type="button"
           aria-label="Delete folder"
           onClick={handleDelete}
-          className="shrink-0 rounded p-1 opacity-0 transition-all hover:bg-[var(--destructive)]/15 group-hover:opacity-100 max-md:opacity-100"
+          className="shrink-0 rounded p-0.5 opacity-0 transition-all hover:bg-[var(--destructive)]/15 group-hover:opacity-100 max-md:opacity-100 sm:p-1"
         >
           <Trash2 size="0.75rem" className="text-[var(--destructive)]" />
         </button>
