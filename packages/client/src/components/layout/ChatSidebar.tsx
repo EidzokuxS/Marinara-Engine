@@ -53,6 +53,7 @@ import {
   type Chat,
   type ChatFolder,
   type ChatMode,
+  type ConversationPresenceStatus,
 } from "@marinara-engine/shared";
 import { resolveLiveConversationStatus } from "../../lib/conversation-presence-status";
 import { Modal } from "../ui/Modal";
@@ -63,6 +64,57 @@ import { SelectionActionBar } from "../ui/SelectionActionBar";
 import { SmoothFolderContent } from "../ui/SmoothFolderContent";
 
 type ChatSortOption = "newest" | "oldest" | "name-asc" | "name-desc";
+
+type ConversationChatStatusInfo = {
+  id: string;
+  name: string;
+  status: ConversationPresenceStatus;
+  activity: string | null;
+};
+
+const CONVERSATION_STATUS_PRIORITY: Record<ConversationPresenceStatus, number> = {
+  online: 0,
+  idle: 1,
+  offline: 2,
+  dnd: 3,
+};
+
+function asConversationStatus(value: unknown): ConversationPresenceStatus | undefined {
+  return value === "online" || value === "idle" || value === "dnd" || value === "offline" ? value : undefined;
+}
+
+function conversationStatusDotClass(status?: string) {
+  const normalized = asConversationStatus(status) ?? "online";
+  return normalized === "online"
+    ? "bg-green-500"
+    : normalized === "idle"
+      ? "bg-yellow-500"
+      : normalized === "dnd"
+        ? "bg-red-500"
+        : "bg-gray-400";
+}
+
+function formatConversationActivity(activity: unknown) {
+  return typeof activity === "string" && activity.trim().length > 0 ? activity.trim() : null;
+}
+
+function getMostUrgentConversationStatus(items: ConversationChatStatusInfo[]) {
+  return items.reduce<ConversationPresenceStatus | undefined>((worstStatus, item) => {
+    if (!worstStatus) return item.status;
+    return CONVERSATION_STATUS_PRIORITY[item.status] > CONVERSATION_STATUS_PRIORITY[worstStatus]
+      ? item.status
+      : worstStatus;
+  }, undefined);
+}
+
+function formatConversationStatusSummary(items: ConversationChatStatusInfo[]) {
+  if (items.length === 0) return null;
+  if (items.length === 1) {
+    return items[0]!.activity;
+  }
+  const activities = items.filter((item) => item.activity).map((item) => `${item.name}: ${item.activity}`);
+  return activities.length > 0 ? activities.join(" · ") : null;
+}
 
 function getChatTags(chat: Pick<Chat, "metadata">): string[] {
   return Array.isArray(chat.metadata?.tags)
@@ -761,6 +813,34 @@ export function ChatSidebar() {
     const cfg = MODE_CONFIG[chat.mode] ?? MODE_CONFIG.conversation;
     const isActive = activeChatId === chat.id || (chat.groupId != null && chat.groupId === activeGroupId);
     const isSelected = selectedChatIds.has(chat.id);
+    const charIds = normalizeChatCharacterIds((chat as { characterIds?: unknown }).characterIds);
+    const convoMeta = chat.mode === "conversation" ? parseChatMetadata(chat.metadata) : undefined;
+    const chatCharStatuses = convoMeta?.conversationCharacterStatuses as
+      | Record<string, { status?: unknown; activity?: unknown }>
+      | undefined;
+    const conversationStatuses: ConversationChatStatusInfo[] =
+      chat.mode === "conversation"
+        ? charIds
+            .map((id) => {
+              const base = charLookup.get(id);
+              if (!base) return null;
+              const live = resolveLiveConversationStatus(convoMeta, id, presenceNow);
+              const snapshot = chatCharStatuses?.[id];
+              return {
+                id,
+                name: base.name,
+                status:
+                  live?.status ??
+                  asConversationStatus(snapshot?.status) ??
+                  asConversationStatus(base.conversationStatus) ??
+                  "online",
+                activity: formatConversationActivity(live?.activity ?? snapshot?.activity),
+              };
+            })
+            .filter((item): item is ConversationChatStatusInfo => item !== null)
+        : [];
+    const conversationStatusByCharacter = new Map(conversationStatuses.map((item) => [item.id, item]));
+    const conversationStatusSummary = formatConversationStatusSummary(conversationStatuses);
     return (
       <div
         role="button"
@@ -853,21 +933,12 @@ export function ChatSidebar() {
         {/* Chat avatar(s) or mode icon fallback — with unread badge overlay */}
         <div className="relative flex-shrink-0">
           {(() => {
-            const charIds = normalizeChatCharacterIds((chat as { characterIds?: unknown }).characterIds);
-            const convoMeta = chat.mode === "conversation" ? parseChatMetadata(chat.metadata) : undefined;
-            const chatCharStatuses = convoMeta?.conversationCharacterStatuses as
-              | Record<string, { status?: string }>
-              | undefined;
-            // Prefer the live override/schedule-derived status (matching the presence pill) over the
-            // generation-time snapshot, which only refreshes on the next generated message.
-            const resolveConvoStatus = (id: string): string | undefined =>
-              resolveLiveConversationStatus(convoMeta, id, presenceNow)?.status ?? chatCharStatuses?.[id]?.status;
             const avatars = charIds
               .slice(0, 3)
               .map((id) => {
                 const base = charLookup.get(id);
                 if (!base) return null;
-                const chatStatus = resolveConvoStatus(id);
+                const chatStatus = conversationStatusByCharacter.get(id)?.status;
                 return chatStatus ? { ...base, conversationStatus: chatStatus } : base;
               })
               .filter(Boolean) as {
@@ -880,29 +951,23 @@ export function ChatSidebar() {
             const isConvoMode = chat.mode === "conversation";
             const statusDot = (status?: string) => {
               if (!isConvoMode) return null;
-              const s = status ?? "online";
-              const color =
-                s === "online"
-                  ? "bg-green-500"
-                  : s === "idle"
-                    ? "bg-yellow-500"
-                    : s === "dnd"
-                      ? "bg-red-500"
-                      : "bg-gray-400";
               return (
                 <span
-                  className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-[0.1875rem] ring-[1.5px] ring-[var(--sidebar-background)] ${color}`}
+                  className={cn(
+                    "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-[0.1875rem] ring-[1.5px] ring-[var(--sidebar-background)]",
+                    conversationStatusDotClass(status),
+                  )}
                 />
               );
             };
-            const multiAvatarStatus = avatars.reduce<string | undefined>((worstStatus, avatar) => {
-              const nextStatus = avatar.conversationStatus ?? "online";
-              const priority = { online: 0, idle: 1, offline: 2, dnd: 3 } as const;
-              if (!worstStatus) return nextStatus;
-              return priority[nextStatus as keyof typeof priority] > priority[worstStatus as keyof typeof priority]
-                ? nextStatus
-                : worstStatus;
-            }, undefined);
+            const multiAvatarStatus = getMostUrgentConversationStatus(
+              avatars.map((avatar) => ({
+                id: "",
+                name: avatar.name,
+                status: asConversationStatus(avatar.conversationStatus) ?? "online",
+                activity: null,
+              })),
+            );
 
             if (avatars.length === 0) {
               return (
@@ -1001,6 +1066,11 @@ export function ChatSidebar() {
           >
             {chat.name}
           </span>
+          {conversationStatusSummary && (
+            <span className="mari-chrome-text-muted mt-0.5 block truncate text-[0.6875rem] leading-tight">
+              {conversationStatusSummary}
+            </span>
+          )}
         </div>
 
         {/* Branch count badge */}
