@@ -1110,6 +1110,8 @@ export function useGenerateSummary() {
         entry: ChatSummaryEntry | null;
         entries: ChatSummaryEntry[];
         messageIds: string[];
+        /** Subset of messageIds eligible to hide (summarized set minus the protected tail). */
+        hideMessageIds: string[];
       }>(`/chats/${chatId}/generate-summary`, {
         contextSize,
         rangeStartMessageId,

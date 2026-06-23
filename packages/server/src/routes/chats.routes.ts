@@ -61,10 +61,12 @@ import { DATA_DIR } from "../utils/data-dir.js";
 import { normalizeTimestampOverrides } from "../services/import/import-timestamps.js";
 import {
   appendNonLeadingSystemMessagesToLastUser,
+  computeSummaryHideIds,
   findTrackerContextInsertIndex,
   isManualTrackerCharacterId,
   parseExtra,
   resolveRoleplayChatSummary,
+  resolveRoleplaySummaryTail,
   isMessageHiddenFromAI,
   resolveBaseUrl,
   resolveActiveCharacterIds,
@@ -2880,11 +2882,22 @@ export async function chatsRoutes(app: FastifyInstance) {
     });
     if (!updatedChat) return reply.status(404).send({ error: "Chat not found" });
 
+    const messageIds = selectedMessages.map((message) => message.id);
+    // The subset eligible to be hidden when "Hide summarised messages" is on:
+    // the summarized messages minus the protected recent tail, so manual hiding
+    // honors `summaryTailMessages` exactly like the automatic path does.
+    const hideMessageIds = computeSummaryHideIds({
+      messages: allMessages,
+      entryMessageIds: messageIds,
+      tail: resolveRoleplaySummaryTail(chatMeta.summaryTailMessages),
+    });
+
     return {
       summary: combined,
       entry: createdEntry,
       entries: summaryEntries,
-      messageIds: selectedMessages.map((message) => message.id),
+      messageIds,
+      hideMessageIds,
     };
   });
 }

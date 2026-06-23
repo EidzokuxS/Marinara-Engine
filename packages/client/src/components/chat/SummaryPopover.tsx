@@ -67,7 +67,7 @@ interface SummaryPopoverProps {
   automaticSummaryEnabled?: boolean;
   activeAgentIds?: string[];
   summaryRunInterval?: number;
-  /** Per-chat persisted "Hide summarised messages" preference (metadata-backed). Undefined falls back to the legacy browser-local pref. */
+  /** Per-chat persisted "Hide summarised messages" preference (metadata-backed). Undefined/false means off (opt-in default). */
   hideSummarisedMessages?: boolean;
   /** How many recent messages stay visible when summarised messages are auto-hidden (roleplay tail). Default 10. */
   summaryTailMessages?: number;
@@ -509,9 +509,11 @@ export function SummaryPopover({
 
   const handleGenerate = useCallback(() => {
     if (!canGenerate) return;
-    const maybeHideSummarisedMessages = (messageIds: string[] | undefined) => {
-      if (!hideSummarisedResolved || !messageIds?.length) return;
-      bulkSetMessagesHiddenFromAI.mutate({ chatId, messageIds, hidden: true });
+    // Hide the server-computed tail-excluded subset, so manual generation honors
+    // `summaryTailMessages` (keep the last N visible) just like the auto path.
+    const maybeHideSummarisedMessages = (hideMessageIds: string[] | undefined) => {
+      if (!hideSummarisedResolved || !hideMessageIds?.length) return;
+      bulkSetMessagesHiddenFromAI.mutate({ chatId, messageIds: hideMessageIds, hidden: true });
     };
     if (sourceMode === "range") {
       setRangeStart(String(rangeLow));
@@ -525,7 +527,7 @@ export function SummaryPopover({
             }
             setEditingEntryId(null);
             setDraftEntry(null);
-            maybeHideSummarisedMessages(data.messageIds);
+            maybeHideSummarisedMessages(data.hideMessageIds);
           },
           onError: (error) => toast.error(summaryErrorMessage(error)),
         },
