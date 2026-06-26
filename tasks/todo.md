@@ -306,7 +306,12 @@
 - [x] Trace the remaining visible em dash leak in Game narration after Hermit.
 - [x] Apply final visible prose typography normalization on the non-narrative-only post-Hermit route.
 - [x] Verify server tests and server typecheck.
-- [ ] Decide widget gameplay model before expanding schema and UI.
+- [x] Decide widget gameplay model before expanding schema and UI.
+- [x] Promote selected widgets into canonical Game state sources of truth.
+- [x] Add universal default RPG widgets for health, money/resources, roll history, pressure, and relationship/faction posture.
+- [x] Expand setup/model widget generation options by genre, tone, campaign mode, and desired crunch level.
+- [x] Route canonical widget state into Justice, Emperor, Chariot, and the UI with strict ownership.
+- [ ] Add scene-aware UI styling hooks for widgets and the input block.
 
 ## Current Task Review
 
@@ -314,3 +319,22 @@
 - Verification passed: `pnpm --filter @marinara-engine/server test` (35/35) and `pnpm --filter @marinara-engine/server lint`.
 - Widget investigation found the current Chariot path is HUD-delta oriented: setup creates widgets, Chariot can update only existing widget IDs, the server validates/applies type-specific changes, and the client receives `widget_state_patch`.
 - Next design decision: turn selected widgets into bound gameplay trackers with explicit authority, thresholds, and routing into Justice/Emperor, while keeping Chariot as the UI/state delta owner.
+- Added shared canonical widget metadata: role, sourceOfTruth, authority, stateKey, affects, thresholds, styleHints, and structured roll log entries.
+- Added shared default gameplay widgets: Condition, Funds, Checks, Pressure, and Stances. New and existing Game sessions are normalized through this default set up to the new 8-widget cap.
+- Added `roll_log` widget type and a compact HUD renderer for recent Justice checks.
+- Justice now appends resolved rolls to the canonical roll log and emits the normal `widget_state_patch`, so the roll card and HUD history share the same source.
+- Chariot prompt now treats sourceOfTruth widgets as canonical RPG state and leaves roll logs to Justice/system.
+- Setup prompt now asks for up to 8 genre-aware gameplay widgets and includes taste-skill-inspired dials for expressive but bounded UI/material flavor.
+- Taste Skill source reviewed from `leonxlnx/taste-skill`; adapted principles only, no runtime dependency added.
+- Verification passed: `pnpm --filter @marinara-engine/server test` (37/37), `pnpm --filter @marinara-engine/server lint`, `pnpm --filter @marinara-engine/client lint`, and `pnpm --filter @marinara-engine/client build`.
+
+## Proposed Gameplay Direction
+
+- Core rule: gameplay widgets are canonical state, while cosmetic widgets are explicitly marked as display-only.
+- Universal baseline widgets: player health/condition, money/resources, roll/check log, active pressure/clock, and key relationship/faction stance.
+- Chariot owns widget state deltas and UI synchronization.
+- Justice reads relevant widget state for DCs, roll modifiers, consequences, and roll-card output.
+- Emperor reads widget pressures and thresholds for scene composition, encounter pressure, rewards, losses, and follow-up choices.
+- Tower reads only the visible scene impact, not raw mechanics authority.
+- The widget generator should choose templates by genre and crunch level, then let the model customize labels, currencies, thresholds, icons, and display flavor.
+- Scene styling should come from a bounded theme packet: current location/mood/danger/time-of-day can tune widget chrome, accent, and input surface without changing layout or hurting readability.

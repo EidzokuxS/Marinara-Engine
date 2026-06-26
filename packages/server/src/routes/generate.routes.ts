@@ -25,6 +25,8 @@ import {
   applyTrackerFieldLocksToGameStatePatch,
   normalizeTrackerFieldLocksForState,
   trackerFieldLocksAreEmpty,
+  appendRollToHudWidgets,
+  ensureDefaultGameplayHudWidgets,
   customAgentHasCapability,
   supportsXhighReasoningEffort,
   DEFAULT_CONVERSATION_PROMPT,
@@ -4849,15 +4851,18 @@ export async function generateRoutes(app: FastifyInstance) {
           ).trim();
 
         const activeHudWidgetsForAgents: HudWidget[] =
-          chatMode === "game" && Array.isArray(chatMeta.gameWidgetState)
-            ? (chatMeta.gameWidgetState as HudWidget[])
-            : chatMode === "game" &&
-                chatMeta.gameBlueprint &&
-                typeof chatMeta.gameBlueprint === "object" &&
-                !Array.isArray(chatMeta.gameBlueprint) &&
-                Array.isArray((chatMeta.gameBlueprint as { hudWidgets?: unknown }).hudWidgets)
-              ? ((chatMeta.gameBlueprint as { hudWidgets: HudWidget[] }).hudWidgets as HudWidget[])
-              : [];
+          chatMode === "game"
+            ? ensureDefaultGameplayHudWidgets(
+                Array.isArray(chatMeta.gameWidgetState)
+                  ? (chatMeta.gameWidgetState as HudWidget[])
+                  : chatMeta.gameBlueprint &&
+                      typeof chatMeta.gameBlueprint === "object" &&
+                      !Array.isArray(chatMeta.gameBlueprint) &&
+                      Array.isArray((chatMeta.gameBlueprint as { hudWidgets?: unknown }).hudWidgets)
+                    ? ((chatMeta.gameBlueprint as { hudWidgets: HudWidget[] }).hudWidgets as HudWidget[])
+                    : [],
+              )
+            : [];
         if (activeHudWidgetsForAgents.length > 0) {
           agentContext.memory._activeHudWidgets = activeHudWidgetsForAgents;
         }
@@ -5455,6 +5460,15 @@ export async function generateRoutes(app: FastifyInstance) {
           logger.debug("[tools] Omitted %d main-generation tools for Tower narrative-only mode", toolDefs.length);
           toolDefs = undefined;
         }
+        if (chatMode === "game" && activeHudWidgetsForAgents.length > 0) {
+          const persistedWidgetState = Array.isArray(chatMeta.gameWidgetState)
+            ? (chatMeta.gameWidgetState as HudWidget[])
+            : [];
+          if (JSON.stringify(persistedWidgetState) !== JSON.stringify(activeHudWidgetsForAgents)) {
+            await updateChatMetadataForTools({ gameWidgetState: activeHudWidgetsForAgents });
+            chatMeta = { ...chatMeta, gameWidgetState: activeHudWidgetsForAgents };
+          }
+        }
         if (enableChatTools && toolDefs && toolDefs.length > 0 && conn.treatAsLocalEndpoint === "true") {
           const toolLines = toolDefs.map(
             (t) =>
@@ -6001,11 +6015,12 @@ export async function generateRoutes(app: FastifyInstance) {
                   "[justice] resolved verdict",
                 );
                 if (resolved.rolled !== null && resolved.dc !== null) {
+                  const checkLabel = summarizeJusticeCheckLabel(input.userMessage);
                   trySendSseEvent(reply, {
                     type: "game_roll_resolved",
                     data: {
                       source: "justice",
-                      check: summarizeJusticeCheckLabel(input.userMessage),
+                      check: checkLabel,
                       die: "1d20",
                       rolled: resolved.rolled,
                       dc: resolved.dc,
@@ -6018,6 +6033,32 @@ export async function generateRoutes(app: FastifyInstance) {
                       reasoning: resolved.reasoning,
                     },
                   });
+                  const currentWidgets = Array.isArray(chatMeta.gameWidgetState)
+                    ? (chatMeta.gameWidgetState as HudWidget[])
+                    : activeHudWidgetsForAgents;
+                  const rollWidgetState = appendRollToHudWidgets(currentWidgets, {
+                    id: `justice_${Date.now().toString(36)}`,
+                    check: checkLabel,
+                    notation: "1d20",
+                    rolled: resolved.rolled,
+                    dc: resolved.dc,
+                    total: resolved.rolled,
+                    margin: resolved.margin ?? resolved.rolled - resolved.dc,
+                    success: resolved.branch === "success",
+                    outcome: resolved.resolvedOutcome,
+                  });
+                  if (rollWidgetState.changed) {
+                    await updateChatMetadataForTools({ gameWidgetState: rollWidgetState.widgets });
+                    chatMeta = { ...chatMeta, gameWidgetState: rollWidgetState.widgets };
+                    agentContext.memory._activeHudWidgets = rollWidgetState.widgets;
+                    trySendSseEvent(reply, {
+                      type: "widget_state_patch",
+                      data: {
+                        widgets: rollWidgetState.widgets,
+                        source: "justice",
+                      },
+                    });
+                  }
                 }
                 const directive =
                   chatMode === "game"

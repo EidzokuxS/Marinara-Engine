@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { HudWidget } from "@marinara-engine/shared";
+import { appendRollToHudWidgets, ensureDefaultGameplayHudWidgets, type HudWidget } from "@marinara-engine/shared";
 import { applyChariotWidgetUpdates, normalizeChariotWidgetUpdates } from "../tarot/chariot-widgets.js";
 
 function widgets(): HudWidget[] {
@@ -107,5 +107,50 @@ describe("Chariot widget deltas", () => {
 
     assert.equal(result.changed, false);
     assert.deepEqual(result.widgets, source);
+  });
+
+  it("ensures default gameplay widgets as canonical RPG state", () => {
+    const ensured = ensureDefaultGameplayHudWidgets([]);
+
+    assert.deepEqual(
+      ensured.map((widget) => [widget.id, widget.role, widget.sourceOfTruth]),
+      [
+        ["player_condition", "health", true],
+        ["player_funds", "currency", true],
+        ["justice_rolls", "roll_log", true],
+        ["scene_pressure", "pressure_clock", true],
+        ["key_stances", "relationship", true],
+      ],
+    );
+  });
+
+  it("appends Justice rolls into the canonical roll log widget", () => {
+    const result = appendRollToHudWidgets([], {
+      id: "roll_1",
+      check: "force the lock",
+      notation: "1d20",
+      rolled: 7,
+      dc: 12,
+      total: 7,
+      margin: -5,
+      success: false,
+      outcome: "The lock holds.",
+    });
+
+    assert.equal(result.changed, true);
+    const rollWidget = result.widgets.find((widget) => widget.role === "roll_log");
+    assert.ok(rollWidget);
+    assert.equal(rollWidget.config.rollEntries?.length, 1);
+    assert.deepEqual(rollWidget.config.rollEntries?.[0], {
+      id: "roll_1",
+      check: "force the lock",
+      notation: "1d20",
+      rolled: 7,
+      dc: 12,
+      total: 7,
+      margin: -5,
+      success: false,
+      outcome: "The lock holds.",
+    });
   });
 });

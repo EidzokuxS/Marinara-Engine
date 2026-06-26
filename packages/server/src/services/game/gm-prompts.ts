@@ -445,11 +445,18 @@ function buildWidgetSummaryLines(widgets: HudWidget[]): string[] {
     if (widget.type === "list" && Array.isArray(config.items) && config.items.length > 0) {
       return `- ${widget.id} (${widget.type}): ${config.items.join("; ")}`;
     }
+    if (widget.type === "roll_log" && Array.isArray(config.rollEntries) && config.rollEntries.length > 0) {
+      const entries = config.rollEntries
+        .slice(0, 3)
+        .map((entry) => `${entry.check}: ${entry.rolled} vs DC ${entry.dc} (${entry.margin >= 0 ? "+" : ""}${entry.margin})`)
+        .join("; ");
+      return `- ${widget.id} (${widget.type}, ${widget.role ?? "roll_log"}): ${entries}`;
+    }
     if (widget.type === "timer") {
       return `- ${widget.id} (${widget.type}): ${config.running ? "running" : "stopped"} ${config.seconds ?? 0}s`;
     }
     const value = config.value ?? config.count ?? JSON.stringify(config);
-    return `- ${widget.id} (${widget.type}): ${value}`;
+    return `- ${widget.id} (${widget.type}${widget.role ? `, role=${widget.role}` : ""}${widget.sourceOfTruth ? ", canonical" : ""}): ${value}`;
   });
 }
 
@@ -1234,12 +1241,12 @@ export function buildGmFormatReminder(
     if (ctx.chariotHandlesWidgets) {
       lines.push(
         `- Chariot owns HUD widget updates after your turn. Do NOT emit [widget:] commands; narrate the real events and let Chariot update the visible dashboard.`,
-        `- HUD widgets are visual UI state only. Player stats, inventory, party member HP, party relationships, and other durable game facts remain in their own canonical systems.`,
+        `- Widgets with sourceOfTruth=true are canonical Game state. Let Chariot update them, Justice read them for checks, and Emperor use them for scene pressure. roll_log is Justice/system owned.`,
       );
     } else {
       lines.push(
         `- Widget usage: emit widget commands for every real change to these visible HUD widgets. Do not skip a changed widget just because another system tracks related player or party stats.`,
-        `- HUD widgets are visual UI state only. Player stats, inventory, party member HP, party relationships, and other durable game facts remain in their own canonical systems; use [widget:] only to mirror a visible widget when that widget's displayed value should change.`,
+        `- Widgets with sourceOfTruth=true are canonical Game state. Update them only when the fiction creates a real state change.`,
         `- Command mapping: value = bars/gauges, count = counters, stat = one stat_block entry, add/remove = rotating list items, running/seconds = timers.`,
         `- Widget commands: [widget: id, value: n] [widget: id, stat: "Name", value: x] [widget: id, count: n] [widget: id, add: "Item"] [widget: id, remove: "Item"] [widget: id, running: true, seconds: 60]`,
         `- List widgets: keep at most 5 short entries visible; remove stale items freely.`,
@@ -1420,14 +1427,26 @@ export function buildSetupPrompt(ctx: SetupPromptContext = {}): string {
           `  counter: config = { count: number }`,
           `  stat_block: config = { stats: [{ name: string, value: string|number }] }`,
           `  list: config = { items: string[] }`,
+          `  roll_log: config = { rollEntries: [], maxEntries: number }`,
           `  timer: config = { seconds: number, running: boolean }`,
+          ``,
+          `Gameplay widgets may be sources of truth. When a widget should affect play, include role, sourceOfTruth, authority, stateKey, affects, and optional thresholds.`,
+          `Roles: health, condition, currency, resource, roll_log, pressure_clock, relationship, faction, objective, inventory, custom.`,
+          `Authority: chariot for changing tracker state, justice for check/roll records, emperor for scenario pressure proposals, system for automatic runtime state.`,
+          `Affects targets: dc, roll, scene_pressure, encounter, reward, choice, narrative.`,
+          `Default useful RPG roles are already guaranteed by the engine when missing: health/condition, currency/resource, roll_log, pressure_clock, and relationship/faction stance. Add genre-specific widgets on top of these, or rename/style equivalents if they fit the world better.`,
+          `Use stateKey as a compact canonical path such as player.condition, player.currency, system.rolls, world.pressure, npc.ren.trust, faction.guild.stance, objective.main.`,
+          ``,
+          `Taste direction for widget UI: DESIGN_VARIANCE 8, MOTION_INTENSITY 6, VISUAL_DENSITY 6. This means expressive labels, setting-flavored materials, and compact cockpit density are welcome. Keep the schema readable and stable.`,
+          `Use styleHints when useful: { intensity: "strict|balanced|expressive", material: "brass gauge|holo glass|blood vellum|paper ledger|terminal phosphor", motion: "subtle|active|cinematic" }.`,
           ``,
           `If you design a list widget, treat it as a compact rotating list with a hard cap of 5 entries. Choose items worth surfacing right now, and expect older entries to be swapped out as the situation changes.`,
           `Keep each list item concise and label-like when possible. Avoid long multi-clause sentences, because the same text may need to be referenced later for removal or swapping.`,
           ``,
-          `Design up to 4 widgets that fit the genre. IMPORTANT: Party member bonds/reputation MUST be a SINGLE stat_block widget with one stat per member (e.g. stats: [{name: "Nadia", value: 50}, {name: "Vlad", value: 30}]) — do NOT create separate widgets per party member. That single widget counts as 1 of 4.`,
-          `Romance = stat_block for bonds + mood gauge. Horror = sanity gauge + clue list. RPG = health/mana bars.`,
-          `Inventory is handled separately — do NOT create inventory widgets.`,
+          `Design up to 8 widgets total. Prefer 5-7 in most games: enough to feel like an RPG, sparse enough to stay playable.`,
+          `Party member bonds/reputation MUST be a SINGLE stat_block widget with one stat per member (e.g. stats: [{name: "Nadia", value: 50}, {name: "Vlad", value: 30}]); do not create separate widgets per party member.`,
+          `Romance = bonds/chemistry + social risk. Horror = condition/sanity + clue list + pressure clock. Heist = funds/resources + suspicion + objective. Dark fantasy = wounds/corruption + coin + omen clock. Sci-fi = suit integrity/credits/alert level.`,
+          `Inventory is handled separately. Only create inventory widgets when the campaign fantasy specifically needs visible slot pressure or gear loadout as a core mechanic.`,
           `</blueprint_widget_types>`,
           ``,
         ]
@@ -1523,13 +1542,20 @@ export function buildSetupPrompt(ctx: SetupPromptContext = {}): string {
           `    "hudWidgets": [`,
           `      {`,
           `        "id": "widget_unique_id",`,
-          `        "type": "progress_bar|gauge|relationship_meter|counter|stat_block|list|timer",`,
+          `        "type": "progress_bar|gauge|relationship_meter|counter|stat_block|list|inventory_grid|roll_log|timer",`,
           `        "label": "Display Name",`,
           `        "icon": "emoji",`,
           `        "position": "hud_left|hud_right",`,
           `        "accent": "#hexcolor",`,
+          `        "role": "health|condition|currency|resource|roll_log|pressure_clock|relationship|faction|objective|inventory|custom",`,
+          `        "sourceOfTruth": true,`,
+          `        "authority": "chariot|justice|emperor|system|player",`,
+          `        "stateKey": "compact.canonical.path",`,
+          `        "affects": ["dc|roll|scene_pressure|encounter|reward|choice|narrative"],`,
+          `        "thresholds": [{ "at": number, "label": "short threshold", "effect": "short gameplay effect" }],`,
+          `        "styleHints": { "intensity": "strict|balanced|expressive", "material": "setting-flavored UI material", "motion": "subtle|active|cinematic" },`,
           `        "config": {`,
-          `          "_note_config": "For bars/gauges/meters, set startingValue to the first-turn value, set value equal to startingValue, and set max separately. For counters use count, for stat_blocks use stats, for lists use items, and for timers use seconds.",`,
+          `          "_note_config": "For bars/gauges/meters, set startingValue to the first-turn value, set value equal to startingValue, and set max separately. For counters use count, for stat_blocks use stats, for lists use items, for roll_log use rollEntries: [] and maxEntries, and for timers use seconds.",`,
           `          "_note_valueHints": "For stat_block widgets with string values, add valueHints: {statName: 'option1 | option2 | option3'} so the scene model knows the valid choices. Example: for a 'class' stat, valueHints: {'class': 'alpha | omega | beta'}"`,
           `        }`,
           `      }`,

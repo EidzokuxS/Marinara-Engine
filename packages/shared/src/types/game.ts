@@ -453,12 +453,55 @@ export type HudWidgetType =
   | "stat_block"
   | "list"
   | "inventory_grid"
+  | "roll_log"
   | "timer";
+
+export type HudWidgetRole =
+  | "health"
+  | "condition"
+  | "currency"
+  | "resource"
+  | "roll_log"
+  | "pressure_clock"
+  | "relationship"
+  | "faction"
+  | "objective"
+  | "inventory"
+  | "custom";
+
+export type HudWidgetAuthority = "chariot" | "justice" | "emperor" | "system" | "player";
+
+export type HudWidgetEffectTarget =
+  | "dc"
+  | "roll"
+  | "scene_pressure"
+  | "encounter"
+  | "reward"
+  | "choice"
+  | "narrative";
 
 /** Milestone marker on a progress/relationship bar. */
 export interface WidgetMilestone {
   at: number;
   label: string;
+}
+
+export interface WidgetThreshold {
+  at: number;
+  label: string;
+  effect?: string;
+}
+
+export interface WidgetRollLogEntry {
+  id: string;
+  check: string;
+  notation?: string;
+  rolled: number;
+  dc: number;
+  total: number;
+  margin: number;
+  success: boolean;
+  outcome?: string;
 }
 
 /** A model-defined HUD widget. */
@@ -469,6 +512,17 @@ export interface HudWidget {
   icon?: string;
   position: "hud_left" | "hud_right";
   accent?: string;
+  role?: HudWidgetRole;
+  sourceOfTruth?: boolean;
+  authority?: HudWidgetAuthority;
+  stateKey?: string;
+  affects?: HudWidgetEffectTarget[];
+  thresholds?: WidgetThreshold[];
+  styleHints?: {
+    intensity?: "strict" | "balanced" | "expressive";
+    material?: string;
+    motion?: "subtle" | "active" | "cinematic";
+  };
   config: HudWidgetConfig;
 }
 
@@ -491,6 +545,10 @@ export interface HudWidgetConfig {
 
   // list
   items?: string[];
+
+  // roll_log
+  rollEntries?: WidgetRollLogEntry[];
+  maxEntries?: number;
 
   // inventory_grid
   slots?: number;

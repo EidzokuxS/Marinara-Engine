@@ -45,7 +45,7 @@ interface WidgetEditorDraft {
 }
 
 /** Maximum number of custom HUD widgets displayed. */
-const MAX_WIDGETS = 4;
+const MAX_WIDGETS = 8;
 
 const GAME_WIDGET_SHELL_CLASS =
   "marinara-chat-popover overflow-hidden rounded-lg border border-[var(--marinara-chat-chrome-panel-border)] bg-[var(--marinara-chat-chrome-panel-bg)] text-[var(--marinara-chat-chrome-panel-text)] shadow-[0_10px_28px_rgba(0,0,0,0.24)] backdrop-blur-md transition-colors";
@@ -110,6 +110,10 @@ function describeWidget(widget: HudWidget) {
     }
     case "inventory_grid":
       return `${widget.config.slots ?? 0} slots`;
+    case "roll_log": {
+      const entries = Array.isArray(widget.config.rollEntries) ? widget.config.rollEntries.length : 0;
+      return entries === 1 ? "1 check" : `${entries} checks`;
+    }
     case "timer":
       return `${widget.config.seconds ?? 0}s remaining`;
     default:
@@ -126,7 +130,12 @@ function createWidgetEditorDraft(widget: HudWidget): WidgetEditorDraft {
           ? String(widget.config.startingValue)
           : "",
     max: widget.config.max != null ? String(widget.config.max) : "",
-    count: widget.config.count != null ? String(widget.config.count) : "",
+    count:
+      widget.type === "roll_log"
+        ? String(widget.config.maxEntries ?? 5)
+        : widget.config.count != null
+          ? String(widget.config.count)
+          : "",
     seconds: widget.config.seconds != null ? String(widget.config.seconds) : "",
     running: Boolean(widget.config.running),
     stats: Array.isArray(widget.config.stats)
@@ -208,6 +217,13 @@ function buildUpdatedWidgetConfig(
         .split(/\r?\n/)
         .map((item) => item.trim())
         .filter(Boolean);
+      return nextConfig;
+    case "roll_log":
+      nextConfig.maxEntries = parseNumberDraft(
+        draft.count,
+        typeof widget.config.maxEntries === "number" ? widget.config.maxEntries : 5,
+        { integer: true, min: 1, max: 10 },
+      );
       return nextConfig;
     case "timer":
       nextConfig.seconds = parseNumberDraft(
@@ -472,6 +488,8 @@ function WidgetBody({ widget }: { widget: HudWidget }) {
       return <ListWidget widget={widget} />;
     case "inventory_grid":
       return <InventoryGridWidget widget={widget} />;
+    case "roll_log":
+      return <RollLogWidget widget={widget} />;
     case "timer":
       return <TimerWidget widget={widget} />;
     default:
@@ -664,6 +682,20 @@ function WidgetEditorModal({
               className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--primary)]"
             />
             <span className="block text-xs text-[var(--muted-foreground)]">Enter one item per line.</span>
+          </label>
+        )}
+
+        {widget.type === "roll_log" && (
+          <label className="space-y-1.5">
+            <span className="text-xs font-medium text-[var(--muted-foreground)]">Max entries</span>
+            <input
+              type="number"
+              min={1}
+              max={10}
+              value={draft.count}
+              onChange={(event) => setDraft((current) => ({ ...current, count: event.target.value }))}
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--primary)]"
+            />
           </label>
         )}
 
@@ -1175,6 +1207,46 @@ function InventoryGridWidget({ widget }: { widget: HudWidget }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function RollLogWidget({ widget }: { widget: HudWidget }) {
+  const entries = Array.isArray(widget.config.rollEntries) ? widget.config.rollEntries : [];
+  const accent = widget.accent ?? "#38bdf8";
+
+  if (entries.length === 0) {
+    return <p className={cn("text-[0.5625rem] italic", GAME_WIDGET_MUTED_CLASS)}>No checks yet</p>;
+  }
+
+  return (
+    <div className="space-y-1">
+      {entries.slice(0, Math.max(1, Math.min(5, widget.config.maxEntries ?? 5))).map((entry) => {
+        const marginText = `${entry.margin >= 0 ? "+" : ""}${entry.margin}`;
+        return (
+          <div
+            key={entry.id}
+            className="rounded border border-[var(--marinara-chat-chrome-panel-divider)]/65 bg-[var(--marinara-chat-chrome-input-bg)] px-1.5 py-1"
+          >
+            <div className="flex items-center justify-between gap-2 text-[0.5rem] uppercase">
+              <span className="truncate font-semibold text-[var(--marinara-chat-chrome-panel-title)]">
+                {entry.check}
+              </span>
+              <span style={{ color: entry.success ? "#22c55e" : "#f87171" }}>
+                {entry.success ? "Pass" : "Fail"}
+              </span>
+            </div>
+            <div className="mt-0.5 flex items-center justify-between gap-2 text-[0.5625rem]">
+              <span className="font-mono text-[var(--marinara-chat-chrome-panel-text)]">
+                {entry.notation ?? "1d20"} {entry.rolled} vs DC {entry.dc}
+              </span>
+              <span className="font-mono font-bold" style={{ color: accent }}>
+                {marginText}
+              </span>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

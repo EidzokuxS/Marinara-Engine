@@ -101,6 +101,10 @@ import {
   serializeResolvedSkillCheckTag,
   applyTrackerFieldLocksToGameStatePatch,
   parseTrackerFieldLocks,
+  ensureDefaultGameplayHudWidgets,
+  GAMEPLAY_WIDGET_ROLES,
+  HUD_WIDGET_TYPES,
+  MAX_GAME_HUD_WIDGETS,
 } from "@marinara-engine/shared";
 import { mergeCustomParameters, parseGameStateRow } from "./generate/generate-route-utils.js";
 import {
@@ -512,25 +516,48 @@ async function addGeneratedIllustrationToGallery(opts: {
 // Validation Schemas
 // ──────────────────────────────────────────────
 
-const MAX_GAME_HUD_WIDGETS = 4;
+const HUD_WIDGET_TYPE_VALUES = [...HUD_WIDGET_TYPES] as [
+  (typeof HUD_WIDGET_TYPES)[number],
+  ...(typeof HUD_WIDGET_TYPES)[number][],
+];
+const GAMEPLAY_WIDGET_ROLE_VALUES = [...GAMEPLAY_WIDGET_ROLES] as [
+  (typeof GAMEPLAY_WIDGET_ROLES)[number],
+  ...(typeof GAMEPLAY_WIDGET_ROLES)[number][],
+];
 const trimmedWidgetString = (max: number) => z.string().trim().min(1).max(max);
 
 const hudWidgetSchema = z.object({
   id: trimmedWidgetString(80),
-  type: z.enum([
-    "progress_bar",
-    "gauge",
-    "relationship_meter",
-    "counter",
-    "stat_block",
-    "list",
-    "inventory_grid",
-    "timer",
-  ]),
+  type: z.enum(HUD_WIDGET_TYPE_VALUES),
   label: trimmedWidgetString(120),
   icon: z.string().trim().max(16).optional(),
   position: z.enum(["hud_left", "hud_right"]),
   accent: z.string().trim().max(32).optional(),
+  role: z.enum(GAMEPLAY_WIDGET_ROLE_VALUES).optional(),
+  sourceOfTruth: z.boolean().optional(),
+  authority: z.enum(["chariot", "justice", "emperor", "system", "player"]).optional(),
+  stateKey: z.string().trim().max(120).optional(),
+  affects: z
+    .array(z.enum(["dc", "roll", "scene_pressure", "encounter", "reward", "choice", "narrative"]))
+    .max(8)
+    .optional(),
+  thresholds: z
+    .array(
+      z.object({
+        at: z.number(),
+        label: z.string().trim().max(80),
+        effect: z.string().trim().max(200).optional(),
+      }),
+    )
+    .max(8)
+    .optional(),
+  styleHints: z
+    .object({
+      intensity: z.enum(["strict", "balanced", "expressive"]).optional(),
+      material: z.string().trim().max(80).optional(),
+      motion: z.enum(["subtle", "active", "cinematic"]).optional(),
+    })
+    .optional(),
   config: z.record(z.unknown()).default({}),
 });
 
@@ -3620,20 +3647,34 @@ export async function gameRoutes(app: FastifyInstance) {
           .array(
             z.object({
               id: z.string(),
-              type: z.enum([
-                "progress_bar",
-                "gauge",
-                "relationship_meter",
-                "counter",
-                "stat_block",
-                "list",
-                "inventory_grid",
-                "timer",
-              ]),
+              type: z.enum(HUD_WIDGET_TYPE_VALUES),
               label: z.string(),
               icon: z.string().optional(),
               position: z.enum(["hud_left", "hud_right"]),
               accent: z.string().optional(),
+              role: z.enum(GAMEPLAY_WIDGET_ROLE_VALUES).optional(),
+              sourceOfTruth: z.boolean().optional(),
+              authority: z.enum(["chariot", "justice", "emperor", "system", "player"]).optional(),
+              stateKey: z.string().optional(),
+              affects: z
+                .array(z.enum(["dc", "roll", "scene_pressure", "encounter", "reward", "choice", "narrative"]))
+                .optional(),
+              thresholds: z
+                .array(
+                  z.object({
+                    at: z.number(),
+                    label: z.string(),
+                    effect: z.string().optional(),
+                  }),
+                )
+                .optional(),
+              styleHints: z
+                .object({
+                  intensity: z.enum(["strict", "balanced", "expressive"]).optional(),
+                  material: z.string().optional(),
+                  motion: z.enum(["subtle", "active", "cinematic"]).optional(),
+                })
+                .optional(),
               config: z.record(z.unknown()),
             }),
           )
@@ -3679,6 +3720,7 @@ export async function gameRoutes(app: FastifyInstance) {
       if (parsed.success) {
         normalizeStatBlocks(parsed.data.hudWidgets);
         normalizeSetupHudWidgetStartingValues(parsed.data.hudWidgets);
+        parsed.data.hudWidgets = ensureDefaultGameplayHudWidgets(parsed.data.hudWidgets as HudWidget[]) as typeof parsed.data.hudWidgets;
         updates.gameBlueprint = parsed.data;
       } else {
         // Last-ditch recovery: keep the user's HUD widgets even if campaignPlan
@@ -3695,7 +3737,7 @@ export async function gameRoutes(app: FastifyInstance) {
         if (hudOnly.success && hudOnly.data.hudWidgets.length > 0) {
           normalizeStatBlocks(hudOnly.data.hudWidgets);
           normalizeSetupHudWidgetStartingValues(hudOnly.data.hudWidgets);
-          updates.gameBlueprint = { hudWidgets: hudOnly.data.hudWidgets };
+          updates.gameBlueprint = { hudWidgets: ensureDefaultGameplayHudWidgets(hudOnly.data.hudWidgets) };
         }
       }
     }
@@ -3705,8 +3747,9 @@ export async function gameRoutes(app: FastifyInstance) {
         updates.gameBlueprint && typeof updates.gameBlueprint === "object" && !Array.isArray(updates.gameBlueprint)
           ? (updates.gameBlueprint as Record<string, unknown>)
           : {};
-      updates.gameBlueprint = { ...currentBlueprint, hudWidgets: customHudWidgets };
-      updates.gameWidgetState = customHudWidgets;
+      const canonicalWidgets = ensureDefaultGameplayHudWidgets(customHudWidgets);
+      updates.gameBlueprint = { ...currentBlueprint, hudWidgets: canonicalWidgets };
+      updates.gameWidgetState = canonicalWidgets;
       const currentSetupConfig =
         updates.gameSetupConfig &&
         typeof updates.gameSetupConfig === "object" &&

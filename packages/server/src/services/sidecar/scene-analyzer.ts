@@ -119,6 +119,8 @@ function widgetUpdateHint(w: HudWidget): string {
     case "list":
     case "inventory_grid":
       return `{"widgetId":"${w.id}","add":"<item>"} or {"widgetId":"${w.id}","remove":"<item>"}`;
+    case "roll_log":
+      return `roll_log is Justice/system owned; do not update directly`;
     case "timer":
       return `{"widgetId":"${w.id}","running":<bool>,"seconds":<number>}`;
     case "stat_block": {
@@ -156,6 +158,13 @@ function widgetStateSummary(w: HudWidget): string {
     case "inventory_grid": {
       const items = (w.config.contents ?? []).map((c) => c.name).join(", ");
       return `${w.id} "${w.label}" (inventory): [${items}]`;
+    }
+    case "roll_log": {
+      const entries = (w.config.rollEntries ?? [])
+        .slice(0, 3)
+        .map((entry) => `${entry.check} ${entry.rolled}/DC${entry.dc}`)
+        .join(", ");
+      return `${w.id} "${w.label}" (roll_log): [${entries}]`;
     }
     case "timer":
       return `${w.id} "${w.label}" (timer): ${w.config.running ? "running" : "stopped"} ${w.config.seconds ?? 0}s`;

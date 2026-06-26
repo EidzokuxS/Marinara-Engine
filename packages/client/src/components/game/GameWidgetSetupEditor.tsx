@@ -5,6 +5,9 @@ import { useMemo, useRef, useState } from "react";
 import { Download, Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import {
+  HUD_WIDGET_TYPES,
+  MAX_GAME_HUD_WIDGETS,
+  isHudWidgetType,
   normalizeTextForMatch,
   type HudWidget,
   type HudWidgetConfig,
@@ -13,20 +16,11 @@ import {
 import { cn } from "../../lib/utils";
 import { DraftNumberInput } from "../ui/DraftNumberInput";
 
-export const MAX_GAME_SETUP_WIDGETS = 4;
+export const MAX_GAME_SETUP_WIDGETS = MAX_GAME_HUD_WIDGETS;
 const GAME_WIDGET_EXPORT_KIND = "marinara-game-hud-widgets";
 const GAME_WIDGET_EXPORT_VERSION = 1;
 
-const WIDGET_TYPES: readonly HudWidgetType[] = [
-  "progress_bar",
-  "gauge",
-  "relationship_meter",
-  "counter",
-  "stat_block",
-  "list",
-  "inventory_grid",
-  "timer",
-];
+const WIDGET_TYPES: readonly HudWidgetType[] = HUD_WIDGET_TYPES;
 
 const DEFAULT_ACCENTS: Record<HudWidgetType, string> = {
   progress_bar: "#a78bfa",
@@ -36,6 +30,7 @@ const DEFAULT_ACCENTS: Record<HudWidgetType, string> = {
   stat_block: "#f59e0b",
   list: "#14b8a6",
   inventory_grid: "#94a3b8",
+  roll_log: "#38bdf8",
   timer: "#fb7185",
 };
 
@@ -47,24 +42,12 @@ const DEFAULT_ICONS: Record<HudWidgetType, string> = {
   stat_block: "▦",
   list: "☰",
   inventory_grid: "▣",
+  roll_log: "d20",
   timer: "◷",
 };
 
 const WIDGET_NUMBER_INPUT_CLASS =
   "w-full rounded-lg border border-transparent bg-[var(--secondary)] px-2.5 py-2 text-xs text-[var(--foreground)] outline-none transition-colors focus:border-[var(--primary)]/40";
-
-function isHudWidgetType(value: unknown): value is HudWidgetType {
-  return (
-    value === "progress_bar" ||
-    value === "gauge" ||
-    value === "relationship_meter" ||
-    value === "counter" ||
-    value === "stat_block" ||
-    value === "list" ||
-    value === "inventory_grid" ||
-    value === "timer"
-  );
-}
 
 function formatWidgetTypeLabel(type: HudWidgetType) {
   return type
@@ -162,6 +145,8 @@ function defaultWidgetConfig(type: HudWidgetType): HudWidgetConfig {
       return { items: [] };
     case "inventory_grid":
       return { slots: 8, contents: [] };
+    case "roll_log":
+      return { rollEntries: [], maxEntries: 5 };
     case "timer":
       return { seconds: 60, running: false };
   }
@@ -216,6 +201,14 @@ function normalizeConfig(type: HudWidgetType, config: unknown): HudWidgetConfig 
     };
   }
 
+  if (type === "roll_log") {
+    return {
+      ...source,
+      rollEntries: Array.isArray(source.rollEntries) ? source.rollEntries : [],
+      maxEntries: Math.round(parseNumber(source.maxEntries, 5, 1)),
+    };
+  }
+
   return {
     ...source,
     seconds: Math.round(parseNumber(source.seconds, 60, 0)),
@@ -260,6 +253,13 @@ export function normalizeGameHudWidgets(value: unknown): HudWidget[] {
       icon: typeof raw.icon === "string" ? raw.icon.slice(0, 8) : DEFAULT_ICONS[type],
       position: raw.position === "hud_right" ? "hud_right" : "hud_left",
       accent: typeof raw.accent === "string" && raw.accent.trim() ? raw.accent.trim() : DEFAULT_ACCENTS[type],
+      role: raw.role,
+      sourceOfTruth: raw.sourceOfTruth === true,
+      authority: raw.authority,
+      stateKey: typeof raw.stateKey === "string" && raw.stateKey.trim() ? raw.stateKey.trim() : undefined,
+      affects: Array.isArray(raw.affects) ? raw.affects : undefined,
+      thresholds: Array.isArray(raw.thresholds) ? raw.thresholds : undefined,
+      styleHints: raw.styleHints && typeof raw.styleHints === "object" ? raw.styleHints : undefined,
       config: normalizeConfig(type, raw.config),
     });
   }
@@ -720,6 +720,22 @@ function WidgetConfigFields({
           />
         </label>
       </div>
+    );
+  }
+
+  if (widget.type === "roll_log") {
+    return (
+      <label className="mt-2 block space-y-1">
+        <span className="text-[0.625rem] font-medium text-[var(--muted-foreground)]">Max entries</span>
+        <DraftNumberInput
+          min={1}
+          value={parseNumber(widget.config.maxEntries, 5, 1)}
+          disabled={disabled}
+          onCommit={(next) => onConfigChange({ maxEntries: Math.round(next) })}
+          selectOnFocus
+          className={WIDGET_NUMBER_INPUT_CLASS}
+        />
+      </label>
     );
   }
 
