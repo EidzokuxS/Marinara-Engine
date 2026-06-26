@@ -1,7 +1,15 @@
 // ──────────────────────────────────────────────
 // React Query: Chat hooks
 // ──────────────────────────────────────────────
-import { useQuery, useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
+import {
+  useQuery,
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+  type InfiniteData,
+  type QueryClient,
+} from "@tanstack/react-query";
+import { toast } from "sonner";
 import { api } from "../lib/api-client";
 import { useChatStore } from "../stores/chat.store";
 import { useAgentStore } from "../stores/agent.store";
@@ -11,6 +19,7 @@ import { useUIStore } from "../stores/ui.store";
 import { clearBrowserRuntimeCaches } from "../lib/browser-runtime";
 import { ApiError } from "../lib/api-client";
 import { lorebookKeys } from "./use-lorebooks";
+import { achievementKeys, trackAchievementEvent } from "./use-achievements";
 import type {
   Chat,
   ChatMemoryChunk,
@@ -37,6 +46,8 @@ export const chatKeys = {
 };
 
 const RECENT_MESSAGE_CONTENT_EDIT_TTL_MS = 5 * 60 * 1000;
+const chatMetadataMutationVersions = new Map<string, number>();
+const chatMetadataFieldVersions = new Map<string, Map<string, number>>();
 
 interface RecentMessageContentEdit {
   chatId: string;
@@ -150,6 +161,7 @@ export function useChats() {
   return useQuery({
     queryKey: chatKeys.list(),
     queryFn: () => api.get<Chat[]>("/chats"),
+    placeholderData: (previousData) => previousData,
     staleTime: 10_000,
     refetchOnMount: "always",
     refetchOnReconnect: true,
@@ -168,6 +180,11 @@ export function useChat(id: string | null) {
     queryFn: () => api.get<Chat>(`/chats/${id}`),
     enabled: !!id,
     staleTime: 60_000,
+    retry: (failureCount, error) => {
+      const status = error instanceof ApiError ? error.status : 0;
+      if (status >= 400 && status < 500 && status !== 408 && status !== 429) return false;
+      return failureCount < 3;
+    },
   });
 }
 
@@ -312,7 +329,7 @@ export function useChatGroup(groupId: string | null) {
   });
 }
 
-type DeleteChatInput = string | { id: string; groupId?: string | null };
+type DeleteChatInput = string | { id: string; groupId?: string | null; force?: boolean };
 
 function getDeleteChatId(input: DeleteChatInput) {
   return typeof input === "string" ? input : input.id;
@@ -320,6 +337,103 @@ function getDeleteChatId(input: DeleteChatInput) {
 
 function getDeleteChatGroupId(input: DeleteChatInput) {
   return typeof input === "string" ? null : (input.groupId ?? null);
+}
+
+function getDeleteChatForce(input: DeleteChatInput) {
+  return typeof input === "string" ? false : input.force === true;
+}
+
+function chatMutationErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof ApiError && error.message) return error.message;
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}
+
+function upsertCachedChat(rows: Chat[] | undefined, chat: Chat): Chat[] | undefined {
+  if (!rows) return rows;
+  const existingIndex = rows.findIndex((row) => row.id === chat.id);
+  if (existingIndex === -1) return [chat, ...rows];
+  return rows.map((row) => (row.id === chat.id ? chat : row));
+}
+
+function normalizeChatMetadataValue(raw: unknown): Chat["metadata"] {
+  if (!raw) return {} as Chat["metadata"];
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Chat["metadata"])
+        : ({} as Chat["metadata"]);
+    } catch {
+      return {} as Chat["metadata"];
+    }
+  }
+  return typeof raw === "object" && !Array.isArray(raw) ? (raw as Chat["metadata"]) : ({} as Chat["metadata"]);
+}
+
+function normalizeChatForCache(chat: Chat): Chat {
+  return { ...chat, metadata: normalizeChatMetadataValue((chat as { metadata?: unknown }).metadata) };
+}
+
+function nextChatMetadataMutationVersion(chatId: string, keys: string[]) {
+  const version = (chatMetadataMutationVersions.get(chatId) ?? 0) + 1;
+  chatMetadataMutationVersions.set(chatId, version);
+  let fieldVersions = chatMetadataFieldVersions.get(chatId);
+  if (!fieldVersions) {
+    fieldVersions = new Map();
+    chatMetadataFieldVersions.set(chatId, fieldVersions);
+  }
+  for (const key of keys) fieldVersions.set(key, version);
+  return version;
+}
+
+function shouldAcceptMetadataField(chatId: string, key: string, version: number) {
+  return (chatMetadataFieldVersions.get(chatId)?.get(key) ?? 0) <= version;
+}
+
+function mergeMetadataForVersion(
+  chatId: string,
+  base: unknown,
+  incoming: unknown,
+  version: number,
+  keys?: string[],
+): Chat["metadata"] {
+  const baseRecord = normalizeChatMetadataValue(base) as Record<string, unknown>;
+  const incomingRecord = normalizeChatMetadataValue(incoming) as Record<string, unknown>;
+  const next: Record<string, unknown> = { ...baseRecord };
+  const incomingKeys = keys ?? Object.keys(incomingRecord);
+  for (const key of incomingKeys) {
+    if (!shouldAcceptMetadataField(chatId, key, version)) continue;
+    if (Object.prototype.hasOwnProperty.call(incomingRecord, key)) {
+      next[key] = incomingRecord[key];
+    } else {
+      delete next[key];
+    }
+  }
+  return next as Chat["metadata"];
+}
+
+export function syncCachedChat(qc: QueryClient, chat: Chat) {
+  const normalized = normalizeChatForCache(chat);
+  qc.setQueryData<Chat>(chatKeys.detail(normalized.id), normalized);
+  qc.setQueryData<Chat[]>(chatKeys.list(), (existing) => upsertCachedChat(existing, normalized));
+  if (normalized.groupId) {
+    qc.setQueryData<Chat[]>(chatKeys.group(normalized.groupId), (existing) => upsertCachedChat(existing, normalized));
+  }
+  const chatStore = useChatStore.getState();
+  if (chatStore.activeChatId === normalized.id || chatStore.activeChat?.id === normalized.id) {
+    chatStore.setActiveChat(normalized);
+  }
+}
+
+function syncCachedBranch(rows: Chat[] | undefined, sourceChatId: string, newChat: Chat): Chat[] | undefined {
+  if (!rows) return rows;
+  const groupedRows = newChat.groupId
+    ? rows.map((row) =>
+        row.id === sourceChatId && row.groupId !== newChat.groupId ? { ...row, groupId: newChat.groupId } : row,
+      )
+    : rows;
+  return upsertCachedChat(groupedRows, newChat);
 }
 
 export function useCreateChat() {
@@ -334,8 +448,18 @@ export function useCreateChat() {
       personaId?: string | null;
       promptPresetId?: string | null;
     }) => api.post<Chat>("/chats", data),
-    onSuccess: () => {
+    onSuccess: (chat) => {
+      if (chat) {
+        qc.setQueryData(chatKeys.detail(chat.id), chat);
+        qc.setQueryData<Chat[]>(chatKeys.list(), (existing) => upsertCachedChat(existing, chat));
+      }
       qc.invalidateQueries({ queryKey: chatKeys.list() });
+      void trackAchievementEvent("chat_created")
+        .finally(() => qc.invalidateQueries({ queryKey: achievementKeys.all }))
+        .catch(() => undefined);
+    },
+    onError: (error) => {
+      toast.error(chatMutationErrorMessage(error, "Couldn't create the conversation. Please try again."));
     },
   });
 }
@@ -343,7 +467,10 @@ export function useCreateChat() {
 export function useDeleteChat() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: DeleteChatInput) => api.delete(`/chats/${getDeleteChatId(input)}`),
+    mutationFn: (input: DeleteChatInput) => {
+      const force = getDeleteChatForce(input) ? "?force=true" : "";
+      return api.delete(`/chats/${getDeleteChatId(input)}${force}`);
+    },
     onMutate: async (input) => {
       const id = getDeleteChatId(input);
       const providedGroupId = getDeleteChatGroupId(input);
@@ -377,6 +504,7 @@ export function useDeleteChat() {
           qc.invalidateQueries({ queryKey: chatKeys.group(context.groupId) });
         }
       }
+      toast.error("Couldn't delete the conversation. It has been restored.");
     },
     onSettled: (_data, _err, input, context) => {
       const groupId = context?.groupId ?? getDeleteChatGroupId(input);
@@ -391,8 +519,13 @@ export function useDeleteChat() {
 export function useDeleteChatGroup() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (groupId: string) => api.delete(`/chats/group/${groupId}`),
-    onMutate: async (groupId) => {
+    mutationFn: (input: string | { groupId: string; force?: boolean }) => {
+      const groupId = typeof input === "string" ? input : input.groupId;
+      const force = typeof input === "string" ? "" : input.force === true ? "?force=true" : "";
+      return api.delete(`/chats/group/${groupId}${force}`);
+    },
+    onMutate: async (input) => {
+      const groupId = typeof input === "string" ? input : input.groupId;
       await qc.cancelQueries({ queryKey: chatKeys.list() });
       const previous = qc.getQueryData<Chat[]>(chatKeys.list());
 
@@ -401,13 +534,13 @@ export function useDeleteChatGroup() {
 
       return { previous, groupId };
     },
-    onError: (_err, _groupId, context) => {
+    onError: (_err, _input, context) => {
       if (context?.previous) qc.setQueryData(chatKeys.list(), context.previous);
       if (context?.groupId) {
         qc.invalidateQueries({ queryKey: chatKeys.group(context.groupId) });
       }
     },
-    onSettled: (_data, _err, _groupId, context) => {
+    onSettled: (_data, _err, _input, context) => {
       qc.invalidateQueries({ queryKey: chatKeys.list() });
       if (context?.groupId) {
         qc.invalidateQueries({ queryKey: chatKeys.group(context.groupId) });
@@ -432,6 +565,9 @@ export function useUpdateChat() {
       characterIds?: string[];
     }) => api.patch<Chat>(`/chats/${id}`, data),
     onSuccess: (updatedChat, vars) => {
+      if (updatedChat) {
+        syncCachedChat(qc, updatedChat);
+      }
       qc.invalidateQueries({ queryKey: chatKeys.detail(vars.id) });
       qc.invalidateQueries({ queryKey: chatKeys.list() });
 
@@ -447,24 +583,87 @@ export function useUpdateChat() {
   });
 }
 
+export function useTouchChat() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<Chat>(`/chats/${id}/touch`, {}),
+    onMutate: async (id) => {
+      const updatedAt = new Date().toISOString();
+      qc.setQueryData<Chat[]>(chatKeys.list(), (existing) =>
+        existing
+          ?.map((chat) => (chat.id === id ? { ...chat, updatedAt } : chat))
+          .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
+      );
+      qc.setQueryData<Chat>(chatKeys.detail(id), (existing) => (existing ? { ...existing, updatedAt } : existing));
+    },
+    onSuccess: (chat, id) => {
+      if (chat) qc.setQueryData<Chat>(chatKeys.detail(id), chat);
+      qc.invalidateQueries({ queryKey: chatKeys.list() });
+    },
+  });
+}
+
 export function useUpdateChatMetadata() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...metadata }: { id: string; [key: string]: unknown }) =>
       api.patch<Chat>(`/chats/${id}/metadata`, metadata),
-    onSuccess: (data, vars) => {
-      // Write the server response straight into the detail cache. Plain
-      // invalidation alone leaves stale data in place when no observer is
-      // mounted to trigger a refetch (e.g. user navigated away after firing
-      // the mutation), causing later renders to re-read the pre-mutation
-      // value — which is what made cleared chat backgrounds reappear after
-      // a chat switch round-trip.
+    onMutate: async ({ id, ...metadata }) => {
+      await qc.cancelQueries({ queryKey: chatKeys.detail(id) });
+      await qc.cancelQueries({ queryKey: chatKeys.list() });
+      const previous = qc.getQueryData<Chat>(chatKeys.detail(id));
+      const fallback = useChatStore.getState().activeChat?.id === id ? useChatStore.getState().activeChat : null;
+      const base = previous ?? fallback;
+      const updatedAt = new Date().toISOString();
+      const changedKeys = Object.keys(metadata);
+      const version = nextChatMetadataMutationVersion(id, changedKeys);
+      if (base) {
+        syncCachedChat(qc, {
+          ...base,
+          metadata: {
+            ...(normalizeChatMetadataValue(base.metadata) as Record<string, unknown>),
+            ...metadata,
+          } as Chat["metadata"],
+          updatedAt,
+        });
+      }
+      return { previous, version, changedKeys };
+    },
+    onError: (_error, variables, context) => {
+      if (context?.previous) {
+        const current = qc.getQueryData<Chat>(chatKeys.detail(variables.id)) ?? context.previous;
+        syncCachedChat(qc, {
+          ...current,
+          metadata: mergeMetadataForVersion(
+            variables.id,
+            current.metadata,
+            context.previous.metadata,
+            context.version,
+            context.changedKeys,
+          ),
+          updatedAt: context.previous.updatedAt,
+        });
+      }
+    },
+    onSuccess: (data, vars, context) => {
       if (data) {
-        qc.setQueryData(chatKeys.detail(vars.id), data);
+        const existing = qc.getQueryData<Chat>(chatKeys.detail(vars.id));
+        const base = existing ?? data;
+        syncCachedChat(qc, {
+          ...base,
+          metadata: mergeMetadataForVersion(
+            vars.id,
+            base.metadata,
+            data.metadata,
+            context?.version ?? (chatMetadataMutationVersions.get(vars.id) ?? 0),
+          ),
+          updatedAt: data.updatedAt,
+        });
       } else {
         qc.invalidateQueries({ queryKey: chatKeys.detail(vars.id) });
       }
       qc.invalidateQueries({ queryKey: chatKeys.list() });
+      qc.invalidateQueries({ queryKey: [...chatKeys.all, "group"] });
       qc.invalidateQueries({ queryKey: lorebookKeys.active(vars.id) });
     },
   });
@@ -527,12 +726,17 @@ function useSummaryEntryMutation() {
       api.patch<Chat>(`/chats/${chatId}/summary-entries`, body),
     onSuccess: (data, vars) => {
       if (data) {
-        qc.setQueryData(chatKeys.detail(vars.chatId), data);
+        syncCachedChat(qc, data);
       } else {
         qc.invalidateQueries({ queryKey: chatKeys.detail(vars.chatId) });
       }
       qc.invalidateQueries({ queryKey: chatKeys.list() });
       qc.invalidateQueries({ queryKey: lorebookKeys.active(vars.chatId) });
+      // Only delete changes message visibility (it unhides server-side), so scope
+      // the message-list refetch to that operation rather than every summary edit.
+      if (vars.operation === "delete") {
+        qc.invalidateQueries({ queryKey: chatKeys.messages(vars.chatId) });
+      }
     },
   });
 }
@@ -793,6 +997,8 @@ export function usePeekPrompt() {
       api.post<{
         messages: Array<{ role: string; content: string }>;
         parameters: unknown;
+        source?: "cached" | "live_preview" | "raw_messages";
+        exact?: boolean;
         generationInfo: {
           model?: string;
           provider?: string;
@@ -818,19 +1024,14 @@ export function usePeekPrompt() {
 export function useExportChat() {
   return useMutation({
     mutationFn: async ({ chatId, format = "jsonl" }: { chatId: string; format?: "jsonl" | "text" }) => {
-      const res = await fetch(`/api/chats/${chatId}/export?format=${format}`);
-      const blob = await res.blob();
-      const disposition = res.headers.get("Content-Disposition") ?? "";
-      const match = disposition.match(/filename="(.+?)"/);
       const ext = format === "text" ? ".txt" : ".jsonl";
-      const filename = match?.[1] ? decodeURIComponent(match[1]) : `chat-${chatId}${ext}`;
-      // Download via blob
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
+      await api.download(
+        `/chats/${encodeURIComponent(chatId)}/export?format=${encodeURIComponent(format)}`,
+        `chat-${chatId}${ext}`,
+      );
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? `Export failed: ${error.message}` : "Export failed.");
     },
   });
 }
@@ -857,15 +1058,25 @@ export function useBranchChat() {
     mutationFn: ({ chatId, upToMessageId }: { chatId: string; upToMessageId?: string }) =>
       api.post<Chat>(`/chats/${chatId}/branch`, { upToMessageId }),
     onSuccess: (newChat, { chatId }) => {
+      if (newChat) {
+        qc.setQueryData(chatKeys.detail(newChat.id), newChat);
+        qc.setQueryData<Chat[]>(chatKeys.list(), (existing) => syncCachedBranch(existing, chatId, newChat));
+
+        if (newChat.groupId) {
+          qc.setQueryData<Chat>(chatKeys.detail(chatId), (existing) =>
+            existing && existing.groupId !== newChat.groupId ? { ...existing, groupId: newChat.groupId } : existing,
+          );
+          qc.setQueryData<Chat[]>(chatKeys.group(newChat.groupId), (existing) =>
+            syncCachedBranch(existing, chatId, newChat),
+          );
+        }
+      }
+
       qc.invalidateQueries({ queryKey: chatKeys.list() });
       qc.invalidateQueries({ queryKey: chatKeys.detail(chatId) });
 
       if (newChat?.groupId) {
         qc.invalidateQueries({ queryKey: chatKeys.group(newChat.groupId) });
-      }
-
-      if (newChat) {
-        qc.setQueryData(chatKeys.detail(newChat.id), newChat);
       }
     },
   });
@@ -899,6 +1110,8 @@ export function useGenerateSummary() {
         entry: ChatSummaryEntry | null;
         entries: ChatSummaryEntry[];
         messageIds: string[];
+        /** Subset of messageIds eligible to hide (summarized set minus the protected tail). */
+        hideMessageIds: string[];
       }>(`/chats/${chatId}/generate-summary`, {
         contextSize,
         rangeStartMessageId,
@@ -907,8 +1120,24 @@ export function useGenerateSummary() {
         rangeEndIndex,
         promptTemplateId,
       }),
-    onSuccess: (_data, vars) => {
+    onSuccess: (data, vars) => {
+      const existing = qc.getQueryData<Chat>(chatKeys.detail(vars.chatId));
+      if (existing) {
+        syncCachedChat(qc, {
+          ...existing,
+          metadata: {
+            ...(normalizeChatMetadataValue(existing.metadata) as Record<string, unknown>),
+            summary: data.summary,
+            summaryEntries: data.entries,
+          } as Chat["metadata"],
+        });
+      }
       qc.invalidateQueries({ queryKey: chatKeys.detail(vars.chatId) });
+      // The server may have hidden the tail-excluded subset; refresh the message
+      // list so the hidden state shows without a manual reload.
+      if (data.hideMessageIds.length > 0) {
+        qc.invalidateQueries({ queryKey: chatKeys.messages(vars.chatId) });
+      }
     },
   });
 }

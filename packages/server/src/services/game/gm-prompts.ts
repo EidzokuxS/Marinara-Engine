@@ -10,6 +10,7 @@ import type {
   SessionSummary,
   HudWidget,
 } from "@marinara-engine/shared";
+import { DEFAULT_GAME_SYSTEM_PROMPT, wrapGameInstructions } from "@marinara-engine/shared";
 import type { CharacterSpriteInfo } from "./sprite.service.js";
 
 export interface GmPromptContext {
@@ -78,6 +79,9 @@ export interface GmPromptContext {
   playerInventory?: Array<{ name: string; quantity: number }>;
   /** Language for all narration and dialogue */
   language?: string;
+  /** User-overridable GM instruction body. Wrapped in <instructions> before sending. */
+  gameSystemPrompt?: string | null;
+  gameSpecialInstructions?: string | null;
 }
 
 const MAX_PROMPT_MAP_LOCATIONS = 10;
@@ -718,23 +722,7 @@ export function buildGmSystemPrompt(ctx: GmPromptContext): string {
     `</game>`,
   );
 
-  sections.push(
-    `<rules>`,
-    `Follow the specified rules precisely:`,
-    `- Introduce stakes, dangers, conflicts, consequences, discoveries, tensions, relationship dynamics, quiet moments, world-building, and reactions accordingly. Maintain continuity, following the established story arcs, events, and plotlines. Pace the plot well without rushing it.`,
-    `- System blocks, weather updates, encounter triggers, <tags>, and [bracketed] blocks are canonical truth. Do not recalculate or contradict them.`,
-    `- Narrate in second person from the player character's limited sensory access and submitted intent. Treat player input as intended action, not guaranteed success: preserve intent, avoid repeating it, and resolve outcomes by logic, context, dice, and consequences. If the player writes quoted speech while gagged, render the physical result as muffled sound instead of turning the intended words into audible dialogue.`,
-    `- Keep the game fair but challenging. Reward creativity, punish recklessness, and never treat the player as a Mary Sue. Commit to consequences and do not defang dark material into vague euphemism or instant comfort. Failure is part of play.`,
-    `</rules>`,
-
-    `<npc_playbook>`,
-    `Portray a living world with dynamic personalities and realistic awareness:`,
-    `- Characters you play as must not sound interchangeable; keep voices distinct. Match each character's cadence, vocabulary, formality, emotional state, interruptions, fragments, hesitation, slurring, breathlessness, laughter, crying, and implication. The line itself should sound like the emotion it's conveying.`,
-    `- Everyone has their own morality, ranging from good through morally gray to evil, but they're not labeled by it. Villains can do noble acts, and heroes can do harm. People can lie, even by omission, and deceive if they're inclined to do so or think it will advance their objectives. Capture how they are flawed, make mistakes, and pursue selfish goals (ignoring what the player or others want, unless their objectives align), but also give them space to grow and change (for better or for worse). NPCs must not merely reach, hover, wait, or unnaturally pause. They fully grab, touch, and commit.`,
-    `- No one is omniscient. Characters should know only what they personally witnessed, inferred from available evidence, learned from public reputation, or were told by someone in-scene. One character must not know another location's events, hidden motives, secret arcs, private thoughts, or offscreen revelations unless that information plausibly reached them. When unsure, let them be wrong, suspicious, confused, or curious instead.`,
-    `- You also play the party members who have their autonomy and emotions, but the outcomes of their actions and lines are also under the GM's jurisdiction. They fall under the same set of rules as the player and should act realistically.`,
-    `</npc_playbook>`,
-  );
+  sections.push(wrapGameInstructions(normalizePromptText(ctx.gameSystemPrompt) || DEFAULT_GAME_SYSTEM_PROMPT));
 
   // ── Rating Guidelines ──
   if (ctx.rating === "nsfw") {
@@ -1037,6 +1025,7 @@ export function buildGmFormatReminder(
     | "playerInventory"
     | "language"
     | "rating"
+    | "gameSpecialInstructions"
   > & {
     /** Special non-scene-advancing address mode inferred from the current player turn prefix. */
     addressMode?: "party" | "gm";
@@ -1124,7 +1113,7 @@ export function buildGmFormatReminder(
       ? [`- Adult mode enabled. Explicit content is allowed. No plot armor. Abandon moral biases.`]
       : []),
     `- Keep each character's vocabulary, grammar, and cadence distinct, shaped by personality and mood.`,
-    `- Run a humanizer/deslop pass before final output: active subjects, specific physical facts, varied rhythm, no throat-clearing, no rhetorical question/answer setups, no negative parallelism, no automatic three-item lists, no staccato punchline stacks.`,
+    `- Run a humanizer/deslop pass before final output: active subjects, specific physical facts, varied rhythm, no throat-clearing, no rhetorical question/answer setups, no negative parallelism, no automatic three-item lists, no staccato punchline stacks. Absolutely avoid lazy AI phrases like "doesn't X, doesn't Y", "not X, not Y", "jaw working", "mechanical precision", "ozone", and "somewhere outside"; state what happens directly.`,
     ``,
     `EXAMPLE:`,
     `Rain needles the broken shrine roof.`,
@@ -1263,6 +1252,11 @@ export function buildGmFormatReminder(
     lines.push(``, `PLAYER INVENTORY: ${buildCompactInventoryLine(playerInventory)}`);
   }
 
+  const specialInstructions = normalizePromptText(ctx.gameSpecialInstructions);
+  if (specialInstructions) {
+    lines.push(``, `SPECIAL INSTRUCTIONS:`, `- ${specialInstructions}`);
+  }
+
   lines.push(`</output_format>`);
 
   return lines.join("\n");
@@ -1285,10 +1279,16 @@ export interface SetupPromptContext {
   gmCharacterCard?: string | null;
   /** Enable custom HUD widgets in the game blueprint */
   enableCustomWidgets?: boolean;
+  /** User-selected HUD widgets that should be used instead of model-designed setup widgets. */
+  customHudWidgets?: HudWidget[];
   /** Selected constant lorebook canon to bake into world generation */
   lorebookContext?: string | null;
   /** Language for natural-language JSON values */
   language?: string;
+  /** User-overridable GM instruction body that will be used after setup. */
+  gameSystemPrompt?: string | null;
+  /** Additional game-mode generation instructions that will be used after setup. */
+  gameSpecialInstructions?: string | null;
 }
 
 export function buildSetupPrompt(ctx: SetupPromptContext = {}): string {
@@ -1367,6 +1367,32 @@ export function buildSetupPrompt(ctx: SetupPromptContext = {}): string {
       `</lorebook_context>`,
     );
   }
+  if (ctx.customHudWidgets?.length) {
+    contextSections.push(
+      `<user_hud_widgets>`,
+      `The user already chose these exact HUD widgets. Treat them as the visible HUD for this game and do not invent replacement widgets:`,
+      JSON.stringify(ctx.customHudWidgets, null, 2),
+      `</user_hud_widgets>`,
+    );
+  }
+  const setupGameSystemPrompt = normalizePromptText(ctx.gameSystemPrompt);
+  if (setupGameSystemPrompt) {
+    contextSections.push(
+      `<gm_prompt_preferences>`,
+      `The user customized the GM prompt that will run after setup. Design the world to support this play style, but do not let it override the required setup JSON schema or output rules:`,
+      setupGameSystemPrompt,
+      `</gm_prompt_preferences>`,
+    );
+  }
+  const setupGameSpecialInstructions = normalizePromptText(ctx.gameSpecialInstructions);
+  if (setupGameSpecialInstructions) {
+    contextSections.push(
+      `<gm_extra_instructions>`,
+      `The user added these extra GM instructions for play after setup. Honor them while designing the world, unless they conflict with the setup JSON schema or output rules:`,
+      setupGameSpecialInstructions,
+      `</gm_extra_instructions>`,
+    );
+  }
 
   return [
     `You are the Game Master preparing a new RPG campaign.`,
@@ -1390,7 +1416,7 @@ export function buildSetupPrompt(ctx: SetupPromptContext = {}): string {
           `Available HUD widget types for the blueprint:`,
           `  progress_bar: config = { startingValue: number, value: number, max: number }`,
           `  gauge: config = { startingValue: number, value: number, max: number, dangerBelow?: number }`,
-          `  relationship_meter: config = { startingValue: number, value: number, max: number, milestones?: [{ value: number, label: string }] }`,
+          `  relationship_meter: config = { startingValue: number, value: number, max: number, milestones?: [{ at: number, label: string }] }`,
           `  counter: config = { count: number }`,
           `  stat_block: config = { stats: [{ name: string, value: string|number }] }`,
           `  list: config = { items: string[] }`,
@@ -1399,7 +1425,7 @@ export function buildSetupPrompt(ctx: SetupPromptContext = {}): string {
           `If you design a list widget, treat it as a compact rotating list with a hard cap of 5 entries. Choose items worth surfacing right now, and expect older entries to be swapped out as the situation changes.`,
           `Keep each list item concise and label-like when possible. Avoid long multi-clause sentences, because the same text may need to be referenced later for removal or swapping.`,
           ``,
-          `Design up to 3 widgets that fit the genre. IMPORTANT: Party member bonds/reputation MUST be a SINGLE stat_block widget with one stat per member (e.g. stats: [{name: "🐱 Nadia", value: 50}, {name: "⚔️ Vlad", value: 30}]) — do NOT create separate widgets per party member. That single widget counts as 1 of 3.`,
+          `Design up to 4 widgets that fit the genre. IMPORTANT: Party member bonds/reputation MUST be a SINGLE stat_block widget with one stat per member (e.g. stats: [{name: "Nadia", value: 50}, {name: "Vlad", value: 30}]) — do NOT create separate widgets per party member. That single widget counts as 1 of 4.`,
           `Romance = stat_block for bonds + mood gauge. Horror = sanity gauge + clue list. RPG = health/mana bars.`,
           `Inventory is handled separately — do NOT create inventory widgets.`,
           `</blueprint_widget_types>`,

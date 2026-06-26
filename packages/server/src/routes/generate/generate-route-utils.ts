@@ -1,12 +1,34 @@
+import { isDeepStrictEqual } from "node:util";
 import {
+  GENERATION_PARAMETER_SEND_KEYS,
   PROVIDERS,
+  SUMMARY_TAIL_MESSAGES,
+  applyTrackerFieldLocksToGameStatePatch,
   generationParametersSchema,
+  normalizeTextForMatch,
+  normalizeThinkingTagPairs,
+  parseTrackerFieldLocks,
+  type CharacterStat,
   type GameState,
+  type GenerationParameterSendMap,
   type GenerationParameters,
+  type InventoryItem,
+  type PlayerStats,
 } from "@marinara-engine/shared";
 import { wrapContent } from "../../services/prompt/format-engine.js";
 
-export type SimpleMessage = { role: "system" | "user" | "assistant"; content: string; images?: string[] };
+export type SimpleMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+  images?: string[];
+  files?: Array<{ type: string; data: string; filename?: string }>;
+  contextKind?: "prompt" | "history" | "injection";
+};
+export type SpeakerPrefixMessage = SimpleMessage & {
+  characterId?: string | null;
+  name?: string | null;
+  providerMetadata?: Record<string, unknown>;
+};
 export type StoredGenerationParameters = Partial<GenerationParameters>;
 export type PromptAttachment = {
   type?: string | null;
@@ -18,8 +40,13 @@ export type PromptAttachment = {
   galleryId?: string | null;
 };
 
+function createEmptyPlayerStats(): PlayerStats {
+  return { stats: [], attributes: null, skills: {}, inventory: [], activeQuests: [], status: "" };
+}
+
 const TEXT_ATTACHMENT_CHAR_LIMIT = 60_000;
 const IMAGE_ATTACHMENT_PROVIDER_BYTE_LIMIT = 6 * 1024 * 1024;
+const FILE_ATTACHMENT_PROVIDER_BYTE_LIMIT = 20 * 1024 * 1024;
 const TEXT_ATTACHMENT_EXTENSIONS = new Set([
   "csv",
   "json",
@@ -37,6 +64,138 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+function extractPatchRecord(patch: Record<string, unknown>, field: string): Record<string, unknown> | null {
+  const value = patch[field];
+  return isPlainRecord(value) ? value : null;
+}
+
+function extractPatchArray<T>(patch: Record<string, unknown>, field: string, fallback: T[]): T[] {
+  const value = patch[field];
+  return Array.isArray(value) ? (value as T[]) : fallback;
+}
+
+function extractPlayerStatsPatch(patch: Record<string, unknown>): Record<string, unknown> {
+  return extractPatchRecord(patch, "playerStats") ?? {};
+}
+
+function extractPlayerStatsPatchArray<T>(patch: Record<string, unknown>, field: keyof PlayerStats, fallback: T[]): T[] {
+  const value = extractPlayerStatsPatch(patch)[field];
+  return Array.isArray(value) ? (value as T[]) : fallback;
+}
+
+type PlayerStatsArrayField = {
+  [K in keyof PlayerStats]-?: NonNullable<PlayerStats[K]> extends unknown[] ? K : never;
+}[keyof PlayerStats];
+
+export function buildLockedPlayerStatsArrayPatch<T>({
+  field,
+  values,
+  snapshot,
+  lockState,
+  basePlayerStats,
+}: {
+  field: PlayerStatsArrayField;
+  values: T[];
+  snapshot: { playerStats?: unknown } | null | undefined;
+  lockState: GameState | null | undefined;
+  basePlayerStats?: PlayerStats;
+}) {
+  const existingPlayerStats = parseSnapshotPlayerStats(snapshot);
+  const lockedPatch = applyTrackerFieldLocksToGameStatePatch({ playerStats: { [field]: values } }, lockState);
+  const lockedValues = extractPlayerStatsPatchArray<T>(lockedPatch, field, values);
+  const playerStats = { ...(basePlayerStats ?? existingPlayerStats), [field]: lockedValues };
+  const existingValues = existingPlayerStats[field];
+  const changed = !isDeepStrictEqual(lockedValues, Array.isArray(existingValues) ? existingValues : []);
+  const patch = {
+    playerStats: { [field]: lockedValues },
+  } as { playerStats: Partial<Record<PlayerStatsArrayField, T[]>> };
+  return { changed, patch, playerStats, values: lockedValues };
+}
+
+function parseSnapshotPersonaStats(snapshot: { personaStats?: unknown } | null | undefined): CharacterStat[] {
+  const raw = snapshot?.personaStats;
+  if (!raw) return [];
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return Array.isArray(parsed) ? (parsed as CharacterStat[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function buildLockedPersonaTrackerPatch({
+  stats,
+  status,
+  inventory,
+  hasStats,
+  hasStatus,
+  hasInventory,
+  snapshot,
+  lockState,
+}: {
+  stats: CharacterStat[];
+  status: string;
+  inventory: InventoryItem[];
+  hasStats?: boolean;
+  hasStatus?: boolean;
+  hasInventory?: boolean;
+  snapshot: { personaStats?: unknown; playerStats?: unknown } | null | undefined;
+  lockState: GameState | null | undefined;
+}) {
+  const rawPatch: Record<string, unknown> = {};
+  if (hasStats ?? stats.length > 0) rawPatch.personaStats = stats;
+
+  const rawPlayerStatsPatch: Record<string, unknown> = {};
+  if (hasStatus ?? !!status) rawPlayerStatsPatch.status = status;
+  if (hasInventory ?? inventory.length > 0) rawPlayerStatsPatch.inventory = inventory;
+  if (Object.keys(rawPlayerStatsPatch).length > 0) rawPatch.playerStats = rawPlayerStatsPatch;
+
+  const patch = applyTrackerFieldLocksToGameStatePatch(rawPatch, lockState);
+  const updates: Record<string, string> = {};
+  const existingPersonaStats = parseSnapshotPersonaStats(snapshot);
+  const existingPlayerStats = parseSnapshotPlayerStats(snapshot);
+
+  const lockedPersonaStats = extractPatchArray<CharacterStat>(patch, "personaStats", []);
+  const personaStatsChanged =
+    Array.isArray(patch.personaStats) && !isDeepStrictEqual(lockedPersonaStats, existingPersonaStats);
+  if (personaStatsChanged) updates.personaStats = JSON.stringify(lockedPersonaStats);
+
+  const lockedPlayerStatsPatch = extractPlayerStatsPatch(patch);
+  const playerStats = { ...existingPlayerStats };
+  let hasPlayerStatsPatch = false;
+  if (Object.prototype.hasOwnProperty.call(lockedPlayerStatsPatch, "status")) {
+    playerStats.status = typeof lockedPlayerStatsPatch.status === "string" ? lockedPlayerStatsPatch.status : "";
+    hasPlayerStatsPatch = true;
+  }
+  if (Array.isArray(lockedPlayerStatsPatch.inventory)) {
+    playerStats.inventory = lockedPlayerStatsPatch.inventory as InventoryItem[];
+    hasPlayerStatsPatch = true;
+  }
+
+  const playerStatsChanged = hasPlayerStatsPatch && !isDeepStrictEqual(playerStats, existingPlayerStats);
+  if (playerStatsChanged) updates.playerStats = JSON.stringify(playerStats);
+
+  return {
+    changed: personaStatsChanged || playerStatsChanged,
+    inventory: Array.isArray(lockedPlayerStatsPatch.inventory)
+      ? (lockedPlayerStatsPatch.inventory as InventoryItem[])
+      : [],
+    patch,
+    updates,
+  };
+}
+
+export function parseSnapshotPlayerStats(snapshot: { playerStats?: unknown } | null | undefined): PlayerStats {
+  const raw = snapshot?.playerStats;
+  if (!raw) return createEmptyPlayerStats();
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return isPlainRecord(parsed) ? (parsed as unknown as PlayerStats) : createEmptyPlayerStats();
+  } catch {
+    return createEmptyPlayerStats();
+  }
+}
+
 export function shouldAbortOnPassiveGenerationDisconnect(args: { chatMode: string; impersonate?: boolean }): boolean {
   return args.chatMode !== "conversation" || args.impersonate === true;
 }
@@ -45,7 +204,7 @@ export function resolveProviderTopK(provider: unknown, topK: number): number | u
   const normalized = Number.isFinite(topK) ? Math.max(0, Math.trunc(topK)) : 0;
   const providerId = typeof provider === "string" ? provider.toLowerCase() : "";
   if (providerId === "google" || providerId === "google_vertex") {
-    return normalized;
+    return normalized > 0 ? normalized : undefined;
   }
   return normalized > 0 ? normalized : undefined;
 }
@@ -58,9 +217,13 @@ export function mergeCustomParameters(
   base: Record<string, unknown> | null | undefined,
   next: Record<string, unknown> | null | undefined,
 ): Record<string, unknown> {
-  const merged: Record<string, unknown> = { ...(base ?? {}) };
+  const merged: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(base ?? {})) {
+    if (!isUnsafeCustomParameterKey(key)) merged[key] = value;
+  }
   if (!next) return merged;
   for (const [key, value] of Object.entries(next)) {
+    if (isUnsafeCustomParameterKey(key)) continue;
     if (value === undefined) continue;
     const current = merged[key];
     if (isPlainRecord(current) && isPlainRecord(value)) {
@@ -70,6 +233,10 @@ export function mergeCustomParameters(
     }
   }
   return merged;
+}
+
+function isUnsafeCustomParameterKey(key: string): boolean {
+  return key === "__proto__" || key === "constructor" || key === "prototype";
 }
 
 function normalizeStringArray(value: unknown): string[] {
@@ -114,6 +281,181 @@ export function findLastIndex(messages: SimpleMessage[], role: string): number {
   return -1;
 }
 
+function isLastMessagePromptBlock(content: unknown): boolean {
+  if (typeof content !== "string") return false;
+  return /<\/?last_message>/i.test(content) || /(?:^|\n)\s*##\s+Last Message\s*(?:\n|$)/i.test(content);
+}
+
+function stripBoundaryLastMessageWrapper(content: string): string {
+  return content
+    .replace(/^\s*<last_message>\s*\n?/i, "")
+    .replace(/\n?\s*<\/last_message>\s*$/i, "")
+    .replace(/^\s*##\s+Last Message\s*\n/i, "")
+    .trim();
+}
+
+function hasBoundaryChatHistoryClose(content: string): boolean {
+  return /\n?\s*<\/chat_history>\s*$/i.test(content);
+}
+
+function stripBoundaryChatHistoryClose(content: string): string {
+  return content.replace(/\n?\s*<\/chat_history>\s*$/i, "").trimEnd();
+}
+
+function appendBoundaryChatHistoryClose(content: string): string {
+  return `${content.trimEnd()}\n</chat_history>`;
+}
+
+export function dedupeLastMessageWrappers<T extends { content: string }>(messages: T[]): void {
+  const lastMessageIndexes: number[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    if (isLastMessagePromptBlock(messages[i]!.content)) {
+      lastMessageIndexes.push(i);
+    }
+  }
+  if (lastMessageIndexes.length <= 1) return;
+
+  const keepIndex = lastMessageIndexes[lastMessageIndexes.length - 1]!;
+  for (const index of lastMessageIndexes) {
+    if (index === keepIndex) continue;
+    let content = stripBoundaryLastMessageWrapper(messages[index]!.content);
+    const previousMessage = messages[index - 1];
+    if (previousMessage && hasBoundaryChatHistoryClose(previousMessage.content)) {
+      messages[index - 1] = {
+        ...previousMessage,
+        content: stripBoundaryChatHistoryClose(previousMessage.content),
+      };
+      content = appendBoundaryChatHistoryClose(content);
+    }
+    messages[index] = {
+      ...messages[index]!,
+      content,
+    };
+  }
+}
+
+/** Tracker context is injected outside chat history, directly before the latest history/last-message block. */
+export function findTrackerContextInsertIndex(
+  messages: Array<{ role: "system" | "user" | "assistant"; content?: string; contextKind?: string }>,
+): number {
+  let latestHistoryIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]!.contextKind === "history") {
+      latestHistoryIndex = i;
+      break;
+    }
+  }
+
+  let latestLastMessageBlockIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (isLastMessagePromptBlock(messages[i]!.content)) {
+      latestLastMessageBlockIndex = i;
+      break;
+    }
+  }
+
+  if (latestLastMessageBlockIndex >= 0 && latestLastMessageBlockIndex > latestHistoryIndex) {
+    return latestLastMessageBlockIndex;
+  }
+  if (latestHistoryIndex >= 0) {
+    return latestHistoryIndex;
+  }
+  if (latestLastMessageBlockIndex >= 0) {
+    return latestLastMessageBlockIndex;
+  }
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]!.role === "user") return i;
+  }
+
+  return messages.length;
+}
+
+type PromptRoleMessage = {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  contextKind?: "prompt" | "history" | "injection";
+  characterId?: string | null;
+  images?: string[];
+  files?: Array<{ type: string; data: string; filename?: string }>;
+  providerMetadata?: Record<string, unknown>;
+};
+
+function clonePromptRoleMessage<T extends PromptRoleMessage>(message: T): T {
+  return {
+    ...message,
+    ...(message.images ? { images: [...message.images] } : {}),
+    ...(message.files ? { files: message.files.map((file) => ({ ...file })) } : {}),
+    ...(message.providerMetadata ? { providerMetadata: { ...message.providerMetadata } } : {}),
+  };
+}
+
+function appendPromptMessageContent(target: PromptRoleMessage, source: PromptRoleMessage) {
+  target.content = `${target.content}\n\n${source.content}`;
+  if (target.contextKind !== source.contextKind) {
+    delete target.contextKind;
+  }
+  if (source.images?.length) {
+    target.images = [...(target.images ?? []), ...source.images];
+  }
+  if (source.files?.length) {
+    target.files = [...(target.files ?? []), ...source.files.map((file) => ({ ...file }))];
+  }
+  if (source.providerMetadata) {
+    target.providerMetadata = {
+      ...(target.providerMetadata ?? {}),
+      ...source.providerMetadata,
+    };
+  }
+}
+
+/**
+ * Provider-safe role normalization for strict prompt presets.
+ *
+ * System blocks before chat history stay as provider system messages. Once
+ * conversation turns have started, later system blocks are appended to the
+ * latest user message so the request remains system/user/assistant/user...
+ * without making post-history preset sections removable during context fitting.
+ * Depth injections are already positioned in history, so they become user
+ * messages in place instead of moving to the latest user turn.
+ */
+export function appendNonLeadingSystemMessagesToLastUser<T extends PromptRoleMessage>(messages: T[]): T[] {
+  const result: T[] = [];
+  let pastLeadingSystem = false;
+  let lastUserIndex = -1;
+
+  for (const message of messages) {
+    const cloned = clonePromptRoleMessage(message);
+    if (!pastLeadingSystem) {
+      if (cloned.role !== "system") pastLeadingSystem = true;
+      result.push(cloned);
+      if (cloned.role === "user") lastUserIndex = result.length - 1;
+      continue;
+    }
+
+    if (cloned.role === "system") {
+      const converted = { ...cloned, role: "user" as const };
+      if (cloned.contextKind === "injection") {
+        result.push(converted as T);
+        lastUserIndex = result.length - 1;
+        continue;
+      }
+      if (lastUserIndex >= 0) {
+        appendPromptMessageContent(result[lastUserIndex]!, converted);
+      } else {
+        result.push(converted as T);
+        lastUserIndex = result.length - 1;
+      }
+      continue;
+    }
+
+    result.push(cloned);
+    if (cloned.role === "user") lastUserIndex = result.length - 1;
+  }
+
+  return result;
+}
+
 /** Parse a JSON extra field safely. */
 export function parseExtra(extra: unknown): Record<string, unknown> {
   if (!extra) return {};
@@ -126,6 +468,118 @@ export function parseExtra(extra: unknown): Record<string, unknown> {
 
 export function isMessageHiddenFromAI(message: { extra?: unknown }): boolean {
   return parseExtra(message.extra).hiddenFromAI === true;
+}
+
+export function isRoleplaySummaryMode(chatMode: string): boolean {
+  return chatMode === "roleplay" || chatMode === "visual_novel";
+}
+
+/**
+ * Resolve the roleplay summary tail (how many recent messages stay visible when
+ * the auto-summary hides the rest) from the chat's `summaryTailMessages` value.
+ * `DEFAULT` only when the value is genuinely unset; an explicit `MIN` (0) means
+ * "hide the whole batch". A present-but-invalid value (NaN, negative) fails
+ * closed to `MIN` so corrupt metadata hides more rather than silently leaking
+ * extra context. Clamped to [MIN, MAX].
+ */
+export function resolveRoleplaySummaryTail(value: unknown): number {
+  const { MIN, MAX, DEFAULT } = SUMMARY_TAIL_MESSAGES;
+  if (value === undefined || value === null) return DEFAULT;
+  const n = Math.floor(Number(value));
+  if (!Number.isFinite(n) || n < MIN) return MIN;
+  return Math.min(MAX, n);
+}
+
+/**
+ * Compute which summarized message IDs the roleplay rolling summary should hide,
+ * protecting the most-recent `tail` *visible* messages so recent context stays
+ * in the prompt. Pure: `messages` must be chat-ordered (ascending). Returns the
+ * subset of `entryMessageIds` that is not in the protected tail.
+ */
+export function computeSummaryHideIds(args: {
+  messages: Array<{ id: string; extra?: unknown }>;
+  entryMessageIds: string[];
+  tail: number;
+}): string[] {
+  const { messages, entryMessageIds, tail } = args;
+  if (entryMessageIds.length === 0) return [];
+  const { MIN, MAX } = SUMMARY_TAIL_MESSAGES;
+  const clampedTail = Number.isFinite(tail) ? Math.max(MIN, Math.min(MAX, Math.floor(tail))) : MIN;
+  const visible = messages.filter((message) => !isMessageHiddenFromAI(message));
+  const tailIdSet = new Set(clampedTail > 0 ? visible.slice(-clampedTail).map((message) => message.id) : []);
+  const entryIdSet = new Set(entryMessageIds);
+  return messages
+    .filter((message) => entryIdSet.has(message.id) && !tailIdSet.has(message.id))
+    .map((message) => message.id);
+}
+
+export function resolveRoleplayChatSummary(chatMode: string, chatMetadata: Record<string, unknown>): string | null {
+  if (!isRoleplaySummaryMode(chatMode)) return null;
+  return ((chatMetadata.summary as string) ?? "").trim() || null;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function readCharacterName(data: unknown): string | null {
+  try {
+    const parsed = typeof data === "string" ? JSON.parse(data) : data;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const name = (parsed as { name?: unknown }).name;
+    return typeof name === "string" && name.trim() ? name.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveCharacterNameMap(
+  characterIds: string[],
+  getCharacterById: (id: string) => Promise<{ data?: unknown } | null | undefined>,
+): Promise<Map<string, string>> {
+  const entries = await Promise.all(
+    characterIds.map(async (id) => {
+      const row = await getCharacterById(id);
+      const name = readCharacterName(row?.data);
+      return name ? ([id, name] as const) : null;
+    }),
+  );
+
+  return new Map(entries.filter((entry): entry is readonly [string, string] => !!entry));
+}
+
+function prefixSpeakerName(content: string, speakerName: string): string {
+  const speaker = speakerName.trim();
+  if (!speaker) return content;
+  const trimmed = content.trim();
+  const alreadyPrefixed = new RegExp(`^${escapeRegex(speaker)}\\s*:`, "i").test(trimmed);
+  if (alreadyPrefixed) return trimmed;
+  return trimmed ? `${speaker}: ${trimmed}` : `${speaker}:`;
+}
+
+export function prefixGroupIndividualHistorySpeakers<T extends SpeakerPrefixMessage>(
+  messages: T[],
+  options: {
+    personaName: string;
+    characterNamesById: ReadonlyMap<string, string>;
+  },
+): T[] {
+  const personaName = options.personaName.trim() || "User";
+
+  return messages.map((message) => {
+    let speakerName: string | null = null;
+    if (message.role === "user") {
+      speakerName = personaName;
+    } else if (message.role === "assistant") {
+      speakerName =
+        (message.characterId ? (options.characterNamesById.get(message.characterId) ?? null) : null) ??
+        (typeof message.name === "string" && message.name.trim() ? message.name.trim() : null);
+    }
+
+    if (!speakerName) return message;
+    const content = prefixSpeakerName(message.content, speakerName);
+    return content === message.content ? message : { ...message, content };
+  });
 }
 
 export function canUseMessageForUserRegeneration(input: {
@@ -178,10 +632,12 @@ export function buildUserMessageRegenerationInstruction(message: { content?: unk
 export function buildUserMessageRegenerationPrompt(message: { content?: unknown; extra?: unknown }): SimpleMessage {
   const attachments = parsePromptAttachments(message.extra);
   const images = extractImageAttachmentDataUrls(attachments);
+  const files = extractFileAttachmentInputs(attachments);
   return {
     role: "user",
     content: buildUserMessageRegenerationInstruction(message),
     ...(images.length ? { images } : {}),
+    ...(files.length ? { files } : {}),
   };
 }
 
@@ -190,6 +646,7 @@ export function buildUserMessageRegenerationPromptFromSource(source: SimpleMessa
     role: "user",
     content: buildUserMessageRegenerationInstruction({ content: source.content }),
     ...(source.images?.length ? { images: source.images } : {}),
+    ...(source.files?.length ? { files: source.files } : {}),
   };
 }
 
@@ -206,10 +663,12 @@ export function buildUserMessageRegenerationSourceMessage(message: {
   const attachments = parsePromptAttachments(message.extra);
   const content = appendReadableAttachmentsToContent(original, attachments);
   const images = extractImageAttachmentDataUrls(attachments);
+  const files = extractFileAttachmentInputs(attachments);
   return {
     role: "user",
     content,
     ...(images.length ? { images } : {}),
+    ...(files.length ? { files } : {}),
   };
 }
 
@@ -230,9 +689,14 @@ export function appendGenerationTailMessages(
   const shouldAppendGoogleUserRegeneration =
     !options.impersonate && options.isGoogleProvider && !!options.regenerateUserMessage;
   const assistantPrefill = options.assistantPrefill.trim();
+  const shouldAppendAssistantPrefill = !options.impersonate && !!assistantPrefill;
 
-  if (assistantPrefill) {
-    messages.push({ role: "assistant", content: options.assistantPrefill });
+  if (shouldAppendAssistantPrefill) {
+    // Strip the trailing edge: Anthropic's Messages API rejects a final assistant
+    // message ending in whitespace (HTTP 400), which surfaces to users as a refusal.
+    // A prefill ending in "\n" or a space is common. The user-facing prefill is
+    // rendered separately, so only what is sent to the API is trimmed.
+    messages.push({ role: "assistant", content: options.assistantPrefill.trimEnd() });
   }
 
   if (shouldAppendGoogleUserRegeneration) {
@@ -240,7 +704,7 @@ export function appendGenerationTailMessages(
   }
 
   return {
-    assistantPrefillInjected: !!assistantPrefill,
+    assistantPrefillInjected: shouldAppendAssistantPrefill,
     googleUserRegenerationInjected: shouldAppendGoogleUserRegeneration,
   };
 }
@@ -335,6 +799,34 @@ export function extractImageAttachmentDataUrls(attachments: PromptAttachment[] |
     .map((attachment) => attachment.data)
     .filter((data): data is string => typeof data === "string" && data.length > 0)
     .filter((data) => estimateDataUrlBytes(data) <= IMAGE_ATTACHMENT_PROVIDER_BYTE_LIMIT);
+}
+
+export function extractFileAttachmentInputs(
+  attachments: PromptAttachment[] | undefined,
+): Array<{ type: string; data: string; filename: string }> {
+  return (attachments ?? []).flatMap((attachment) => {
+    const type = normalizeProviderFileAttachmentType(attachment);
+    if (!type || typeof attachment.data !== "string") return [];
+    if (estimateDataUrlBytes(attachment.data) > FILE_ATTACHMENT_PROVIDER_BYTE_LIMIT) return [];
+    const data = normalizeDataUrlMimeType(attachment.data, type);
+    if (!data) return [];
+    return [{ type, data, filename: getAttachmentFilename(attachment) }];
+  });
+}
+
+function normalizeProviderFileAttachmentType(attachment: PromptAttachment): string | null {
+  const type = typeof attachment.type === "string" ? attachment.type.toLowerCase().trim() : "";
+  const filename = getAttachmentFilename(attachment).toLowerCase();
+  if (type === "application/pdf" || filename.endsWith(".pdf")) return "application/pdf";
+  return null;
+}
+
+function normalizeDataUrlMimeType(dataUrl: string, mimeType: string): string | null {
+  const commaIndex = dataUrl.indexOf(",");
+  if (!dataUrl.startsWith("data:") || commaIndex < 0) return null;
+  const meta = dataUrl.slice(5, commaIndex).toLowerCase();
+  if (!meta.includes(";base64")) return null;
+  return `data:${mimeType};base64,${dataUrl.slice(commaIndex + 1)}`;
 }
 
 function estimateDataUrlBytes(dataUrl: string): number {
@@ -458,7 +950,16 @@ export function shouldInjectIdentityFallback({
   chatMode: string;
   presetId: string | null | undefined;
 }): boolean {
-  return chatMode !== "game" && !presetId;
+  if (chatMode === "game") return false;
+  // Conversation mode never runs the preset assembler (it is excluded from the
+  // assemblePrompt path), so the preset only supplies the conversation prompt
+  // text — it never injects character/persona card info. Without the identity
+  // fallback, selecting a prompt preset leaves the model with only the
+  // character names and no description/personality. Always inject the fallback
+  // for conversation mode; the injector self-guards against duplicating a
+  // profile that a custom prompt already contains.
+  if (chatMode === "conversation") return true;
+  return !presetId;
 }
 
 /** Parse connection/chat stored generation parameters without injecting schema defaults. */
@@ -482,22 +983,41 @@ export function parseStoredGenerationParameters(raw: unknown): StoredGenerationP
   // dropping the whole advanced-parameter fallback.
   const source = parsed as Record<string, unknown>;
   const out: StoredGenerationParameters = {};
-  for (const key of [
-    "temperature",
-    "topP",
-    "topK",
-    "minP",
-    "maxTokens",
-    "maxContext",
-    "frequencyPenalty",
-    "presencePenalty",
-  ] as const) {
-    const value = source[key];
-    if (typeof value === "number" && Number.isFinite(value)) out[key] = value;
+  if (source.temperature !== undefined) {
+    const temperature = generationParametersSchema.shape.temperature.safeParse(source.temperature);
+    if (temperature.success) out.temperature = temperature.data;
+  }
+  if (source.topP !== undefined) {
+    const topP = generationParametersSchema.shape.topP.safeParse(source.topP);
+    if (topP.success) out.topP = topP.data;
+  }
+  if (source.topK !== undefined) {
+    const topK = generationParametersSchema.shape.topK.safeParse(source.topK);
+    if (topK.success) out.topK = topK.data;
+  }
+  if (source.minP !== undefined) {
+    const minP = generationParametersSchema.shape.minP.safeParse(source.minP);
+    if (minP.success) out.minP = minP.data;
+  }
+  if (source.maxTokens !== undefined) {
+    const maxTokens = generationParametersSchema.shape.maxTokens.safeParse(source.maxTokens);
+    if (maxTokens.success) out.maxTokens = maxTokens.data;
+  }
+  if (source.maxContext !== undefined) {
+    const maxContext = generationParametersSchema.shape.maxContext.safeParse(source.maxContext);
+    if (maxContext.success) out.maxContext = maxContext.data;
+  }
+  if (source.frequencyPenalty !== undefined) {
+    const frequencyPenalty = generationParametersSchema.shape.frequencyPenalty.safeParse(source.frequencyPenalty);
+    if (frequencyPenalty.success) out.frequencyPenalty = frequencyPenalty.data;
+  }
+  if (source.presencePenalty !== undefined) {
+    const presencePenalty = generationParametersSchema.shape.presencePenalty.safeParse(source.presencePenalty);
+    if (presencePenalty.success) out.presencePenalty = presencePenalty.data;
   }
   if (
     source.reasoningEffort === null ||
-    ["low", "medium", "high", "maximum"].includes(String(source.reasoningEffort))
+    ["low", "medium", "high", "xhigh", "maximum"].includes(String(source.reasoningEffort))
   ) {
     out.reasoningEffort = source.reasoningEffort as StoredGenerationParameters["reasoningEffort"];
   }
@@ -508,8 +1028,18 @@ export function parseStoredGenerationParameters(raw: unknown): StoredGenerationP
     out.serviceTier = source.serviceTier as StoredGenerationParameters["serviceTier"];
   }
   if (typeof source.assistantPrefill === "string") out.assistantPrefill = source.assistantPrefill;
+  if (Array.isArray(source.customThinkingTags)) {
+    out.customThinkingTags = normalizeThinkingTagPairs(source.customThinkingTags);
+  }
   if (isPlainRecord(source.customParameters)) {
-    out.customParameters = source.customParameters;
+    out.customParameters = mergeCustomParameters({}, source.customParameters);
+  }
+  if (isPlainRecord(source.enabledParameters)) {
+    const enabledParameters: GenerationParameterSendMap = {};
+    for (const key of GENERATION_PARAMETER_SEND_KEYS) {
+      if (typeof source.enabledParameters[key] === "boolean") enabledParameters[key] = source.enabledParameters[key];
+    }
+    if (Object.keys(enabledParameters).length > 0) out.enabledParameters = enabledParameters;
   }
   for (const key of [
     "squashSystemMessages",
@@ -570,7 +1100,7 @@ function trackerCharacterIdKey(character: Record<string, unknown>) {
 }
 
 function trackerCharacterNameKey(character: Record<string, unknown>) {
-  return typeof character.name === "string" ? character.name.trim().toLowerCase() : "";
+  return normalizeTextForMatch(character.name);
 }
 
 function trackerCharacterKey(character: Record<string, unknown>) {
@@ -652,7 +1182,19 @@ export function preserveTrackerCharacterUiFields(
 }
 
 /** Parse game state JSON fields from a DB row. */
+export function parseJsonField<T>(value: unknown, fallback: T): T {
+  if (value == null) return fallback;
+  if (typeof value !== "string") return value as T;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 export function parseGameStateRow(row: Record<string, unknown>): GameState {
+  const manualOverrides = parseJsonField<Record<string, string> | null>(row.manualOverrides, null);
+  const fieldLocks = parseTrackerFieldLocks(row.fieldLocks);
   return {
     id: row.id as string,
     chatId: row.chatId as string,
@@ -663,10 +1205,12 @@ export function parseGameStateRow(row: Record<string, unknown>): GameState {
     location: row.location as string | null,
     weather: row.weather as string | null,
     temperature: row.temperature as string | null,
-    presentCharacters: JSON.parse((row.presentCharacters as string) ?? "[]"),
-    recentEvents: JSON.parse((row.recentEvents as string) ?? "[]"),
-    playerStats: row.playerStats ? JSON.parse(row.playerStats as string) : null,
-    personaStats: row.personaStats ? JSON.parse(row.personaStats as string) : null,
+    presentCharacters: parseJsonField<any[]>(row.presentCharacters, []),
+    recentEvents: parseJsonField<string[]>(row.recentEvents, []),
+    playerStats: parseJsonField<PlayerStats | null>(row.playerStats, null),
+    personaStats: parseJsonField<any[] | null>(row.personaStats, null),
+    manualOverrides,
+    fieldLocks,
     createdAt: row.createdAt as string,
   };
 }

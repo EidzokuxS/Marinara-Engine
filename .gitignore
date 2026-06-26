@@ -1,3 +1,7 @@
+# Scratch / planning files
+.work/
+.tmp/
+
 # Dependencies
 node_modules/
 .pnpm-store/
@@ -37,6 +41,14 @@ packages/server/data/
 
 # Logs
 *.log
+
+# Browser smoke-test artifacts
+playwright-report/
+test-results/
+
+# Temporary tests
+*.test.ts
+*.spec.ts
 
 # Custom agents (personal)
 .github/agents/qa.agent.md

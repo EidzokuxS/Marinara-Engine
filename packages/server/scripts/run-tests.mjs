@@ -26,6 +26,7 @@ process.env.LOG_LEVEL ??= "silent";
 // expand `*`. Passing them literally gives identical behavior everywhere.
 const TEST_GLOBS = [
   "src/services/agents/__tests__/*.test.ts",
+  "src/services/image/__tests__/*.test.ts",
   "src/services/llm/providers/__tests__/*.test.ts",
   "src/services/llm/providers/claude-subscription/__tests__/*.test.ts",
 ];

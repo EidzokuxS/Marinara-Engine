@@ -3,10 +3,18 @@
 // Auto-opens on the user's first game; re-openable via the (?) button
 // in the top-right game controls. Users can permanently disable it.
 // ──────────────────────────────────────────────
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, CircleHelp, X } from "lucide-react";
+import { cn } from "../../lib/utils";
+import {
+  NEUTRAL_PANEL_HEADER,
+  NEUTRAL_PANEL_SCROLL_AREA,
+  NEUTRAL_PANEL_SHELL,
+  NEUTRAL_PANEL_SUBTITLE,
+  NEUTRAL_PANEL_TITLE,
+} from "../ui/neutral-surface-styles";
 
 // ─── Step definitions ─────────────────────────
 
@@ -59,6 +67,13 @@ interface Rect {
 }
 
 const PAD = 8;
+const TOPBAR_SAFE_TOP = 64;
+const TUTORIAL_ICON_BUTTON =
+  "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--marinara-chat-chrome-button-border)] bg-[var(--marinara-chat-chrome-button-bg)] text-[var(--marinara-chat-chrome-button-text)] transition-colors hover:border-[var(--marinara-chat-chrome-button-border-hover)] hover:bg-[var(--marinara-chat-chrome-highlight-bg-hover)] hover:text-[var(--marinara-chat-chrome-highlight-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--marinara-chat-chrome-focus-ring)]";
+const TUTORIAL_SECONDARY_BUTTON =
+  "inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-[var(--marinara-chat-chrome-button-border)] bg-[var(--marinara-chat-chrome-button-bg)] px-3 text-xs font-medium text-[var(--marinara-chat-chrome-button-text)] transition-colors hover:border-[var(--marinara-chat-chrome-button-border-hover)] hover:bg-[var(--marinara-chat-chrome-button-bg-hover)] hover:text-[var(--marinara-chat-chrome-button-text-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--marinara-chat-chrome-focus-ring)]";
+const TUTORIAL_PRIMARY_BUTTON =
+  "inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-[var(--marinara-chat-chrome-button-border-active)] bg-[var(--marinara-chat-chrome-button-bg-active)] px-3.5 text-xs font-semibold text-[var(--marinara-chat-chrome-button-text-active)] transition-colors hover:border-[var(--marinara-chat-chrome-button-border-hover)] hover:bg-[var(--marinara-chat-chrome-button-bg-hover)] hover:text-[var(--marinara-chat-chrome-button-text-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--marinara-chat-chrome-focus-ring)]";
 
 function getTargetRect(target: string): Rect | null {
   // Pick the first visible element matching the selector. This handles cases
@@ -74,18 +89,19 @@ function getTargetRect(target: string): Rect | null {
   return null;
 }
 
-function computeTooltipStyle(rect: Rect, side: "top" | "bottom" | "left" | "right"): React.CSSProperties {
+function computeTooltipStyle(rect: Rect, side: "top" | "bottom" | "left" | "right"): CSSProperties {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const isMobile = vw < 640;
   const VIEWPORT_MARGIN = isMobile ? 12 : 16;
+  const SAFE_TOP = Math.max(VIEWPORT_MARGIN, TOPBAR_SAFE_TOP);
   const TOOLTIP_W = isMobile ? Math.min(vw - VIEWPORT_MARGIN * 2, 340) : Math.min(340, vw - VIEWPORT_MARGIN * 2);
   const GAP = isMobile ? 12 : 16;
   const available = {
     right: vw - (rect.left + rect.width + GAP + PAD) - VIEWPORT_MARGIN,
     left: rect.left - GAP - PAD - VIEWPORT_MARGIN,
     bottom: vh - (rect.top + rect.height + GAP + PAD) - VIEWPORT_MARGIN,
-    top: rect.top - GAP - PAD - VIEWPORT_MARGIN,
+    top: rect.top - GAP - PAD - SAFE_TOP,
   };
 
   if (isMobile) {
@@ -97,10 +113,11 @@ function computeTooltipStyle(rect: Rect, side: "top" | "bottom" | "left" | "righ
     const MARGIN = 12;
     if (placeAtBottom) {
       const top = rect.top + rect.height + GAP + PAD;
-      const maxHeight = vh - top - MARGIN;
+      const safeTop = Math.max(top, SAFE_TOP);
+      const maxHeight = vh - safeTop - MARGIN;
       return {
         position: "fixed",
-        top,
+        top: safeTop,
         left: (vw - TOOLTIP_W) / 2,
         width: TOOLTIP_W,
         maxHeight: `${Math.max(200, maxHeight)}px`,
@@ -111,10 +128,10 @@ function computeTooltipStyle(rect: Rect, side: "top" | "bottom" | "left" | "righ
     }
     // Target is in the lower half (e.g. the dialogue box) → anchor card at top
     const bottomLimit = rect.top - GAP - PAD;
-    const maxHeight = Math.max(200, bottomLimit - MARGIN);
+    const maxHeight = Math.max(200, bottomLimit - SAFE_TOP);
     return {
       position: "fixed",
-      top: MARGIN,
+      top: SAFE_TOP,
       left: (vw - TOOLTIP_W) / 2,
       width: TOOLTIP_W,
       maxHeight: `${maxHeight}px`,
@@ -152,25 +169,25 @@ function computeTooltipStyle(rect: Rect, side: "top" | "bottom" | "left" | "righ
   let left = 0;
 
   if (placement === "right") {
-    maxHeight = Math.max(minScrollableHeight, vh - VIEWPORT_MARGIN * 2);
+    maxHeight = Math.max(minScrollableHeight, vh - SAFE_TOP - VIEWPORT_MARGIN);
     top = rect.top + rect.height / 2 - maxHeight / 2;
     left = rect.left + rect.width + GAP + PAD;
     if (left + TOOLTIP_W > vw - VIEWPORT_MARGIN) {
       left = rect.left - TOOLTIP_W - GAP - PAD;
     }
   } else if (placement === "left") {
-    maxHeight = Math.max(minScrollableHeight, vh - VIEWPORT_MARGIN * 2);
+    maxHeight = Math.max(minScrollableHeight, vh - SAFE_TOP - VIEWPORT_MARGIN);
     top = rect.top + rect.height / 2 - maxHeight / 2;
     left = rect.left - TOOLTIP_W - GAP - PAD;
     if (left < VIEWPORT_MARGIN) {
       left = rect.left + rect.width + GAP + PAD;
     }
   } else if (placement === "bottom") {
-    maxHeight = Math.max(minScrollableHeight, Math.min(vh - VIEWPORT_MARGIN * 2, available.bottom));
+    maxHeight = Math.max(minScrollableHeight, Math.min(vh - SAFE_TOP - VIEWPORT_MARGIN, available.bottom));
     top = rect.top + rect.height + GAP + PAD;
     left = rect.left + rect.width / 2 - TOOLTIP_W / 2;
   } else {
-    maxHeight = Math.max(minScrollableHeight, Math.min(vh - VIEWPORT_MARGIN * 2, available.top));
+    maxHeight = Math.max(minScrollableHeight, Math.min(vh - SAFE_TOP - VIEWPORT_MARGIN, available.top));
     top = rect.top - GAP - PAD - maxHeight;
     left = rect.left + rect.width / 2 - TOOLTIP_W / 2;
     if (top < VIEWPORT_MARGIN) {
@@ -179,7 +196,7 @@ function computeTooltipStyle(rect: Rect, side: "top" | "bottom" | "left" | "righ
   }
 
   left = Math.max(VIEWPORT_MARGIN, Math.min(left, vw - TOOLTIP_W - VIEWPORT_MARGIN));
-  top = Math.max(VIEWPORT_MARGIN, Math.min(top, vh - maxHeight - VIEWPORT_MARGIN));
+  top = Math.max(SAFE_TOP, Math.min(top, vh - maxHeight - VIEWPORT_MARGIN));
 
   return {
     position: "fixed",
@@ -209,71 +226,86 @@ function TutorialCard({
   onSkip: () => void;
 }) {
   return (
-    <>
-      {stepData.sprite && (
-        <div className="mb-2 flex justify-center">
-          <img
-            src={stepData.sprite.src}
-            alt="Professor Mari"
-            className="h-20 max-h-[12vh] w-auto object-contain drop-shadow-lg sm:h-28 sm:max-h-[14vh]"
-            style={stepData.sprite.flip ? { transform: "scaleX(-1)" } : undefined}
-            draggable={false}
-          />
+    <div className="flex min-h-0 flex-col">
+      <div className={cn(NEUTRAL_PANEL_HEADER, "flex items-center justify-between gap-3 px-3 py-2.5")}>
+        <div className="min-w-0">
+          <div className={NEUTRAL_PANEL_TITLE}>
+            <CircleHelp size="0.8rem" className="shrink-0 text-[var(--marinara-chat-chrome-button-text-active)]" />
+            <span className="truncate">Game Tutorial</span>
+          </div>
+          <div className={NEUTRAL_PANEL_SUBTITLE}>
+            Step {step + 1} of {STEPS.length}
+          </div>
         </div>
-      )}
-
-      <div className="mb-3">
-        <h3 className="text-sm font-semibold text-[var(--foreground)]">{stepData.title}</h3>
+        <button type="button" onClick={onSkip} className={TUTORIAL_ICON_BUTTON} title="Close tutorial">
+          <X size={14} />
+        </button>
       </div>
 
-      <p className="mb-4 break-words text-xs leading-relaxed text-[var(--muted-foreground)]">
-        {stepData.body.split("\n").map((line, i, arr) => (
-          <span key={i}>
-            {line.split(/(\*\*[^*]+\*\*)/).map((part, j) =>
-              part.startsWith("**") && part.endsWith("**") ? (
-                <strong key={j} className="font-semibold text-[var(--foreground)]">
-                  {part.slice(2, -2)}
-                </strong>
-              ) : (
-                <span key={j}>{part}</span>
-              ),
-            )}
-            {i < arr.length - 1 && <br />}
-          </span>
-        ))}
-      </p>
+      <div className={cn(NEUTRAL_PANEL_SCROLL_AREA, "min-h-0 overflow-y-auto p-3")}>
+        {stepData.sprite && (
+          <div className="mb-3 flex justify-center">
+            <img
+              src={stepData.sprite.src}
+              alt="Professor Mari"
+              className={cn(
+                "h-20 max-h-[12vh] w-auto object-contain drop-shadow-lg sm:h-28 sm:max-h-[14vh]",
+                stepData.sprite.flip && "-scale-x-100",
+              )}
+              draggable={false}
+            />
+          </div>
+        )}
 
-      <div className="mb-3 flex items-center justify-center gap-1.5">
-        {STEPS.map((_, i) => (
-          <div
-            key={i}
-            className={`h-1.5 rounded-full transition-all duration-300 ${
-              i === step
-                ? "w-4 bg-[var(--primary)]"
-                : i < step
-                  ? "w-1.5 bg-[var(--primary)]/40"
-                  : "w-1.5 bg-[var(--muted-foreground)]/20"
-            }`}
-          />
-        ))}
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold leading-tight text-[var(--marinara-chat-chrome-panel-title)]">
+            {stepData.title}
+          </h3>
+          <p className="break-words text-xs leading-relaxed text-[var(--marinara-chat-chrome-panel-muted)]">
+            {stepData.body.split("\n").map((line, i, arr) => (
+              <span key={i}>
+                {line.split(/(\*\*[^*]+\*\*)/).map((part, j) =>
+                  part.startsWith("**") && part.endsWith("**") ? (
+                    <strong key={j} className="font-semibold text-[var(--marinara-chat-chrome-panel-text)]">
+                      {part.slice(2, -2)}
+                    </strong>
+                  ) : (
+                    <span key={j}>{part}</span>
+                  ),
+                )}
+                {i < arr.length - 1 && <br />}
+              </span>
+            ))}
+          </p>
+        </div>
+
+        <div className="mt-4 flex items-center justify-center gap-1.5">
+          {STEPS.map((_, i) => (
+            <div
+              key={i}
+              className={cn(
+                "h-1.5 rounded-full transition-all duration-200",
+                i === step
+                  ? "w-4 bg-[var(--marinara-chat-chrome-button-text-active)]"
+                  : i < step
+                    ? "w-2 bg-[var(--marinara-chat-chrome-button-text-active)]/45"
+                    : "w-2 bg-[var(--marinara-chat-chrome-panel-muted)]/25",
+              )}
+            />
+          ))}
+        </div>
       </div>
 
-      <div className="flex items-center justify-between gap-2">
-        <button
-          onClick={onSkip}
-          className="rounded-lg px-3 py-1.5 text-xs text-[var(--muted-foreground)] transition-colors hover:bg-[var(--secondary)] hover:text-[var(--foreground)]"
-        >
+      <div className="flex items-center justify-between gap-2 border-t border-[var(--marinara-chat-chrome-panel-divider)] px-3 py-2.5">
+        <button type="button" onClick={onSkip} className={TUTORIAL_SECONDARY_BUTTON}>
           Skip
         </button>
-        <button
-          onClick={onNext}
-          className="flex items-center gap-1.5 rounded-lg bg-[var(--primary)] px-4 py-1.5 text-xs font-medium text-[var(--primary-foreground)] shadow-sm transition-all hover:opacity-90 active:scale-95"
-        >
-          {isLast ? "Got it!" : "Next"}
+        <button type="button" onClick={onNext} className={TUTORIAL_PRIMARY_BUTTON}>
+          {isLast ? "Got it" : "Next"}
           {!isLast && <ChevronRight size="0.75rem" />}
         </button>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -340,13 +372,13 @@ export function GameTutorial({ open, onClose }: GameTutorialProps) {
       {/* Pulsing highlight around target */}
       {targetRect && (
         <div
-          className="pointer-events-none fixed rounded-xl ring-2 ring-[var(--primary)] animate-pulse"
+          className="pointer-events-none fixed animate-pulse rounded-xl ring-2 ring-[var(--marinara-chat-chrome-focus-ring)]"
           style={{
             top: targetRect.top - PAD,
             left: targetRect.left - PAD,
             width: targetRect.width + PAD * 2,
             height: targetRect.height + PAD * 2,
-            boxShadow: "0 0 16px 4px color-mix(in srgb, var(--primary) 40%, transparent)",
+            boxShadow: "0 0 16px 4px color-mix(in srgb, var(--marinara-chat-chrome-focus-ring) 40%, transparent)",
           }}
         />
       )}
@@ -359,7 +391,7 @@ export function GameTutorial({ open, onClose }: GameTutorialProps) {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.96 }}
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-            className="pointer-events-auto rounded-2xl border border-[var(--border)] bg-[var(--popover)] p-4 shadow-2xl ring-1 ring-[var(--primary)]/20 sm:p-5"
+            className={cn(NEUTRAL_PANEL_SHELL, "pointer-events-auto flex min-h-0 flex-col overflow-hidden")}
             style={computeTooltipStyle(targetRect, stepData.side)}
           >
             <TutorialCard step={step} stepData={stepData} isLast={isLast} onNext={next} onSkip={onClose} />
@@ -368,7 +400,10 @@ export function GameTutorial({ open, onClose }: GameTutorialProps) {
       ) : (
         // Fallback: target not yet measurable — show a centered card so the tour
         // still works even if a region is momentarily hidden.
-        <div className="pointer-events-none fixed inset-0 flex items-center justify-center">
+        <div
+          className="pointer-events-none fixed inset-x-0 bottom-0 flex items-center justify-center"
+          style={{ top: TOPBAR_SAFE_TOP }}
+        >
           <AnimatePresence mode="wait">
             <motion.div
               key={step}
@@ -376,7 +411,10 @@ export function GameTutorial({ open, onClose }: GameTutorialProps) {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -8, scale: 0.96 }}
               transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-              className="pointer-events-auto rounded-2xl border border-[var(--border)] bg-[var(--popover)] p-4 shadow-2xl ring-1 ring-[var(--primary)]/20 max-h-[90vh] overflow-x-hidden overflow-y-auto sm:p-5"
+              className={cn(
+                NEUTRAL_PANEL_SHELL,
+                "pointer-events-auto flex max-h-[90vh] min-h-0 flex-col overflow-hidden",
+              )}
               style={{ width: Math.min(380, window.innerWidth - 32) }}
             >
               <TutorialCard step={step} stepData={stepData} isLast={isLast} onNext={next} onSkip={onClose} />

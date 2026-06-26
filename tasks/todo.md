@@ -1,5 +1,25 @@
 # Current Task
 
+## Upstream Marinara Sync v2.0.5
+
+- [x] Commit and push current Tarot/Game work before upstream merge.
+- [x] Fetch original Marinara upstream and start merge into `feat/tarot-justice-slice`.
+- [x] Re-review conflict resolutions as three-way integrations instead of plain `--ours`.
+- [x] Carry useful upstream prompt/generation/client deltas forward while preserving Tarot ownership.
+- [x] Fix shared/server/client type fallout from the merge.
+- [x] Run verification.
+- [x] Commit merge and push synced branch.
+
+## Upstream Marinara Sync Review
+
+- Executed: local Tarot/Game changes were committed as `19463ecc` and pushed to origin before the upstream merge.
+- Executed: fetched `upstream/main` from original Marinara and merged v2.0.5 into `feat/tarot-justice-slice`.
+- Executed: re-resolved conflicts as a three-way integration by applying the Tarot delta onto upstream versions, then reviewing merged files rather than keeping a blanket local side.
+- Preserved: Tarot ownership remains intact. Justice owns adjudication/rolls, Emperor owns Game composition and commands, Hermit owns prose sanitation, Chariot owns HUD widgets, and Tower stays narrative-only.
+- Carried forward: upstream v2.0.5 feature registry/generated manifests, new chat/settings/game UI additions, prompt/runtime extraction, stale asset recovery, custom emoji/sticker/gallery/turn-game additions, and shared/server/client package updates.
+- Fixed: shared prompt aliases for retired internal summary/secret-plot flows, `generate.routes.ts` merge syntax, secret-plot normalizer imports, Game setup wizard JSX structure, and default Game prompt leakage of the old subjective-lens/player-thought contract.
+- Verification passed: `pnpm --filter @marinara-engine/shared build`, `pnpm --filter @marinara-engine/server test`, `pnpm --filter @marinara-engine/server lint`, `pnpm --filter @marinara-engine/client lint`, and full `pnpm check`.
+
 ## Zetta Onyx v1.55 Prompt Adaptation
 
 - [x] Read `R:\Projects\SillytavernUpgrade\Template\Zetta Onyx v1.55.json` and determine active blocks via `prompt_order`.

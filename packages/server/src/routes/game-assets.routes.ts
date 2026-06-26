@@ -15,6 +15,8 @@ import {
   renameSync,
   copyFileSync,
   readFileSync,
+  rmSync,
+  unlinkSync,
 } from "fs";
 import { join, extname, basename, dirname } from "path";
 import { execFile } from "child_process";
@@ -23,6 +25,7 @@ import { z } from "zod";
 import { pipeline } from "stream/promises";
 import { MUSIC_GENRES, MUSIC_INTENSITIES } from "@marinara-engine/shared";
 import { GAME_ASSETS_DIR, buildAssetManifest, getAssetManifest } from "../services/game/asset-manifest.service.js";
+import { requirePrivilegedAccess } from "../middleware/privileged-gate.js";
 import { assertInsideDir } from "../utils/security.js";
 
 const META_PATH = join(GAME_ASSETS_DIR, "meta.json");
@@ -49,7 +52,7 @@ function loadMeta(): Record<string, FolderMeta> {
  * @param meta - Map of folder paths to metadata
  */
 function saveMeta(meta: Record<string, FolderMeta>) {
-  writeFileSync(META_PATH, JSON.stringify(meta, null, 2), "utf-8");
+  atomicWriteText(META_PATH, JSON.stringify(meta, null, 2));
 }
 
 // sharp can fail to load on Android/Termux because it has no native Android
@@ -103,10 +106,11 @@ const MIME_MAP: Record<string, string> = {
   ".svg": "image/svg+xml",
 };
 
+const MUSIC_FILE_EXTENSIONS = new Set([".mp3", ".ogg", ".wav", ".flac", ".m4a", ".aac", ".webm"]);
 const CATEGORY_EXTENSIONS: Record<string, Set<string>> = {
-  music: new Set([".mp3", ".ogg", ".wav", ".flac", ".m4a", ".aac", ".webm"]),
-  sfx: new Set([".mp3", ".ogg", ".wav", ".flac", ".m4a", ".aac", ".webm"]),
-  ambient: new Set([".mp3", ".ogg", ".wav", ".flac", ".m4a", ".aac", ".webm"]),
+  music: MUSIC_FILE_EXTENSIONS,
+  sfx: MUSIC_FILE_EXTENSIONS,
+  ambient: MUSIC_FILE_EXTENSIONS,
   sprites: new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".svg"]),
   backgrounds: new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif"]),
 };
@@ -115,6 +119,10 @@ const TEXT_EXTS = new Set([".txt", ".md", ".json", ".yaml", ".yml", ".js", ".ts"
 const VALID_CATEGORIES = new Set(Object.keys(CATEGORY_EXTENSIONS));
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_TEXT_BYTES = 10 * 1024 * 1024;
+const GENERATED_BACKGROUND_WIDTH = 1280;
+const GENERATED_BACKGROUND_HEIGHT = 720;
+const GENERATED_BACKGROUND_MAX_INPUT_PIXELS = 32_000_000;
+const PICK_FOLDER_TIMEOUT_MS = 60_000;
 const MUSIC_STATES = ["exploration", "dialogue", "combat", "travel_rest"] as const;
 const MUSIC_STATE_SET = new Set<string>(MUSIC_STATES);
 const MUSIC_GENRE_SET = new Set<string>(MUSIC_GENRES);
@@ -127,6 +135,97 @@ const MUSIC_INTENSITY_SET = new Set<string>(MUSIC_INTENSITIES);
  */
 function isSafePath(segment: string): boolean {
   return !segment.includes("..") && !segment.includes("\\") && !/^\//.test(segment);
+}
+
+function pickMusicFolder(): Promise<string | null> {
+  return new Promise((resolve) => {
+    let resolved = false;
+    const done = (val: string | null) => {
+      if (resolved) return;
+      resolved = true;
+      resolve(val);
+    };
+
+    const timer = setTimeout(() => done(null), PICK_FOLDER_TIMEOUT_MS);
+    const cleanup = () => clearTimeout(timer);
+    const os = platform();
+
+    if (os === "darwin") {
+      execFile(
+        "osascript",
+        ["-e", 'POSIX path of (choose folder with prompt "Select your music folder")'],
+        (err, stdout) => {
+          cleanup();
+          if (err) return done(null);
+          const p = stdout.trim().replace(/\/$/, "");
+          done(p || null);
+        },
+      );
+    } else if (os === "win32") {
+      const ps = [
+        "-STA",
+        "-NoProfile",
+        "-Command",
+        `Add-Type -AssemblyName System.Windows.Forms;` +
+          `$f = New-Object System.Windows.Forms.Form;` +
+          `$f.TopMost = $true;` +
+          `$f.WindowState = 'Minimized';` +
+          `$f.ShowInTaskbar = $false;` +
+          `$f.Show();` +
+          `$f.Hide();` +
+          `$d = New-Object System.Windows.Forms.FolderBrowserDialog;` +
+          `$d.Description = 'Select your music folder';` +
+          `if ($d.ShowDialog($f) -eq 'OK') { $d.SelectedPath } else { '' };` +
+          `$f.Dispose()`,
+      ];
+      execFile("powershell.exe", ps, (err, stdout) => {
+        cleanup();
+        if (err) return done(null);
+        const p = stdout.trim();
+        done(p || null);
+      });
+    } else {
+      execFile("zenity", ["--file-selection", "--directory", "--title=Select your music folder"], (err, stdout) => {
+        if (!err && stdout.trim()) {
+          cleanup();
+          return done(stdout.trim());
+        }
+        execFile("kdialog", ["--getexistingdirectory", ".", "--title", "Select your music folder"], (err2, stdout2) => {
+          cleanup();
+          if (err2) return done(null);
+          const p = stdout2.trim();
+          done(p || null);
+        });
+      });
+    }
+  });
+}
+
+function cleanupFile(filePath: string): void {
+  try {
+    if (existsSync(filePath)) unlinkSync(filePath);
+  } catch {
+    /* best-effort cleanup */
+  }
+}
+
+function tempWritePath(filePath: string): string {
+  return join(dirname(filePath), `.${basename(filePath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`);
+}
+
+function atomicWriteBuffer(filePath: string, buffer: Buffer): void {
+  const tmpPath = tempWritePath(filePath);
+  try {
+    writeFileSync(tmpPath, buffer);
+    renameSync(tmpPath, filePath);
+  } catch (err) {
+    cleanupFile(tmpPath);
+    throw err;
+  }
+}
+
+function atomicWriteText(filePath: string, value: string): void {
+  atomicWriteBuffer(filePath, Buffer.from(value, "utf-8"));
 }
 
 const uploadSchema = z.object({
@@ -251,6 +350,62 @@ function finishAssetUpload(category: string, subcategory: string, filename: stri
   const rel = `${category}/${subcategory}/${filename}`;
   const tag = rel.replace(/\.[^.]+$/, "").replace(/\//g, ":");
   return { tag, path: rel, manifestCount: manifest.count };
+}
+
+function shouldNormalizeGeneratedBackground(category: string, subcategory: string, ext: string) {
+  if (category !== "backgrounds") return false;
+  if (!subcategory.split("/").includes("generated")) return false;
+  return ext === ".png" || ext === ".jpg" || ext === ".jpeg" || ext === ".webp";
+}
+
+async function normalizeGeneratedBackgroundBuffer(buffer: Buffer, ext: string) {
+  const sharp = await getSharp();
+  if (!sharp) return buffer;
+
+  try {
+    const pipeline = sharp(buffer, {
+      limitInputPixels: GENERATED_BACKGROUND_MAX_INPUT_PIXELS,
+      failOn: "warning",
+    })
+      .rotate()
+      .resize(GENERATED_BACKGROUND_WIDTH, GENERATED_BACKGROUND_HEIGHT, { fit: "cover" });
+
+    if (ext === ".jpg" || ext === ".jpeg") {
+      return await pipeline.jpeg({ quality: 92 }).toBuffer();
+    }
+    if (ext === ".webp") {
+      return await pipeline.webp({ quality: 92 }).toBuffer();
+    }
+    return await pipeline.png().toBuffer();
+  } catch (error) {
+    logger.warn(error, "[game-assets] Failed to normalize generated background upload");
+    return buffer;
+  }
+}
+
+async function normalizeGeneratedBackgroundFile(category: string, subcategory: string, filePath: string, ext: string) {
+  if (!shouldNormalizeGeneratedBackground(category, subcategory, ext)) return;
+  const normalized = await normalizeGeneratedBackgroundBuffer(readFileSync(filePath), ext);
+  atomicWriteBuffer(filePath, normalized);
+}
+
+function containsNativeMarker(dir: string): boolean {
+  if (existsSync(join(dir, ".native"))) return true;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (containsNativeMarker(join(dir, entry.name))) return true;
+  }
+  return false;
+}
+
+function isInsideNativeFolder(filePath: string): boolean {
+  let current = statSync(filePath).isDirectory() ? filePath : dirname(filePath);
+  while (current !== dirname(current)) {
+    if (existsSync(join(current, ".native"))) return true;
+    if (current === GAME_ASSETS_DIR) return false;
+    current = dirname(current);
+  }
+  return false;
 }
 
 // ════════════════════════════════════════════════
@@ -383,11 +538,46 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
     return reply.header("Content-Type", mime).header("Cache-Control", "public, max-age=604800").send(stream);
   });
 
+  // ── GET /game-assets/local-music-file/:encoded ──
+  // Serves an audio file selected through the local music folder picker.
+  app.get("/local-music-file/:encoded", async (req, reply) => {
+    const { encoded } = (req.params as { encoded?: string }) ?? {};
+    if (!encoded) {
+      return reply.status(400).send({ error: "Missing music file" });
+    }
+
+    let filePath = "";
+    try {
+      filePath = Buffer.from(encoded, "base64url").toString("utf8");
+    } catch {
+      return reply.status(400).send({ error: "Invalid music file" });
+    }
+
+    const ext = extname(filePath).toLowerCase();
+    if (!MUSIC_FILE_EXTENSIONS.has(ext)) {
+      return reply.status(400).send({ error: "Unsupported music file type" });
+    }
+
+    let isFile = false;
+    try {
+      isFile = existsSync(filePath) && statSync(filePath).isFile();
+    } catch {
+      isFile = false;
+    }
+    if (!isFile) {
+      return reply.status(404).send({ error: "Music file not found" });
+    }
+
+    const mime = MIME_MAP[ext] ?? "application/octet-stream";
+    const stream = createReadStream(filePath);
+    return reply.header("Content-Type", mime).header("Cache-Control", "private, max-age=60").send(stream);
+  });
+
   // ── POST /game-assets/upload ──
   app.post("/upload", async (req, reply) => {
     const contentType = req.headers["content-type"] ?? "";
     if (contentType.includes("multipart/form-data")) {
-      const file = await req.file();
+      const file = await req.file({ limits: { fileSize: MAX_UPLOAD_BYTES + 1 } });
       if (!file) {
         return reply.status(400).send({ error: "No file uploaded" });
       }
@@ -405,22 +595,52 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: error instanceof Error ? error.message : "Invalid upload" });
       }
 
-      await pipeline(file.file, createWriteStream(target.targetPath));
+      const tempPath = tempWritePath(target.targetPath);
+      try {
+        await pipeline(file.file, createWriteStream(tempPath));
+      } catch (error) {
+        cleanupFile(tempPath);
+        const truncated = (file.file as typeof file.file & { truncated?: boolean }).truncated === true;
+        return reply.status(truncated ? 400 : 500).send({
+          error: truncated
+            ? `File too large: ${file.filename} exceeds the 50MB upload limit.`
+            : "Failed to upload file",
+          ...(truncated ? {} : { detail: String(error) }),
+        });
+      }
 
-      const writtenSize = statSync(target.targetPath).size;
+      const writtenSize = statSync(tempPath).size;
       const ext = extname(file.filename).toLowerCase();
       const isTextFile = TEXT_EXTS.has(ext);
       const maxBytes = isTextFile ? MAX_TEXT_BYTES : MAX_UPLOAD_BYTES;
       const maxLabel = isTextFile ? "10MB" : "50MB";
 
-      if (writtenSize > maxBytes) {
-        const { unlinkSync } = await import("fs");
-        unlinkSync(target.targetPath);
+      if (writtenSize > maxBytes || (file.file as typeof file.file & { truncated?: boolean }).truncated === true) {
+        cleanupFile(tempPath);
         return reply.status(400).send({
           error: `File too large: ${file.filename} is ${(writtenSize / 1024 / 1024).toFixed(1)} MB. Max size: ${maxLabel}.`,
         });
       }
 
+      try {
+        await normalizeGeneratedBackgroundFile(category, subcategory, tempPath, extname(target.safeName).toLowerCase());
+        const processedSize = statSync(tempPath).size;
+        if (processedSize > maxBytes) {
+          cleanupFile(tempPath);
+          return reply.status(400).send({
+            error: `File too large after processing: ${file.filename} is ${(processedSize / 1024 / 1024).toFixed(1)} MB. Max size: ${maxLabel}.`,
+          });
+        }
+
+        if (existsSync(target.targetPath)) {
+          cleanupFile(tempPath);
+          return reply.status(409).send({ error: "A file with that name already exists" });
+        }
+        renameSync(tempPath, target.targetPath);
+      } catch (error) {
+        cleanupFile(tempPath);
+        return reply.status(500).send({ error: "Failed to process uploaded file", detail: String(error) });
+      }
       return finishAssetUpload(category, subcategory, target.safeName);
     }
 
@@ -440,7 +660,7 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
     // Strip data URL prefix if present
     const base64Match = data.match(/^data:[^;]+;base64,(.+)$/);
     const rawBase64 = base64Match ? base64Match[1]! : data;
-    const buffer = Buffer.from(rawBase64, "base64");
+    let buffer = Buffer.from(rawBase64, "base64");
 
     const ext = extname(filename).toLowerCase();
     const isTextFile = TEXT_EXTS.has(ext);
@@ -453,7 +673,16 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
       });
     }
 
-    writeFileSync(target.targetPath, buffer);
+    if (shouldNormalizeGeneratedBackground(category, subcategory, ext)) {
+      buffer = await normalizeGeneratedBackgroundBuffer(buffer, ext);
+    }
+    if (buffer.length > maxBytes) {
+      return reply.status(400).send({
+        error: `File too large after processing: ${filename} is ${(buffer.length / 1024 / 1024).toFixed(1)} MB. Max size: ${maxLabel}.`,
+      });
+    }
+
+    atomicWriteBuffer(target.targetPath, buffer);
 
     return finishAssetUpload(category, subcategory, target.safeName);
   });
@@ -470,7 +699,6 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
       return reply.status(404).send({ error: "Asset not found" });
     }
 
-    const { unlinkSync } = await import("fs");
     unlinkSync(filePath);
 
     // Rebuild manifest after deletion
@@ -493,6 +721,14 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
       if (err) logger.warn(err, "Could not open game assets folder");
     });
     return reply.send({ ok: true, path: target });
+  });
+
+  // ── POST /game-assets/pick-local-music-folder ──
+  app.post("/pick-local-music-folder", async (req, reply) => {
+    if (!requirePrivilegedAccess(req, reply, { feature: "Custom music folder picker" })) return;
+    const selected = await pickMusicFolder();
+    if (!selected) return reply.status(400).send({ success: false, error: "No folder selected" });
+    return { success: true, path: selected };
   });
 
   // ── GET /game-assets/tree ──
@@ -578,9 +814,6 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
 
     const target = join(GAME_ASSETS_DIR, wildcard);
 
-    if (existsSync(join(target, ".native"))) {
-      return reply.status(403).send({ error: "Cannot delete native folders" });
-    }
     try {
       assertInsideDir(GAME_ASSETS_DIR, target);
     } catch {
@@ -596,6 +829,10 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "Not a directory" });
     }
 
+    if (containsNativeMarker(target)) {
+      return reply.status(403).send({ error: "Cannot delete folders containing native assets" });
+    }
+
     const entries = readdirSync(target);
     const visibleEntries = entries.filter((e) => !e.startsWith("."));
     const recursive = (req.query as { recursive?: string }).recursive === "true";
@@ -606,7 +843,6 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
 
     try {
       if (recursive && visibleEntries.length > 0) {
-        const { rmSync } = await import("fs");
         rmSync(target, { recursive: true, force: true });
       } else {
         rmdirSync(target);
@@ -682,6 +918,14 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
 
     if (!existsSync(oldFull)) {
       return reply.status(404).send({ error: "File not found" });
+    }
+
+    const oldStat = statSync(oldFull);
+    if (!oldStat.isFile()) {
+      return reply.status(400).send({ error: "Not a file" });
+    }
+    if (isInsideNativeFolder(oldFull)) {
+      return reply.status(403).send({ error: "Cannot move native assets" });
     }
 
     const destDir = join(GAME_ASSETS_DIR, targetFolder);
@@ -858,7 +1102,6 @@ export async function gameAssetsRoutes(app: FastifyInstance) {
 
     const succeeded: string[] = [];
     const failed: { path: string; error: string }[] = [];
-    const { unlinkSync } = await import("fs");
 
     for (const filePath of paths) {
       if (!isSafePath(filePath)) {

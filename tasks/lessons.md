@@ -1,5 +1,6 @@
 # Lessons
 
+- During upstream sync, conflict resolution must be a three-way integration. Preserve Tarot/Game ownership work while explicitly reviewing and carrying forward useful upstream deltas; `--ours` is only a temporary staging move, not a final merge strategy.
 - When adapting a new Zetta Onyx preset, treat Handshake and NSFW/adult-mode blocks as first-class donor deltas. Even if the version diff looks focused on BOLT, explicitly compare `main`, `zettaHandshakeAsk`, `zettaHandshakeGrant`, and the active adult-mode block, then update prompt tests for their current wording.
 - When the user corrects an observability diagnosis, first distinguish global logger debug from per-request debug. In this codebase, visible pasted prompt logs can come from `requestDebug` via `debugLog(...)` even when `logger.isLevelEnabled("debug")` is false.
 - Tarot agents must have hard ownership boundaries. Justice owns adjudication and rolls, Emperor owns turn composition, Chariot owns HUD widgets, and Tower/GM must not remain a fallback command bus for mechanics that a Tarot agent owns.

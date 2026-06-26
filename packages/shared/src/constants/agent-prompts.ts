@@ -875,3 +875,6 @@ Private BOLT v2 editor room:
 export function getDefaultAgentPrompt(agentType: string): string {
   return DEFAULT_AGENT_PROMPTS[agentType] ?? "";
 }
+
+export const DEFAULT_CHAT_SUMMARY_PROMPT: string = DEFAULT_AGENT_PROMPTS["chat-summary"] ?? "";
+export const NARRATIVE_DIRECTOR_SECRET_PLOT_PROMPT: string = DEFAULT_AGENT_PROMPTS["secret-plot-driver"] ?? "";

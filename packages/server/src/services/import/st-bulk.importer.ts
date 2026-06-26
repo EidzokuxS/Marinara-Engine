@@ -18,6 +18,7 @@ import { characters as charactersTable, personas as personasTable } from "../../
 import { createCharactersStorage } from "../storage/characters.storage.js";
 import { DATA_DIR } from "../../utils/data-dir.js";
 import { getFileTimestampOverrides, parseTrustedTimestamp } from "./import-timestamps.js";
+import { normalizeTextForMatch } from "@marinara-engine/shared";
 
 const BG_DIR = join(DATA_DIR, "backgrounds");
 const BG_EXTS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif"]);
@@ -503,6 +504,7 @@ export interface STBulkImportOptions {
   backgrounds: STBulkImportSelection;
   personas: STBulkImportSelection;
   characterTagImportMode?: STCharacterTagImportMode;
+  regexScriptScope?: "character" | "global";
 }
 
 export interface STBulkImportResult {
@@ -567,6 +569,7 @@ export async function runSTBulkImport(
   const selectedBackgrounds = resolveSelectedItems(scanResult.backgrounds, options.backgrounds);
   const selectedPersonas = resolveSelectedItems(scanResult.personas, options.personas);
   const tagImportMode = options.characterTagImportMode ?? "all";
+  const regexScriptScope = options.regexScriptScope ?? "character";
   const existingTagKeys =
     tagImportMode === "existing" && selectedCharacters.length > 0 ? await getExistingCharacterTagKeys(db) : undefined;
 
@@ -592,12 +595,13 @@ export async function runSTBulkImport(
               timestampOverrides,
               tagImportMode,
               existingTagKeys,
+              regexScriptScope,
             });
             imported.characters++;
           }
         } else {
           const raw = JSON.parse(await readFile(ch.path, "utf-8"));
-          await importSTCharacter(raw, db, { timestampOverrides, tagImportMode, existingTagKeys });
+          await importSTCharacter(raw, db, { timestampOverrides, tagImportMode, existingTagKeys, regexScriptScope });
           imported.characters++;
         }
       } catch (err) {
@@ -614,7 +618,7 @@ export async function runSTBulkImport(
     for (const ch of allChars) {
       try {
         const data = JSON.parse(ch.data);
-        const name = (data?.name ?? "").toLowerCase().trim();
+        const name = normalizeTextForMatch(data?.name);
         if (name) charNameToId.set(name, ch.id);
       } catch {
         // skip
@@ -628,8 +632,8 @@ export async function runSTBulkImport(
   // Use ALL scanned characters, not just selectedCharacters, so chats can still
   // link to already-existing characters even when they were not re-imported now.
   for (const ch of scanResult.characters) {
-    const displayNameKey = ch.name.toLowerCase().trim();
-    const filenameKey = basename(ch.path, extname(ch.path)).toLowerCase().trim();
+    const displayNameKey = normalizeTextForMatch(ch.name);
+    const filenameKey = normalizeTextForMatch(basename(ch.path, extname(ch.path)));
 
     const charId = charNameToId.get(displayNameKey) ?? charNameToId.get(filenameKey) ?? null;
 
@@ -658,8 +662,8 @@ export async function runSTBulkImport(
         const content = await readFile(ct.path, "utf-8");
         const fileInfo = await stat(ct.path);
 
-        const normalizedCharacterName = ct.characterName.toLowerCase().trim();
-        const normalizedFolderName = ct.folderName.toLowerCase().trim();
+        const normalizedCharacterName = normalizeTextForMatch(ct.characterName);
+        const normalizedFolderName = normalizeTextForMatch(ct.folderName);
 
         // Prefer folder name first because ST chat folders usually track the
         // character card filename more reliably than character_name headers.
@@ -701,10 +705,10 @@ export async function runSTBulkImport(
         // Build speaker→characterId map from member names
         const speakerMap: Record<string, string> = {};
         for (const memberName of gc.members) {
-          const cid = charNameToId.get(memberName.toLowerCase().trim());
+          const cid = charNameToId.get(normalizeTextForMatch(memberName));
           if (cid) speakerMap[memberName] = cid;
         }
-        const groupKey = gc.groupName.toLowerCase().trim();
+        const groupKey = normalizeTextForMatch(gc.groupName);
         if (!gcGroupIds.has(groupKey)) {
           gcGroupIds.set(groupKey, randomUUID());
         }

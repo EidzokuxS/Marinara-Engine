@@ -4,10 +4,28 @@
 
 let audioCtx: AudioContext | null = null;
 
-function getAudioContext(): AudioContext {
+type NotificationPingOptions = {
+  onlyWhenUnfocused?: boolean;
+};
+
+export function isMarinaraFocused(): boolean {
+  if (typeof document === "undefined") return false;
+  return document.visibilityState === "visible" && document.hasFocus();
+}
+
+export function shouldPlayNotificationPing(options: NotificationPingOptions = {}): boolean {
+  return !options.onlyWhenUnfocused || !isMarinaraFocused();
+}
+
+function getAudioContext(): AudioContext | null {
+  if (typeof window === "undefined") return null;
   if (!audioCtx) {
-    audioCtx = new AudioContext();
+    const AudioContextCtor =
+      window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) return null;
+    audioCtx = new AudioContextCtor();
   }
+  if (audioCtx.state === "suspended") void audioCtx.resume().catch(() => {});
   return audioCtx;
 }
 
@@ -16,9 +34,11 @@ function getAudioContext(): AudioContext {
  * Uses two layered sine oscillators with a quick exponential decay
  * to produce a soft "ding" reminiscent of Discord/iMessage notifications.
  */
-export function playNotificationPing(): void {
+export function playNotificationPing(options: NotificationPingOptions = {}): void {
   try {
+    if (!shouldPlayNotificationPing(options)) return;
     const ctx = getAudioContext();
+    if (!ctx) return;
     const now = ctx.currentTime;
 
     // Main tone — a bright sine at ~880 Hz (A5)
@@ -52,4 +72,9 @@ export function playNotificationPing(): void {
   } catch {
     // Silently ignore — audio may not be available
   }
+}
+
+export function playConfiguredNotificationPing(enabled: boolean, onlyWhenUnfocused: boolean): void {
+  if (!enabled) return;
+  playNotificationPing({ onlyWhenUnfocused });
 }
