@@ -300,3 +300,17 @@
 - Verification: roll UI flow emitted `game_roll_resolved` with `check="quietly force the mail slot open with a hairpin without leaving any marks."`, `rolled=4`, `dc=10`, `margin=-6`, `success=false`, and no current `tool_result` event from Tower.
 - Verification: `pnpm --filter @marinara-engine/server test` passed (53/53).
 - Verification: `pnpm check` passed after fixing strict test fixtures.
+
+## Current Task: Widget Gameplay And Visible Prose Cleanup
+
+- [x] Trace the remaining visible em dash leak in Game narration after Hermit.
+- [x] Apply final visible prose typography normalization on the non-narrative-only post-Hermit route.
+- [x] Verify server tests and server typecheck.
+- [ ] Decide widget gameplay model before expanding schema and UI.
+
+## Current Task Review
+
+- Fixed the post-Hermit final prose path in `generate.routes.ts` so Game narration typography normalization runs even when Tower narrative-only mode is not the active branch.
+- Verification passed: `pnpm --filter @marinara-engine/server test` (35/35) and `pnpm --filter @marinara-engine/server lint`.
+- Widget investigation found the current Chariot path is HUD-delta oriented: setup creates widgets, Chariot can update only existing widget IDs, the server validates/applies type-specific changes, and the client receives `widget_state_patch`.
+- Next design decision: turn selected widgets into bound gameplay trackers with explicit authority, thresholds, and routing into Justice/Emperor, while keeping Chariot as the UI/state delta owner.

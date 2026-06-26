@@ -368,7 +368,12 @@ import {
   syncGameMapMetaPartyPosition,
   withActiveGameMapMeta,
 } from "../services/game/map-position.service.js";
-import { applyAllSegmentEdits, stripGmCommandTags, stripGmNarrativeCommandTags } from "../services/game/segment-edits.js";
+import {
+  applyAllSegmentEdits,
+  normalizeVisibleProseTypography,
+  stripGmCommandTags,
+  stripGmNarrativeCommandTags,
+} from "../services/game/segment-edits.js";
 import { listPartySprites, readPreferredFullBodySpriteBase64 } from "../services/game/sprite.service.js";
 import {
   generatePerceptionHints,
@@ -7605,7 +7610,7 @@ export async function generateRoutes(app: FastifyInstance) {
               const beforePostHermitNarrativeSanitize = visibleGameProse;
               visibleGameProse = tarotTowerNarrativeOnly
                 ? stripGmNarrativeCommandTags(visibleGameProse)
-                : visibleGameProse.trim();
+                : normalizeVisibleProseTypography(visibleGameProse);
               const postHermitNarrativeStrippedChars =
                 beforePostHermitNarrativeSanitize.length - visibleGameProse.length;
 

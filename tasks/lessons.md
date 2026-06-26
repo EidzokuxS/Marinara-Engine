@@ -28,3 +28,4 @@
 - In Tarot-owned Game mode, Justice and Emperor are critical gates, not advisory helpers. If either fails, abort Tower generation visibly instead of letting Tower resolve mechanics or composition from a fallback prompt.
 - Smoke harnesses must fail on SSE `error` and missing `message_saved`. Reading the last assistant message after a failed turn creates false-positive userflow evidence.
 - SPA fallback must exclude built client asset paths. Missing `/assets/*.js` should never receive `index.html`; return JavaScript stale-build recovery or a real 404 so browsers do not crash with strict MIME `text/html` module errors.
+- Visible prose cleanup must be enforced at the final save/stream boundary as well as inside Hermit. If a post-agent branch can return raw `trim()` output, banned typography such as em dashes can leak even when Hermit's own revision contract is correct.
