@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { extractJson } from "../agent-executor.js";
+import { extractJson, parseAgentResponse } from "../agent-executor.js";
 
 describe("agent JSON extraction", () => {
   it("prefers a balanced JSON object after prose and VN bracket tags", () => {
@@ -45,5 +45,18 @@ Draft follows. Ignore this line.
       changed: true,
       notes: ["trimmed"],
     });
+  });
+
+  it("recovers Hermit malformed JSON before the result is marked failed", () => {
+    const raw =
+      '{"revision": "The door opens on dry hinges.\\n\\n[Archivist] [main] [calm]: "Come in."", "changed": true, "notes": ["Tightened hinge beat"]}';
+
+    const parsed = parseAgentResponse({ type: "hermit", settings: {} }, raw);
+    const data = parsed.data as { revision?: string; changed?: boolean; parseError?: boolean };
+
+    assert.equal(parsed.type, "hermit_prose_revision");
+    assert.equal(data.parseError, undefined);
+    assert.equal(data.changed, true);
+    assert.match(data.revision ?? "", /\[Archivist\] \[main\] \[calm\]: "Come in\."/);
   });
 });

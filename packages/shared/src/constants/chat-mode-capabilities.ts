@@ -101,8 +101,8 @@ export const VISUAL_NOVEL_DEFAULT_AGENT_IDS = [
 export const GAME_TAROT_DEFAULT_AGENT_IDS = ["justice", "emperor", "tower", "hermit", "chariot"] as const;
 
 // Game mode has native GM/world-state/quest/combat/knowledge systems.
-// Roleplay helper agents must not be exposed as per-game agent toggles here.
-export const GAME_AGENT_IDS = [] as const;
+// Only Tarot Game agents are allowed here; roleplay helper agents stay out.
+export const GAME_AGENT_IDS = GAME_TAROT_DEFAULT_AGENT_IDS;
 
 export const GAME_OPTIONAL_AGENT_IDS = [] as const;
 

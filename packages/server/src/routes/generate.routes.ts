@@ -7526,11 +7526,31 @@ export async function generateRoutes(app: FastifyInstance) {
                     hermitAgent.model,
                     hermitAgent.toolContext,
                   );
+                  let hermitRetried = false;
+
+                  if (!hermitResult.success && !abortController.signal.aborted) {
+                    const retryResult = await executeAgent(
+                      hermitAgent,
+                      {
+                        ...agentContext,
+                        recentMessages: [],
+                        mainResponse: visibleGameProse,
+                        streaming: false,
+                        preGenInjections: undefined,
+                        parallelResults: undefined,
+                      },
+                      hermitAgent.provider,
+                      hermitAgent.model,
+                      hermitAgent.toolContext,
+                    );
+                    hermitRetried = true;
+                    if (retryResult.success) {
+                      hermitResult = retryResult;
+                    }
+                  }
 
                   if (hermitResult.success) {
                     let applied = applyHermitProseRevision(visibleGameProse, hermitResult.data);
-                    let hermitRetried = false;
-                    let hermitFallback: string | null = null;
                     const hermitData =
                       hermitResult.data && typeof hermitResult.data === "object" && !Array.isArray(hermitResult.data)
                         ? (hermitResult.data as Record<string, unknown>)
@@ -7561,27 +7581,8 @@ export async function generateRoutes(app: FastifyInstance) {
                         applied = applyHermitProseRevision(visibleGameProse, hermitResult.data);
                       }
                     }
-                    const finalHermitData =
-                      hermitResult.data && typeof hermitResult.data === "object" && !Array.isArray(hermitResult.data)
-                        ? (hermitResult.data as Record<string, unknown>)
-                        : null;
-                    if (
-                      !applied.accepted &&
-                      applied.reason === "invalid_revision" &&
-                      finalHermitData?.parseError === true
-                    ) {
-                      hermitFallback = "invalid_revision_kept_original";
-                      applied = {
-                        text: visibleGameProse,
-                        accepted: true,
-                        changed: false,
-                        reason: null,
-                        notes: ["Hermit returned invalid JSON; original prose kept."],
-                      };
-                    }
                     const hermitRecoveredParseError =
                       applied.accepted &&
-                      hermitFallback === null &&
                       hermitResult.data &&
                       typeof hermitResult.data === "object" &&
                       !Array.isArray(hermitResult.data) &&
@@ -7595,7 +7596,6 @@ export async function generateRoutes(app: FastifyInstance) {
                               ...(hermitRecoveredParseError
                                 ? { parseError: false, recoveredParseError: true }
                                 : {}),
-                              ...(hermitFallback ? { parseError: false, fallback: hermitFallback } : {}),
                               ...(hermitRetried ? { retried: true } : {}),
                               applied: {
                                 accepted: applied.accepted,
@@ -7617,7 +7617,6 @@ export async function generateRoutes(app: FastifyInstance) {
                             changed: applied.changed,
                             notes: applied.notes,
                             ...(hermitRetried ? { retried: true } : {}),
-                            ...(hermitFallback ? { fallback: hermitFallback } : {}),
                           }),
                         );
                       }
@@ -7641,6 +7640,11 @@ export async function generateRoutes(app: FastifyInstance) {
                           }),
                         );
                       }
+                      sendSseEvent(reply, {
+                        type: "error",
+                        data: `Critical Tarot agent failed (hermit): ${applied.reason ?? "unsafe revision"}. Tower generation was aborted to preserve prose quality.`,
+                      });
+                      return null;
                     }
                   } else {
                     sendAgentEvent(hermitResult);
@@ -7654,6 +7658,11 @@ export async function generateRoutes(app: FastifyInstance) {
                         }),
                       );
                     }
+                    sendSseEvent(reply, {
+                      type: "error",
+                      data: `Critical Tarot agent failed (hermit): ${hermitResult.error ?? "unknown error"}. Tower generation was aborted to preserve prose quality.`,
+                    });
+                    return null;
                   }
                 } catch (hermitErr) {
                   logger.warn(hermitErr, "[hermit] prose pass failed");
@@ -7666,6 +7675,13 @@ export async function generateRoutes(app: FastifyInstance) {
                       }),
                     );
                   }
+                  sendSseEvent(reply, {
+                    type: "error",
+                    data: `Critical Tarot agent failed (hermit): ${
+                      hermitErr instanceof Error ? hermitErr.message : String(hermitErr)
+                    }. Tower generation was aborted to preserve prose quality.`,
+                  });
+                  return null;
                 }
               }
 

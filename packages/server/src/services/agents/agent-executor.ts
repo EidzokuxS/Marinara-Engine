@@ -18,6 +18,7 @@ import { logger } from "../../lib/logger.js";
 import { wrapContent } from "../prompt/format-engine.js";
 import { settleAgentJobsWithConcurrencyLimit } from "./agent-concurrency.js";
 import { getAssetManifest } from "../game/asset-manifest.service.js";
+import { normalizeHermitProseRevision } from "./tarot/hermit-prose.js";
 
 const MAX_AGENT_CONTEXT_MESSAGES = 200;
 const EXPRESSION_AGENT_RECENT_CONTEXT_MESSAGES = 2;
@@ -2334,7 +2335,7 @@ function sanitizeTextAgentResponse(agentType: string, text: string): string {
 /**
  * Parse the raw LLM response into a typed result.
  */
-function parseAgentResponse(
+export function parseAgentResponse(
   config: Pick<AgentExecConfig, "type" | "settings">,
   responseText: string,
 ): {
@@ -2347,8 +2348,18 @@ function parseAgentResponse(
     try {
       const jsonStr = extractJson(responseText);
       const data = JSON.parse(jsonStr);
+      if (config.type === "hermit") {
+        const normalized = normalizeHermitProseRevision(data);
+        if (normalized) return { type: resultType, data: normalized };
+        const recovered = normalizeHermitProseRevision({ raw: responseText, parseError: true });
+        if (recovered) return { type: resultType, data: recovered };
+      }
       return { type: resultType, data };
     } catch {
+      if (config.type === "hermit") {
+        const recovered = normalizeHermitProseRevision({ raw: responseText, parseError: true });
+        if (recovered) return { type: resultType, data: recovered };
+      }
       return { type: resultType, data: { raw: responseText, parseError: true } };
     }
   }

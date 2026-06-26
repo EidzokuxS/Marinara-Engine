@@ -371,3 +371,14 @@
 - [x] Add Tower to the visible default Tarot Game stack.
 - [x] Keep Tower out of the generic agent executor because the GM harness owns its execution.
 - [x] Verify build/tests/lint and push.
+
+## Current Task: Hermit Negation Leak
+
+- [x] Record correction: inspect agent logs before blaming upstream generation.
+- [x] Tighten Hermit's changed=false contract around Zetta negation scan and VN thought lines.
+- [x] Mirror the same negation-as-description family into Tower's visible prose contract.
+- [x] Recover malformed Hermit JSON in the executor before marking the prose pass failed.
+- [x] Make enabled Game Hermit a critical pre-save prose gate instead of keeping original Tower prose on parse failure.
+- [x] Run Hermit's strict non-streaming retry when the first Hermit call returns invalid JSON or empty content.
+- [x] Verify build/tests/lint and temp Game userflow smoke.
+- [x] Commit and push.

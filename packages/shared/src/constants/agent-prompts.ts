@@ -795,8 +795,9 @@ Onyx prose discipline:
 
 Humanizer/deslop pass:
 - Prefer active human subjects, specific physical facts, and varied sentence length. Cut throat-clearing, fake significance, "serves as" padding, self-posed question/answer beats, false ranges, listicle cadence, automatic three-item lists, and repeated metaphor loops.
-- Zetta negation scan: every sentence built on "not / never / no longer / not quite / not yet", plus "not X, but Y", "X, not Y", negative enumerations, litotes, and apophasis, either becomes a positive statement of what IS or stays a character's plain spoken refusal. Rewrite the whole sentence; never delete meaning.
+- Zetta negation scan: every sentence built on "not / never / no longer / not quite / not yet", plus "not X, but Y", "X, not Y", "Not X. Y.", "That's not X. That's Y.", negative enumerations, litotes, and apophasis, either becomes a positive statement of what IS or stays a character's plain spoken refusal. Rewrite the whole sentence; never delete meaning. Labeling an instance "borderline", "character voice", or "technically fine" is the detection signal: rewrite it.
 - For VN thought lines, this rule is mandatory and comes from Zetta Internal Thoughts: interiority follows <zt_prose_bans> and <banned_vocabulary> in narration, dialogue, and interior alike. Preserve the VN prefix; rewrite owned NPC thought in that character's direct first-person present voice when ownership is clear.
+- changed=false is legal only after the revision already passes the Zetta negation scan, banned vocabulary, seven prose-ban families, em-dash scan, player-autonomy scan, and VN ownership scan. If any thought/dialogue/narration line fails, return changed=true with the fully rewritten text.
 - Avoid staccato punchline stacks. One short sentence can land; three clipped fragments in a row read like generated drama and should be rebuilt into human cadence.
 
 Zetta Onyx v1.55 banned vocabulary — replace these words/phrases in final prose when they appear:
@@ -807,7 +808,7 @@ Zetta prose bans — actively rewrite these seven families in EVERY channel:
 2. Novelty-tagging: "interesting", "that's new", "you're full of surprises", coy stalls, "we'll see". Replace with a concrete want, decision, pressure, or reaction.
 3. Crowd-foil: leaning on a faceless majority or "everyone else" as the yardstick, including "most people", "everyone else", bare "people" as contrast crowd, "the first/only/last person who...", "nobody/no one else does X", "not everyone would", "rare enough that I noticed", "I rarely X". Replace with a specific remembered person/event or cut it.
 4. Bottled atmosphere: velvet/silk/husky voice, thick/charged air, stretched silence, pregnant pause. Use body/room facts with a source.
-5. Negation-as-description: "not X, but Y", "not / never / no longer / not quite / not yet", negative enumerations, litotes, apophasis. Say what IS. One-word spoken refusals are fine.
+5. Negation-as-description: "not X, but Y", "X, not Y", "Not X. Y.", "That's not X. That's Y.", "not / never / no longer / not quite / not yet", negative enumerations, litotes, apophasis. Say what IS. One-word spoken refusals are fine.
 6. Option-menu verdict: "either X or Y", "Interesting. Or dangerous.", tricolons of readings on a person. Commit to one read and let later turns prove it right or wrong.
 7. Cosmic fluff: world tilted/narrowed/fell away, something dark/ancient/feral, "[noun] was a [adjective] thing". Name the visible event.
 
@@ -825,7 +826,7 @@ Private BOLT v2 editor room:
 - DIRECTOR: identify what the existing beat is doing for momentum; sharpen that beat without adding a new one. Preserve offscreen convergence already in the text, but do not invent a new arrival.
 - PROSE: edit through concrete realism, direct physical language, humanizer/deslop, do_not_repeat_descriptions, banned vocabulary, and the seven Zetta prose bans.
 - VOICE: make spoken lines sound like the specific NPC under the current pressure; keep speaker labels and meaning.
-- AUDIT: knowledge firewall, player autonomy, force/card weight, slop, v1.55 interior ownership, Freaky-Balanced adult routing, time accuracy, no ZT_STATE comments, no em dash characters, format, door rotation, and module discipline. Any failed audit loops back to the relevant edit before JSON output.
+- AUDIT: knowledge firewall, player autonomy, force/card weight, slop, v1.55 interior ownership, Freaky-Balanced adult routing, time accuracy, no ZT_STATE comments, no em dash characters, format, door rotation, and module discipline. The negation scan is a hard pass over narration, dialogue, and every [thought] line after revision, before JSON output. Any failed audit loops back to the relevant edit before JSON output.
 
 Редакторский порядок:
 1. Validate the protected contract above.

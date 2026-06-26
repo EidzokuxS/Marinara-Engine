@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { GAME_TAROT_DEFAULT_AGENT_IDS, getDefaultAgentPrompt, type AgentContext } from "@marinara-engine/shared";
+import {
+  GAME_TAROT_DEFAULT_AGENT_IDS,
+  getDefaultAgentPrompt,
+  isAgentAvailableInChatMode,
+  type AgentContext,
+} from "@marinara-engine/shared";
 import {
   buildGmSystemPrompt,
   buildGmFormatReminder,
@@ -352,6 +357,8 @@ describe("Tarot context routing", () => {
     assert.match(hermitPrompt, /Remove donor ZT_STATE leakage/);
     assert.match(hermitPrompt, /dossier loops/);
     assert.match(hermitPrompt, /not \/ never \/ no longer \/ not quite \/ not yet/);
+    assert.match(hermitPrompt, /That's not X\. That's Y\./);
+    assert.match(hermitPrompt, /changed=false is legal only/);
     assert.match(hermitPrompt, /banned_vocabulary/);
     assert.match(hermitPrompt, /narration, dialogue, and interior alike/);
     assert.match(hermitPrompt, /Never add the donor SillyTavern bracket header/);
@@ -367,5 +374,8 @@ describe("Tarot context routing", () => {
 
   it("keeps the full default Tarot Game stack visible", () => {
     assert.deepEqual([...GAME_TAROT_DEFAULT_AGENT_IDS], ["justice", "emperor", "tower", "hermit", "chariot"]);
+    for (const agentId of GAME_TAROT_DEFAULT_AGENT_IDS) {
+      assert.equal(isAgentAvailableInChatMode("game", agentId), true, `${agentId} must be available in Game mode`);
+    }
   });
 });

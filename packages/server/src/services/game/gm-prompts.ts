@@ -641,7 +641,7 @@ function buildOnyxNarrativeCraftLines(
     `2. Novelty-tagging: "interesting", "that's new", "you're full of surprises", coy stalls. State the concrete want the act triggers.`,
     `3. Crowd-foil: vague "most people" or "everyone else" as a contrast. Use a specific person/event or cut it.`,
     `4. Bottled atmosphere: velvet/silk/husky voice, thick or charged air, stretched silence, pregnant pause. Give a body or room fact with a source.`,
-    `5. Negation-as-description: "not X, but Y", negative enumerations, litotes, apophasis. Say what is.`,
+    `5. Negation-as-description: "not X, but Y", "X, not Y", "Not X. Y.", "That's not X. That's Y.", sentences built on "not / never / no longer / not quite / not yet", negative enumerations, litotes, apophasis. Say what is. Plain one-word spoken refusals are fine.`,
     `6. Option-menu verdict: "either smart or stupid", tricolons of readings on a person. Commit to one read and act on it.`,
     `7. Cosmic fluff: the world tilted/narrowed/fell away, "something dark/ancient/feral", "[noun] was a [adjective] thing". Name the visible event.`,
     `</zt_prose_bans>`,
@@ -666,7 +666,7 @@ function buildBoltPrivateTurnAuditLines(ctx: {
     `AUDIT / Knowledge firewall: trace every NPC line to in-scene source. NPCs react only to player action and speech, never unspoken player thought, narration-only intent, or off-screen events.`,
     `AUDIT / Autonomy: no line speaks, feels, decides, moves, or privately thinks for the player character. Pressure-test against <forward_motion>; cut mirrors of the player's input.`,
     `AUDIT / Force: name the strongest action any character takes this turn and confirm it lands at the size their card and nature set. A character who would claim, take, break, protect, refuse, expose, desire, or hurt gets that act at full weight, and the outcome serves whoever drove it.`,
-    `AUDIT / Slop: apply <banned_vocabulary>, <humanizer_deslop>, and all seven <zt_prose_bans> families across narration, dialogue, and interiority. Cut throat-clearing, rhetorical question/answer setups, negative parallelism, false significance, tricolon padding, and staccato punchline stacks. No meta.`,
+    `AUDIT / Slop: apply <banned_vocabulary>, <humanizer_deslop>, and all seven <zt_prose_bans> families across narration, dialogue, and interiority. Cut throat-clearing, rhetorical question/answer setups, negative parallelism, negation-as-description, false significance, tricolon padding, and staccato punchline stacks. A line defended as "character voice" or "borderline" gets rewritten. No meta.`,
     `AUDIT / Interior: explicit NPC private thoughts are first-person present-tense, never player-character thought, never thinker-naming third person, and never bare standalone italic lines in Game. Emit them as [Name] [thought] [expression]: Thought or fold them into narration. Do not disguise private thought as [Name] [side] [thinking].`,
     `AUDIT / Format: obey the VN/Game output format, language, active sprites, turn length, and <door_rotation> when loaded.`,
     ctx.rating === "nsfw"
