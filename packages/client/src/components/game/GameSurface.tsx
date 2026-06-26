@@ -2498,7 +2498,11 @@ export function GameSurface({
   // Apply segment-tied effects when the user progresses to a new segment
   const handleSegmentEnter = useCallback(
     (segmentIndex: number) => {
-      useGameModeStore.getState().setDiceRollResult(null);
+      const currentDiceRoll = useGameModeStore.getState().diceRollResult;
+      const isJusticeCheck = Boolean(currentDiceRoll?.check) || typeof currentDiceRoll?.dc === "number";
+      if (!isJusticeCheck) {
+        useGameModeStore.getState().setDiceRollResult(null);
+      }
       const sceneEffectsApplied = appliedSegmentsRef.current.has(segmentIndex);
       const inventoryApplied = appliedInventorySegmentsRef.current.has(segmentIndex);
       const effects = sceneEffectsApplied ? [] : pendingSegmentEffects.filter((e) => e.segment === segmentIndex);

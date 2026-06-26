@@ -43,6 +43,40 @@ const REVALIDATE_FILES = new Set(["index.html"]);
 const NO_STORE_FILES = new Set(["manifest.json", "sw.js", "registerSW.js"]);
 const MAX_UPLOAD_BYTES = 256 * 1024 * 1024;
 
+export function isClientAssetRequest(url: string | undefined): boolean {
+  return !!url && (url.startsWith("/assets/") || url.startsWith("/sprites/"));
+}
+
+export function isMissingModuleScriptRequest(url: string | undefined): boolean {
+  return !!url && /^\/assets\/[^?#]+\.js(?:[?#].*)?$/.test(url);
+}
+
+export function buildMissingAssetRecoveryModule(): string {
+  return `
+const reloadKey = "marinara:missing-asset-reload";
+const alreadyReloaded = sessionStorage.getItem(reloadKey) === "1";
+sessionStorage.setItem(reloadKey, "1");
+try {
+  if ("serviceWorker" in navigator) {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+  }
+  if ("caches" in globalThis) {
+    const keys = await caches.keys();
+    await Promise.all(keys.map((key) => caches.delete(key)));
+  }
+} catch {
+  // Best-effort stale-build recovery.
+}
+if (!alreadyReloaded) {
+  const url = new URL(location.href);
+  url.searchParams.set("_marinara_reload", Date.now().toString(36));
+  location.replace(url.toString());
+}
+export {};
+`.trimStart();
+}
+
 export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
   const app = Fastify({
     logger: {
@@ -187,6 +221,21 @@ export async function buildApp(https?: { cert: Buffer; key: Buffer }) {
     app.setNotFoundHandler(async (req, reply) => {
       if (req.raw.url?.startsWith("/api/")) {
         return reply.status(404).send({ error: "Not Found" });
+      }
+
+      if (isMissingModuleScriptRequest(req.raw.url)) {
+        reply.header("Cache-Control", "no-store, no-cache, must-revalidate");
+        reply.header("Pragma", "no-cache");
+        reply.header("Expires", "0");
+        reply.type("application/javascript; charset=utf-8");
+        return reply.status(200).send(buildMissingAssetRecoveryModule());
+      }
+
+      if (isClientAssetRequest(req.raw.url)) {
+        reply.header("Cache-Control", "no-store, no-cache, must-revalidate");
+        reply.header("Pragma", "no-cache");
+        reply.header("Expires", "0");
+        return reply.status(404).send("Not Found");
       }
 
       reply.header("Cache-Control", "no-cache, must-revalidate");

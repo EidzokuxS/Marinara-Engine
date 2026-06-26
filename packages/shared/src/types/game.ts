@@ -169,6 +169,8 @@ export interface GameSetupConfig {
   gmCharacterId?: string;
   /** Party member IDs; library character IDs or `npc:<slug>` tracked-NPC IDs. */
   partyCharacterIds: string[];
+  /** GM-only library character IDs used as offscreen canon/reference cast, not party members. */
+  referenceCharacterIds?: string[];
   /** User's persona ID */
   personaId?: string;
   /** Connection to use for the scene wrap-up turn (backgrounds, music, widgets, etc.).
@@ -206,6 +208,10 @@ export interface GameSetupConfig {
 
 /** Result of a dice roll. */
 export interface DiceRollResult {
+  /** Optional source label, e.g. "justice" for Tarot adjudication rolls. */
+  source?: string;
+  /** Human-readable reason for the roll, e.g. "Pick the locked apartment door". */
+  check?: string;
   /** The notation used, e.g. "2d6+3" */
   notation: string;
   /** Individual die results */
@@ -214,6 +220,18 @@ export interface DiceRollResult {
   modifier: number;
   /** Final total */
   total: number;
+  /** Optional target number for checks. */
+  dc?: number;
+  /** Optional total - dc margin for checks. */
+  margin?: number | null;
+  /** Optional check result branch, e.g. "success" or "fail". */
+  result?: string;
+  /** Optional check success flag. */
+  success?: boolean;
+  /** Authoritative outcome selected by the harness. */
+  outcome?: string;
+  /** Short adjudication reason from the owning agent. */
+  reasoning?: string;
 }
 
 /** Result of a skill check resolution. */

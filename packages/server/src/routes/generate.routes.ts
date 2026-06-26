@@ -34,6 +34,7 @@ import type {
   GameCampaignPlan,
   GameState,
   HapticDeviceCommand,
+  HudWidget,
   PlayerStats,
   LorebookEntryTimingState,
   ChatSummaryEntry,
@@ -85,6 +86,9 @@ import { createAgentPipeline, type ResolvedAgent, type AgentInjection } from "..
 import { DATA_DIR } from "../utils/data-dir.js";
 import { executeAgent, normalizeAgentContextSize, resolveAgentResultType } from "../services/agents/agent-executor.js";
 import { resolveJustice } from "../services/agents/tarot/justice-resolve.js";
+import { applyChariotWidgetUpdates, normalizeChariotWidgetUpdates } from "../services/agents/tarot/chariot-widgets.js";
+import { normalizeEmperorGameCommands } from "../services/agents/tarot/emperor-commands.js";
+import { applyHermitProseRevision } from "../services/agents/tarot/hermit-prose.js";
 import { matchCustomAgentActivation } from "./generate/agent-activation.js";
 import { listCharacterSprites } from "../services/game/sprite.service.js";
 import { generateChatBackground } from "../services/game/game-asset-generation.js";
@@ -236,7 +240,12 @@ import {
   addNpcEntry,
   type Journal,
 } from "../services/game/journal.service.js";
-import { buildGmSystemPrompt, buildGmFormatReminder, type GmPromptContext } from "../services/game/gm-prompts.js";
+import {
+  buildGmSystemPrompt,
+  buildGmFormatReminder,
+  buildTowerNarrativeSystemPrompt,
+  type GmPromptContext,
+} from "../services/game/gm-prompts.js";
 import {
   applyMapUpdateCommand,
   getGameMapsFromMeta,
@@ -244,7 +253,7 @@ import {
   syncGameMapMetaPartyPosition,
   withActiveGameMapMeta,
 } from "../services/game/map-position.service.js";
-import { applyAllSegmentEdits, stripGmCommandTags } from "../services/game/segment-edits.js";
+import { applyAllSegmentEdits, stripGmCommandTags, stripGmNarrativeCommandTags } from "../services/game/segment-edits.js";
 import { listPartySprites, readPreferredFullBodySpriteBase64 } from "../services/game/sprite.service.js";
 import {
   generatePerceptionHints,
@@ -257,6 +266,70 @@ import { sidecarModelService } from "../services/sidecar/sidecar-model.service.j
 
 function cardPromptText(value: unknown): string {
   return typeof value === "string" ? stripMacroComments(value).trim() : "";
+}
+
+function buildCharacterReferencePromptCard(characterData: Record<string, any>): { name: string; card: string } | null {
+  const name = cardPromptText(characterData.name);
+  if (!name) return null;
+
+  const fields: Array<[string, string]> = [
+    ["Personality", cardPromptText(characterData.personality)],
+    ["Description", cardPromptText(characterData.description)],
+    ["Scenario", cardPromptText(characterData.scenario)],
+    ["Backstory", cardPromptText(characterData.extensions?.backstory || characterData.backstory)],
+    ["Appearance", cardPromptText(characterData.extensions?.appearance || characterData.appearance)],
+    ["Creator Notes", cardPromptText(characterData.creator_notes)],
+    ["System Prompt", cardPromptText(characterData.system_prompt)],
+    ["Post-History Instructions", cardPromptText(characterData.post_history_instructions)],
+    ["Example Dialogue", cardPromptText(characterData.mes_example)],
+  ];
+
+  const parts = [`Name: ${name}`];
+  for (const [label, value] of fields) {
+    if (value) parts.push(`${label}: ${value}`);
+  }
+
+  return { name, card: parts.join("\n") };
+}
+
+function buildCharacterReferenceIndexEntry(characterData: Record<string, any>): { name: string; entry: string } | null {
+  const name = cardPromptText(characterData.name);
+  if (!name) return null;
+  const source =
+    cardPromptText(characterData.description) ||
+    cardPromptText(characterData.personality) ||
+    cardPromptText(characterData.scenario) ||
+    cardPromptText(characterData.extensions?.backstory || characterData.backstory) ||
+    "No short description available.";
+  const oneLine = source.replace(/\s+/g, " ").trim();
+  const shortDescription = oneLine.length > 220 ? `${oneLine.slice(0, 217).trimEnd()}...` : oneLine;
+  return { name, entry: `${name}: ${shortDescription}` };
+}
+
+function parsePresentCharacterNamesForReference(value: unknown): Set<string> {
+  return new Set(parsePresentCharacterNames(value).map((name) => name.toLowerCase()));
+}
+
+function parsePresentCharacterNames(value: unknown): string[] {
+  let parsed = value;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      parsed = [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .map((character) =>
+      character && typeof character === "object" && typeof (character as Record<string, unknown>).name === "string"
+        ? ((character as Record<string, unknown>).name as string).trim()
+        : "",
+    )
+    .filter(
+      (name, index, names) =>
+        name.length > 0 && names.findIndex((other) => other.toLowerCase() === name.toLowerCase()) === index,
+    );
 }
 
 function bumpCharacterVersion(value: unknown): string {
@@ -354,6 +427,83 @@ export function normalizeHapticAgentCommands(data: Record<string, unknown>): Arr
   }
 
   return [];
+}
+
+function summarizeJusticeCheckLabel(userMessage: string | null | undefined): string {
+  const cleaned = (userMessage ?? "")
+    .replace(/^\s*\[[^\]\n]*\]\s*/g, "")
+    .replace(/<[^>\n]+>[\s\S]*?<\/[^>\n]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const firstSentence = cleaned.split(/(?<=[.!?])\s+/)[0]?.trim() || cleaned;
+  const withoutLead = firstSentence
+    .replace(/^I\s+(try|attempt|want|quietly|carefully|silently)\s+to\s+/i, "")
+    .replace(/^I\s+(try|attempt|want|quietly|carefully|silently)\s+/i, "")
+    .replace(/^I\s+/i, "")
+    .trim();
+  const label = withoutLead || "Justice check";
+  return label.length > 96 ? `${label.slice(0, 93).trimEnd()}...` : label;
+}
+
+function normalizeGameInventoryForTarot(value: unknown): Array<{ name: string; quantity: number }> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const source = item as Record<string, unknown>;
+    const name = typeof source.name === "string" ? source.name.trim() : "";
+    if (!name) return [];
+    const quantity = typeof source.quantity === "number" && Number.isFinite(source.quantity) ? source.quantity : 1;
+    return [{ name, quantity: Math.max(1, Math.trunc(quantity)) }];
+  });
+}
+
+function compactGameMapForTarot(map: GameMap | null): Record<string, unknown> | null {
+  if (!map) return null;
+  const base: Record<string, unknown> = {
+    type: map.type,
+    name: map.name,
+    description: map.description,
+    partyPosition: map.partyPosition,
+  };
+  if (map.type === "node") {
+    base.nodes = (map.nodes ?? []).map((node) => ({
+      id: node.id,
+      label: node.label,
+      description: node.description,
+      discovered: node.discovered,
+    }));
+    base.edges = (map.edges ?? []).map((edge) => ({ from: edge.from, to: edge.to }));
+  } else {
+    base.cells = (map.cells ?? [])
+      .filter((cell) => cell.discovered)
+      .map((cell) => ({
+        x: cell.x,
+        y: cell.y,
+        label: cell.label,
+        description: cell.description,
+        discovered: cell.discovered,
+      }));
+  }
+  return base;
+}
+
+function compactGameNpcsForTarot(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((npc) => {
+    if (!npc || typeof npc !== "object") return [];
+    const source = npc as Record<string, any>;
+    const name = typeof source.name === "string" ? source.name.trim() : "";
+    if (!name) return [];
+    return [
+      {
+        name,
+        description: typeof source.description === "string" ? source.description : "",
+        location: typeof source.location === "string" ? source.location : "",
+        reputation: typeof source.reputation === "number" ? source.reputation : 0,
+        notes: Array.isArray(source.notes) ? source.notes.filter((note: unknown) => typeof note === "string") : [],
+      },
+    ];
+  });
 }
 
 const COMPLETE_OUTPUT_END_RE = /[.!?…。！？]["'”’)\]}»›]*$/;
@@ -1928,7 +2078,7 @@ export async function generateRoutes(app: FastifyInstance) {
         logger.info("[generate] Conversation client disconnected; generation will continue for chat: %s", input.chatId);
         return;
       }
-      logger.info("[abort] Client disconnected — aborting generation");
+      logger.info("[abort] Client disconnected - aborting generation");
       abortController.abort();
       if (activeGenerations) activeGenerations.delete(input.chatId);
       if (baseUrl) {
@@ -4543,7 +4693,14 @@ export async function generateRoutes(app: FastifyInstance) {
           }
         }
 
-        // ── Game mode: build and inject full GM system prompt ──
+        let tarotTowerNarrativeOnly = false;
+        let tarotAgentContextPackets: {
+          emperorComposition?: Record<string, unknown>;
+          justiceAdjudication?: Record<string, unknown>;
+        } = {};
+        let gameLoreContextForTarot: string | null = null;
+
+        // ── Game mode: build and inject full GM/Tower system prompt ──
         if (chatMode === "game") {
           // Gather game metadata for prompt context
           const setupConfig =
@@ -4571,6 +4728,7 @@ export async function generateRoutes(app: FastifyInstance) {
             : [];
           const playerNotes =
             typeof chatMeta.gamePlayerNotes === "string" ? chatMeta.gamePlayerNotes.trim() : undefined;
+          const playerInventoryForTarot = normalizeGameInventoryForTarot(chatMeta.gameInventory);
 
           // Resolve GM character card if in "character" GM mode
           let gmCharacterCard: string | null = null;
@@ -4678,6 +4836,43 @@ export async function generateRoutes(app: FastifyInstance) {
               }
             }
             partyCards.push({ name, card: parts.join("\n") });
+          }
+
+          const referenceCharacterIds = Array.from(
+            new Set(
+              [
+                ...(Array.isArray(chatMeta.gameReferenceCharacterIds)
+                  ? (chatMeta.gameReferenceCharacterIds as unknown[])
+                  : []),
+                ...(Array.isArray((setupConfig as Record<string, unknown> | null)?.referenceCharacterIds)
+                  ? (((setupConfig as Record<string, unknown>).referenceCharacterIds as unknown[]) ?? [])
+                  : []),
+              ].filter((id): id is string => typeof id === "string" && id.trim().length > 0),
+            ),
+          ).filter((id) => !partyCharIds.includes(id) && id !== gmCharId);
+          const referenceSnapshot = await selectedGameStateSnapshotPromise;
+          const presentCharacterNames = parsePresentCharacterNames(referenceSnapshot?.presentCharacters);
+          const presentReferenceNames = parsePresentCharacterNamesForReference(referenceSnapshot?.presentCharacters);
+          const referenceCharacterIndex: string[] = [];
+          const referenceCharacterCards: Array<{ name: string; card: string }> = [];
+          for (const referenceCharacterId of referenceCharacterIds) {
+            try {
+              const referenceCharacter = await chars.getById(referenceCharacterId);
+              if (!referenceCharacter) continue;
+              const referenceData =
+                typeof referenceCharacter.data === "string"
+                  ? JSON.parse(referenceCharacter.data)
+                  : referenceCharacter.data;
+              const referenceIndexEntry = buildCharacterReferenceIndexEntry(referenceData as Record<string, any>);
+              if (!referenceIndexEntry) continue;
+              referenceCharacterIndex.push(referenceIndexEntry.entry);
+              if (!presentReferenceNames.has(referenceIndexEntry.name.toLowerCase())) continue;
+              const referenceCard = buildCharacterReferencePromptCard(referenceData as Record<string, any>);
+              if (!referenceCard) continue;
+              referenceCharacterCards.push(referenceCard);
+            } catch {
+              /* ignore malformed reference character cards */
+            }
           }
 
           // Resolve player persona card
@@ -4796,6 +4991,9 @@ export async function generateRoutes(app: FastifyInstance) {
             sessionNumber,
             partyNames,
             partyCards,
+            referenceCharacterIndex,
+            referenceCharacterCards,
+            presentCharacterNames,
             playerName: personaName,
             playerCard,
             gmCharacterCard,
@@ -4815,6 +5013,8 @@ export async function generateRoutes(app: FastifyInstance) {
               : Array.isArray(gameBlueprint?.hudWidgets)
                 ? (gameBlueprint.hudWidgets as any[])
                 : undefined,
+            chariotHandlesWidgets: resolvedAgents.some((agent) => agent.type === "chariot"),
+            justiceHandlesAdjudication: resolvedAgents.some((agent) => agent.type === "justice"),
             hasSceneModel,
             playerMoved,
             turnNumber: gameTurnNumber,
@@ -4828,7 +5028,76 @@ export async function generateRoutes(app: FastifyInstance) {
             language: (setupConfig?.language as string) || undefined,
           };
 
-          const builtGmPrompt = buildGmSystemPrompt(gmCtx);
+          tarotAgentContextPackets = {
+            emperorComposition: {
+              owner: "emperor",
+              purpose:
+                "Own turn composition, pacing, world reaction, choices/QTEs, map/inventory/state/reputation/party/session directives. Tower must not receive this planning context.",
+              game: {
+                state: gameActiveState,
+                sessionNumber,
+                difficulty: gmCtx.difficulty,
+                genre: gmCtx.genre,
+                setting: gmCtx.setting,
+                tone: gmCtx.tone,
+                rating: gmCtx.rating,
+                time: gameTime ?? null,
+                weather: weatherContext ?? null,
+              },
+              strategicContinuity: {
+                storyArc,
+                plotTwists,
+                campaignPlan: gameBlueprint?.campaignPlan ?? null,
+                sessionSummaries,
+                playerNotes: playerNotes ?? null,
+                worldForecast: null,
+              },
+              sceneState: {
+                map: compactGameMapForTarot(gameMap),
+                trackedNpcs: compactGameNpcsForTarot(gameNpcs),
+                presentCharacters: presentCharacterNames,
+                partyNames,
+                referenceCharacterIndex,
+                presentReferenceCharacterCards: referenceCharacterCards,
+                inventory: playerInventoryForTarot,
+              },
+              commandOwnership: {
+                allowed:
+                  "[choices:], [qte:], [map_update:], [inventory:], [Note:], [Book:], [state:], [reputation:], [party_change:], [session_end:]",
+                forbidden: "[skill_check:] belongs to Justice; [widget:] belongs to Chariot; prose belongs to Tower.",
+              },
+            },
+            justiceAdjudication: {
+              owner: "justice",
+              purpose:
+                "Own realism, feasibility, DC selection, and outcome branches for the player's immediate action before the harness rolls.",
+              game: {
+                state: gameActiveState,
+                difficulty: gmCtx.difficulty,
+                genre: gmCtx.genre,
+                setting: gmCtx.setting,
+                time: gameTime ?? null,
+                weather: weatherContext ?? null,
+              },
+              immediateScene: {
+                map: compactGameMapForTarot(gameMap),
+                presentCharacters: presentCharacterNames,
+                partyNames,
+                inventory: playerInventoryForTarot,
+                playerNotes: playerNotes ?? null,
+              },
+              adjudicationRules: {
+                towerDoesNotRoll: true,
+                harnessRollsDice: true,
+                outputMustContainBothBranchesForRoll: true,
+              },
+            },
+          };
+
+          tarotTowerNarrativeOnly = resolvedAgents.some((agent) => agent.type === "emperor");
+          const builtGmPrompt = tarotTowerNarrativeOnly
+            ? buildTowerNarrativeSystemPrompt(gmCtx)
+            : buildGmSystemPrompt(gmCtx);
 
           // User can override/extend with a custom prompt from Chat Settings
           const customGmPrompt = typeof chatMeta.customGmPrompt === "string" ? chatMeta.customGmPrompt.trim() : "";
@@ -4898,6 +5167,7 @@ export async function generateRoutes(app: FastifyInstance) {
               .filter(Boolean)
               .join("\n");
             if (loreContent) {
+              gameLoreContextForTarot = loreContent;
               const loreBlock = `<lore>\n${loreContent}\n</lore>`;
               // Append lore to the GM system prompt
               const sysMsg = finalMessages.find((m) => m.role === "system");
@@ -4927,11 +5197,13 @@ export async function generateRoutes(app: FastifyInstance) {
               finalMessages.length,
             );
             debugLog(
-              "[debug/game] GM context: storyArc=%s, map=%s, npcs=%d, widgets=%s, hasSceneModel=%s, state=%s",
-              !!gmCtx.storyArc,
+              "[debug/game] GM context: promptMode=%s, storyArc=%s, map=%s, npcs=%d, widgets=%s, presentCharacters=%d, hasSceneModel=%s, state=%s",
+              tarotTowerNarrativeOnly ? "tower_narrative" : "legacy_gm",
+              tarotTowerNarrativeOnly ? false : !!gmCtx.storyArc,
               !!gmCtx.map,
-              gmCtx.npcs.length,
-              !!gmCtx.hudWidgets?.length,
+              tarotTowerNarrativeOnly ? 0 : gmCtx.npcs.length,
+              tarotTowerNarrativeOnly ? false : !!gmCtx.hudWidgets?.length,
+              gmCtx.presentCharacterNames?.length ?? 0,
               gmCtx.hasSceneModel,
               gmCtx.gameActiveState,
             );
@@ -4952,22 +5224,26 @@ export async function generateRoutes(app: FastifyInstance) {
           const formatReminder = resolvePromptMacros(
             buildGmFormatReminder({
               hasSceneModel,
-              hudWidgets: gmCtx.hudWidgets,
+              hudWidgets: tarotTowerNarrativeOnly ? undefined : gmCtx.hudWidgets,
+              chariotHandlesWidgets: gmCtx.chariotHandlesWidgets,
+              justiceHandlesAdjudication: gmCtx.justiceHandlesAdjudication,
               turnNumber: gameTurnNumber,
               gameActiveState: gameActiveState as import("@marinara-engine/shared").GameActiveState,
               sessionNumber,
               gameTime,
-              map: gameMap,
+              map: tarotTowerNarrativeOnly ? null : gameMap,
               partyNames: gmCtx.partyNames,
               playerName: gmCtx.playerName,
               characterSprites: gmCtx.characterSprites,
               language: gmCtx.language,
               rating: gmCtx.rating,
-              canGenerateBackgrounds: gmCtx.canGenerateBackgrounds,
-              artStylePrompt: gmCtx.artStylePrompt,
+              canGenerateBackgrounds: tarotTowerNarrativeOnly ? false : gmCtx.canGenerateBackgrounds,
+              artStylePrompt: tarotTowerNarrativeOnly ? undefined : gmCtx.artStylePrompt,
               addressMode,
               playerDiceRollSubmitted,
+              towerNarrativeOnly: tarotTowerNarrativeOnly,
               playerInventory: (() => {
+                if (tarotTowerNarrativeOnly) return undefined;
                 try {
                   const inv = (chatMeta.gameInventory as Array<{ name: string; quantity: number }>) ?? [];
                   return inv.length > 0 ? inv : undefined;
@@ -5280,6 +5556,29 @@ export async function generateRoutes(app: FastifyInstance) {
           streaming: input.streaming,
           signal: abortController.signal,
         };
+
+        const activeHudWidgetsForAgents: HudWidget[] =
+          chatMode === "game" && Array.isArray(chatMeta.gameWidgetState)
+            ? (chatMeta.gameWidgetState as HudWidget[])
+            : chatMode === "game" &&
+                chatMeta.gameBlueprint &&
+                typeof chatMeta.gameBlueprint === "object" &&
+                !Array.isArray(chatMeta.gameBlueprint) &&
+                Array.isArray((chatMeta.gameBlueprint as { hudWidgets?: unknown }).hudWidgets)
+              ? ((chatMeta.gameBlueprint as { hudWidgets: HudWidget[] }).hudWidgets as HudWidget[])
+              : [];
+        if (activeHudWidgetsForAgents.length > 0) {
+          agentContext.memory._activeHudWidgets = activeHudWidgetsForAgents;
+        }
+        if (tarotAgentContextPackets.emperorComposition) {
+          agentContext.memory._emperorCompositionContext = tarotAgentContextPackets.emperorComposition;
+        }
+        if (tarotAgentContextPackets.justiceAdjudication) {
+          agentContext.memory._justiceAdjudicationContext = tarotAgentContextPackets.justiceAdjudication;
+        }
+        if (gameLoreContextForTarot) {
+          agentContext.memory._tarotLoreContext = gameLoreContextForTarot;
+        }
 
         // ── Interval gating: Narrative Director only intervenes every N assistant messages ──
         const directorAgent = resolvedAgents.find((a) => a.type === "director");
@@ -5884,7 +6183,7 @@ export async function generateRoutes(app: FastifyInstance) {
         const textRewriteAgentIds = new Set(textRewriteAgents.map((a) => a.id));
         const lorebookKeeperAgent = resolvedAgents.find((a) => a.type === "lorebook-keeper") ?? null;
         let pipelineAgents = resolvedAgents.filter(
-          (a) => !textRewriteAgentIds.has(a.id) && a.type !== "lorebook-keeper",
+          (a) => !textRewriteAgentIds.has(a.id) && a.type !== "lorebook-keeper" && a.type !== "hermit",
         );
 
         // When manualTrackers is enabled, strip tracker-category agents from the
@@ -6041,6 +6340,11 @@ export async function generateRoutes(app: FastifyInstance) {
                 )
               : allToolDefs.filter((td) => !agentOnlyToolNames.has(td.function.name));
           }
+        }
+
+        if (chatMode === "game" && tarotTowerNarrativeOnly && toolDefs?.length) {
+          logger.debug("[tools] Omitted %d main-generation tools for Tower narrative-only mode", toolDefs.length);
+          toolDefs = undefined;
         }
 
         // ── Spotify Token Refresh (Early) ──
@@ -6260,7 +6564,14 @@ export async function generateRoutes(app: FastifyInstance) {
         // "emperor" is excluded from the batched pipeline because it runs MANUALLY
         // after Justice in the fresh branch (it depends on Justice's resolved outcome —
         // a sequential chain link that the parallel-batched pipeline can't express).
-        const EXCLUDED_FROM_PIPELINE = new Set(["html", "knowledge-retrieval", "knowledge-router", "emperor"]);
+        // "hermit" also runs manually before save because it rewrites Tower prose.
+        const EXCLUDED_FROM_PIPELINE = new Set([
+          "html",
+          "knowledge-retrieval",
+          "knowledge-router",
+          "emperor",
+          "hermit",
+        ]);
         const hasPreGenAgents = resolvedAgents.some(
           (a) => a.phase === "pre_generation" && !EXCLUDED_FROM_PIPELINE.has(a.type) && !reviewedAgentTypes.has(a.type),
         );
@@ -6277,6 +6588,48 @@ export async function generateRoutes(app: FastifyInstance) {
           !input.regenerateMessageId
         );
         const shouldRunPreGen = (hasPreGenAgents || reviewedAgentInjections.length > 0) && !input.regenerateMessageId;
+        const gameTarotDebug = (isDebug || requestDebug) && chatMode === "game";
+        const hasResolvedAgent = (type: string) => resolvedAgents.some((agent) => agent.type === type);
+        let justiceDebugStatus = hasResolvedAgent("justice")
+          ? input.regenerateMessageId
+            ? "skipped_regenerate"
+            : "not_run"
+          : "not_configured";
+        let emperorDebugStatus = hasResolvedAgent("emperor")
+          ? input.regenerateMessageId
+            ? "skipped_regenerate"
+            : "not_run"
+          : "not_configured";
+
+        if (gameTarotDebug) {
+          debugLog(
+            "[debug/game/tarot-pipeline] configured %s",
+            JSON.stringify({
+              freshGeneration: !input.regenerateMessageId,
+              resolvedAgents: resolvedAgents.map((agent) => `${agent.type}:${agent.phase}`),
+              pipelineAgents: pipelineAgents.map((agent) => `${agent.type}:${agent.phase}`),
+              preGeneration: {
+                hasPreGenAgents,
+                shouldRunPreGen,
+                shouldRunKR,
+                shouldRunRouter,
+                reviewedAgentTypes: Array.from(reviewedAgentTypes),
+              },
+              tarotConfigured: {
+                justice: hasResolvedAgent("justice"),
+                emperor: hasResolvedAgent("emperor"),
+                hermit: hasResolvedAgent("hermit"),
+                chariot: hasResolvedAgent("chariot"),
+              },
+              contextPackets: {
+                justiceAdjudication: !!agentContext.memory._justiceAdjudicationContext,
+                emperorComposition: !!agentContext.memory._emperorCompositionContext,
+                chariotWidgets: !!agentContext.memory._activeHudWidgets,
+                tarotLore: !!agentContext.memory._tarotLoreContext,
+              },
+            }),
+          );
+        }
 
         // Helper: wrap a separate-injection agent's text and append it to the last
         // user message. Used by both knowledge-retrieval and knowledge-router on
@@ -6314,6 +6667,7 @@ export async function generateRoutes(app: FastifyInstance) {
         // Raw Justice outcome text (fed to Emperor) + Emperor's composed scenario block.
         let justiceOutcomeText: string | null = null;
         let emperorScenarioBlock: string | null = null;
+        let emperorGameCommandBlock: string | null = null;
         // World (secret-plot) forecast summary for this turn, fed to Emperor.
         let worldForecastText: string | null = null;
 
@@ -6382,7 +6736,7 @@ export async function generateRoutes(app: FastifyInstance) {
                   // running. (Mirrors the Illustrator agent's failure protocol.)
                   // Use trySendSseEvent rather than reply.raw.write so a disconnected
                   // client doesn't turn this caught failure back into a rejected promise.
-                  logger.warn(err, "[knowledge-retrieval] failed — continuing generation without retrieved context");
+                  logger.warn(err, "[knowledge-retrieval] failed - continuing generation without retrieved context");
                   trySendSseEvent(reply, {
                     type: "agent_error",
                     data: {
@@ -6447,7 +6801,7 @@ export async function generateRoutes(app: FastifyInstance) {
                   // running. (Mirrors the Illustrator agent's failure protocol.)
                   // Use trySendSseEvent rather than reply.raw.write so a disconnected
                   // client doesn't turn this caught failure back into a rejected promise.
-                  logger.warn(err, "[knowledge-router] failed — continuing generation without routed context");
+                  logger.warn(err, "[knowledge-router] failed - continuing generation without routed context");
                   trySendSseEvent(reply, {
                     type: "agent_error",
                     data: {
@@ -6470,6 +6824,12 @@ export async function generateRoutes(app: FastifyInstance) {
           const preGenResults = pipeline.results.filter(
             (r) => r.agentType !== "knowledge-retrieval" && r.agentType !== "knowledge-router",
           );
+          const justiceRunResult = preGenResults.find((r) => r.agentType === "justice" || r.type === "justice_verdict");
+          if (justiceRunResult) {
+            justiceDebugStatus = justiceRunResult.success
+              ? "success"
+              : `failed: ${justiceRunResult.error ?? "unknown error"}`;
+          }
           const latestUserMessageForPreGenRun = [...allChatMessages]
             .reverse()
             .find((message: any) => message.role === "user");
@@ -6494,7 +6854,12 @@ export async function generateRoutes(app: FastifyInstance) {
           if (criticalFailed.length > 0) {
             const failedNames = criticalFailed.map((r) => r.agentType).join(", ");
             const firstError = criticalFailed[0]!.error ?? "unknown error";
-            logger.error(`[pre-gen] FATAL: critical agent(s) failed (${failedNames}) — aborting generation`);
+            const failureDetails = criticalFailed.map((r) => `${r.agentType}: ${r.error ?? "unknown error"}`);
+            logger.error(
+              { failures: failureDetails },
+              "[pre-gen] FATAL: critical agent(s) failed (%s) - aborting generation",
+              failedNames,
+            );
             sendSseEvent(reply, {
               type: "error",
               data: `Critical pre-generation agent failed (${failedNames}): ${firstError}. Please try again.`,
@@ -6503,7 +6868,12 @@ export async function generateRoutes(app: FastifyInstance) {
           }
           if (nonCriticalFailed.length > 0) {
             const failedNames = nonCriticalFailed.map((r) => r.agentType).join(", ");
-            logger.warn(`[pre-gen] Non-critical agent(s) failed (${failedNames}) — continuing generation`);
+            const failureDetails = nonCriticalFailed.map((r) => `${r.agentType}: ${r.error ?? "unknown error"}`);
+            logger.warn(
+              { failures: failureDetails },
+              "[pre-gen] Non-critical agent(s) failed (%s) - continuing generation",
+              failedNames,
+            );
           }
 
           const shouldReviewWriterAgentOutputs =
@@ -6545,7 +6915,8 @@ export async function generateRoutes(app: FastifyInstance) {
                   ? arcObj
                   : "";
             const activeDir = Array.isArray(plotData.sceneDirections)
-              ? (normalizeSecretPlotSceneDirections(plotData.sceneDirections).find((d) => !d.fulfilled)?.direction ?? "")
+              ? (normalizeSecretPlotSceneDirections(plotData.sceneDirections).find((d) => !d.fulfilled)?.direction ??
+                "")
               : "";
             const pacingText = typeof plotData.pacing === "string" ? plotData.pacing : "";
             const forecastParts = [
@@ -6588,7 +6959,7 @@ export async function generateRoutes(app: FastifyInstance) {
                 plotData.staleDetected ?? false,
               );
               logger.debug(
-                `[secret-plot-driver] Persisted pre-gen state — arc: ${plotData.overarchingArc ? "updated" : "unchanged"}, directions: ${Array.isArray(plotData.sceneDirections) ? (plotData.sceneDirections as any[]).filter((d: any) => !d.fulfilled).length : 0} active, pacing: ${plotData.pacing ?? "unknown"}`,
+                `[secret-plot-driver] Persisted pre-gen state - arc: ${plotData.overarchingArc ? "updated" : "unchanged"}, directions: ${Array.isArray(plotData.sceneDirections) ? (plotData.sceneDirections as any[]).filter((d: any) => !d.fulfilled).length : 0} active, pacing: ${plotData.pacing ?? "unknown"}`,
               );
             } catch (persistErr) {
               logger.error(persistErr, "[secret-plot-driver] Failed to persist state");
@@ -6623,6 +6994,25 @@ export async function generateRoutes(app: FastifyInstance) {
                   },
                   "[justice] resolved verdict",
                 );
+                if (resolved.rolled !== null && resolved.dc !== null) {
+                  trySendSseEvent(reply, {
+                    type: "game_roll_resolved",
+                    data: {
+                      source: "justice",
+                      check: summarizeJusticeCheckLabel(input.userMessage),
+                      die: "1d20",
+                      rolled: resolved.rolled,
+                      dc: resolved.dc,
+                      modifier: 0,
+                      total: resolved.rolled,
+                      margin: resolved.margin,
+                      result: resolved.branch,
+                      success: resolved.branch === "success",
+                      outcome: resolved.resolvedOutcome,
+                      reasoning: resolved.reasoning,
+                    },
+                  });
+                }
                 const directive =
                   chatMode === "game"
                     ? "Ниже в <justice_resolution> — авторитетный исход действия игрока (судья реализма + честный бросок). " +
@@ -6632,12 +7022,17 @@ export async function generateRoutes(app: FastifyInstance) {
                 const resolutionBlock = wrapContent(resolved.resolvedOutcome, "justice_resolution", wrapFormat);
                 justiceResolutionBlock = `${directive}\n${resolutionBlock}`;
                 justiceOutcomeText = resolved.resolvedOutcome;
+                justiceDebugStatus = "injected";
               } else {
+                justiceDebugStatus = "invalid_verdict";
                 logger.warn("[justice] verdict missing or invalid — skipping injection");
               }
             } catch (justiceErr) {
+              justiceDebugStatus = `resolve_failed: ${justiceErr instanceof Error ? justiceErr.message : String(justiceErr)}`;
               logger.error(justiceErr, "[justice] Failed to resolve verdict");
             }
+          } else if (hasResolvedAgent("justice") && !input.regenerateMessageId) {
+            justiceDebugStatus = justiceRunResult ? justiceDebugStatus : "missing_result";
           }
 
           // ── Emperor: compose the turn scenario AFTER Justice (sequential chain link) ──
@@ -6646,6 +7041,7 @@ export async function generateRoutes(app: FastifyInstance) {
           const emperorAgent = resolvedAgents.find((a) => a.type === "emperor");
           if (emperorAgent) {
             try {
+              emperorDebugStatus = "running";
               const tarotMode = chatMeta.tarotMode === "world" ? "world" : "player";
               const emperorContext: AgentContext = {
                 ...agentContext,
@@ -6662,11 +7058,20 @@ export async function generateRoutes(app: FastifyInstance) {
                 emperorAgent.provider,
                 emperorAgent.model,
               );
-              sendAgentEvent(emperorResult);
+              emperorDebugStatus = emperorResult.success
+                ? "success"
+                : `failed: ${emperorResult.error ?? "unknown error"}`;
               if (emperorResult.success && emperorResult.data && typeof emperorResult.data === "object") {
-                const scenario = (emperorResult.data as Record<string, unknown>).scenario;
+                const emperorData = emperorResult.data as Record<string, unknown>;
+                const scenario = emperorData.scenario;
+                const emperorCommands = normalizeEmperorGameCommands(emperorData.commands);
+                emperorData.commands = emperorCommands;
+                if (emperorCommands.length > 0) {
+                  emperorGameCommandBlock = emperorCommands.join("\n");
+                }
                 if (typeof scenario === "string" && scenario.trim()) {
                   logger.debug("[emperor] composed scenario (%d chars)", scenario.length);
+                  emperorDebugStatus = "injected";
                   const emperorDirective =
                     chatMode === "game"
                       ? "Ниже в <turn_scenario> — раскадровка хода от режиссёра (Emperor): авторитетная основа этого хода. " +
@@ -6675,12 +7080,56 @@ export async function generateRoutes(app: FastifyInstance) {
                         "Ты рассказчик: разверни её живой прозой. НЕ меняй суть и исход, НЕ добавляй новых событий сверх сценария.";
                   emperorScenarioBlock = `${emperorDirective}\n${wrapContent(scenario, "turn_scenario", wrapFormat)}`;
                 } else {
+                  emperorDebugStatus = "invalid_scenario";
                   logger.warn("[emperor] empty or invalid scenario — falling back to raw justice resolution");
                 }
               }
+              sendAgentEvent(emperorResult);
             } catch (emperorErr) {
+              emperorDebugStatus = `failed: ${emperorErr instanceof Error ? emperorErr.message : String(emperorErr)}`;
               logger.error(emperorErr, "[emperor] Failed to compose scenario");
             }
+          }
+
+          if (chatMode === "game" && tarotTowerNarrativeOnly) {
+            if (hasResolvedAgent("justice") && !justiceResolutionBlock) {
+              sendSseEvent(reply, {
+                type: "error",
+                data: `Critical Tarot agent failed (justice): ${justiceDebugStatus}. Tower generation was aborted to preserve agent ownership.`,
+              });
+              return;
+            }
+            if (emperorAgent && !emperorScenarioBlock) {
+              sendSseEvent(reply, {
+                type: "error",
+                data: `Critical Tarot agent failed (emperor): ${emperorDebugStatus}. Tower generation was aborted to preserve agent ownership.`,
+              });
+              return;
+            }
+          }
+
+          if (gameTarotDebug) {
+            debugLog(
+              "[debug/game/tarot-pipeline] pre-generation summary %s",
+              JSON.stringify({
+                justice: {
+                  status: justiceDebugStatus,
+                  resultType: justiceRunResult?.type ?? null,
+                  error: justiceRunResult?.error ?? null,
+                  resolutionInjected: !!justiceResolutionBlock,
+                },
+                emperor: {
+                  status: emperorDebugStatus,
+                  scenarioInjected: !!emperorScenarioBlock,
+                  commands: emperorGameCommandBlock ? emperorGameCommandBlock.split("\n").length : 0,
+                },
+                finalInjection: emperorScenarioBlock
+                  ? "turn_scenario"
+                  : justiceResolutionBlock
+                    ? "justice_resolution"
+                    : "none",
+              }),
+            );
           }
 
           const runtimeHandledPreGen = splitRuntimeHandledAgentInjections(
@@ -6789,8 +7238,12 @@ export async function generateRoutes(app: FastifyInstance) {
               if (failedRegen.length > 0) {
                 const failedNames = failedRegen.map((r) => r.agentType).join(", ");
                 const firstError = failedRegen[0]!.error ?? "unknown error";
+                const failureDetails = failedRegen.map((r) => `${r.agentType}: ${r.error ?? "unknown error"}`);
                 logger.error(
-                  `[pre-gen] FATAL: ${failedRegen.length} agent(s) failed on regen (${failedNames}) — aborting generation`,
+                  { failures: failureDetails },
+                  "[pre-gen] FATAL: %d agent(s) failed on regen (%s) - aborting generation",
+                  failedRegen.length,
+                  failedNames,
                 );
                 sendSseEvent(reply, {
                   type: "error",
@@ -7117,6 +7570,7 @@ export async function generateRoutes(app: FastifyInstance) {
         let fullThinking = "";
         let providerThinking = "";
         let allResponses: string[] = [];
+        const preSavePostResults: AgentResult[] = [];
 
         const onThinking = (chunk: string) => {
           providerThinking += chunk;
@@ -7867,6 +8321,7 @@ export async function generateRoutes(app: FastifyInstance) {
             // ── Parse and strip hidden character commands ──
             let parsedCommands: CharacterCommand[] = [];
             let contentReplaced = false;
+            let contentReplaceOverride: string | null = null;
             if (
               tailMessages.assistantPrefillInjected &&
               assistantPrefill &&
@@ -8050,8 +8505,203 @@ export async function generateRoutes(app: FastifyInstance) {
               }
             }
 
+            if (chatMode === "game") {
+              const beforeGameProsePass = fullResponse;
+              let visibleGameProse = tarotTowerNarrativeOnly
+                ? stripGmNarrativeCommandTags(fullResponse)
+                : fullResponse.trim();
+              const towerOwnershipStrippedChars = tarotTowerNarrativeOnly
+                ? beforeGameProsePass.length - visibleGameProse.length
+                : 0;
+
+              const hermitAgent = resolvedAgents.find((agent) => agent.type === "hermit");
+              if (hermitAgent && visibleGameProse && !abortController.signal.aborted) {
+                try {
+                  let hermitResult = await executeAgent(
+                    hermitAgent,
+                    {
+                      ...agentContext,
+                      mainResponse: visibleGameProse,
+                    },
+                    hermitAgent.provider,
+                    hermitAgent.model,
+                    hermitAgent.toolContext,
+                  );
+
+                  if (hermitResult.success) {
+                    let applied = applyHermitProseRevision(visibleGameProse, hermitResult.data);
+                    let hermitRetried = false;
+                    let hermitFallback: string | null = null;
+                    const hermitData =
+                      hermitResult.data && typeof hermitResult.data === "object" && !Array.isArray(hermitResult.data)
+                        ? (hermitResult.data as Record<string, unknown>)
+                        : null;
+                    const shouldRetryHermit =
+                      !applied.accepted &&
+                      applied.reason === "invalid_revision" &&
+                      hermitData?.parseError === true &&
+                      !abortController.signal.aborted;
+                    if (shouldRetryHermit) {
+                      const retryResult = await executeAgent(
+                        hermitAgent,
+                        {
+                          ...agentContext,
+                          recentMessages: [],
+                          mainResponse: visibleGameProse,
+                          streaming: false,
+                          preGenInjections: undefined,
+                          parallelResults: undefined,
+                        },
+                        hermitAgent.provider,
+                        hermitAgent.model,
+                        hermitAgent.toolContext,
+                      );
+                      hermitRetried = true;
+                      if (retryResult.success) {
+                        hermitResult = retryResult;
+                        applied = applyHermitProseRevision(visibleGameProse, hermitResult.data);
+                      }
+                    }
+                    const finalHermitData =
+                      hermitResult.data && typeof hermitResult.data === "object" && !Array.isArray(hermitResult.data)
+                        ? (hermitResult.data as Record<string, unknown>)
+                        : null;
+                    if (
+                      !applied.accepted &&
+                      applied.reason === "invalid_revision" &&
+                      finalHermitData?.parseError === true
+                    ) {
+                      hermitFallback = "invalid_revision_kept_original";
+                      applied = {
+                        text: visibleGameProse,
+                        accepted: true,
+                        changed: false,
+                        reason: null,
+                        notes: ["Hermit returned invalid JSON; original prose kept."],
+                      };
+                    }
+                    const hermitRecoveredParseError =
+                      applied.accepted &&
+                      hermitFallback === null &&
+                      hermitResult.data &&
+                      typeof hermitResult.data === "object" &&
+                      !Array.isArray(hermitResult.data) &&
+                      (hermitResult.data as Record<string, unknown>).parseError === true;
+                    const hermitResultWithApplication: AgentResult = {
+                      ...hermitResult,
+                      data:
+                        hermitResult.data && typeof hermitResult.data === "object" && !Array.isArray(hermitResult.data)
+                          ? {
+                              ...(hermitResult.data as Record<string, unknown>),
+                              ...(hermitRecoveredParseError
+                                ? { parseError: false, recoveredParseError: true }
+                                : {}),
+                              ...(hermitFallback ? { parseError: false, fallback: hermitFallback } : {}),
+                              ...(hermitRetried ? { retried: true } : {}),
+                              applied: {
+                                accepted: applied.accepted,
+                                changed: applied.changed,
+                                reason: applied.reason,
+                              },
+                            }
+                          : hermitResult.data,
+                    };
+                    sendAgentEvent(hermitResultWithApplication);
+                    preSavePostResults.push(hermitResultWithApplication);
+
+                    if (applied.accepted) {
+                      visibleGameProse = applied.text;
+                      if (gameTarotDebug) {
+                        debugLog(
+                          "[debug/game/tarot-pipeline] hermit prose pass %s",
+                          JSON.stringify({
+                            changed: applied.changed,
+                            notes: applied.notes,
+                            ...(hermitRetried ? { retried: true } : {}),
+                            ...(hermitFallback ? { fallback: hermitFallback } : {}),
+                          }),
+                        );
+                      }
+                    } else {
+                      logger.warn("[hermit] rejected prose revision: %s", applied.reason ?? "unknown");
+                      const hermitRaw =
+                        hermitResult.data && typeof hermitResult.data === "object" && !Array.isArray(hermitResult.data)
+                          ? ((hermitResult.data as Record<string, unknown>).raw as string | undefined)
+                          : undefined;
+                      if (gameTarotDebug) {
+                        debugLog(
+                          "[debug/game/tarot-pipeline] hermit prose pass %s",
+                          JSON.stringify({
+                            changed: false,
+                            rejected: applied.reason ?? "unknown",
+                            ...(hermitRetried ? { retried: true } : {}),
+                            raw:
+                              typeof hermitRaw === "string" && hermitRaw.trim()
+                                ? hermitRaw.trim().slice(0, 500)
+                                : undefined,
+                          }),
+                        );
+                      }
+                    }
+                  } else {
+                    sendAgentEvent(hermitResult);
+                    preSavePostResults.push(hermitResult);
+                    if (gameTarotDebug) {
+                      debugLog(
+                        "[debug/game/tarot-pipeline] hermit prose pass %s",
+                        JSON.stringify({
+                          changed: false,
+                          failed: hermitResult.error ?? "unknown",
+                        }),
+                      );
+                    }
+                  }
+                } catch (hermitErr) {
+                  logger.warn(hermitErr, "[hermit] prose pass failed");
+                  if (gameTarotDebug) {
+                    debugLog(
+                      "[debug/game/tarot-pipeline] hermit prose pass %s",
+                      JSON.stringify({
+                        changed: false,
+                        failed: hermitErr instanceof Error ? hermitErr.message : String(hermitErr),
+                      }),
+                    );
+                  }
+                }
+              }
+
+              const beforePostHermitNarrativeSanitize = visibleGameProse;
+              visibleGameProse = tarotTowerNarrativeOnly
+                ? stripGmNarrativeCommandTags(visibleGameProse)
+                : visibleGameProse.trim();
+              const postHermitNarrativeStrippedChars =
+                beforePostHermitNarrativeSanitize.length - visibleGameProse.length;
+
+              fullResponse =
+                tarotTowerNarrativeOnly && emperorGameCommandBlock
+                  ? `${visibleGameProse}\n\n${emperorGameCommandBlock}`.trim()
+                  : visibleGameProse;
+
+              if (fullResponse !== beforeGameProsePass) {
+                contentReplaced = true;
+                contentReplaceOverride = tarotTowerNarrativeOnly ? visibleGameProse : fullResponse;
+                if (gameTarotDebug && tarotTowerNarrativeOnly) {
+                  debugLog(
+                    "[debug/game/tarot-pipeline] tower ownership enforcement %s",
+                    JSON.stringify({
+                      strippedTowerCommandChars: towerOwnershipStrippedChars,
+                      postHermitNarrativeStrippedChars,
+                      emperorCommands: emperorGameCommandBlock ? emperorGameCommandBlock.split("\n").length : 0,
+                    }),
+                  );
+                }
+              }
+            }
+
             if (contentReplaced) {
-              reply.raw.write(`data: ${JSON.stringify({ type: "content_replace", data: fullResponse })}\n\n`);
+              reply.raw.write(
+                `data: ${JSON.stringify({ type: "content_replace", data: contentReplaceOverride ?? fullResponse })}\n\n`,
+              );
             }
 
             // Guard: don't save empty responses — the model returned nothing useful.
@@ -8617,6 +9267,10 @@ export async function generateRoutes(app: FastifyInstance) {
             }
           }
 
+          if (preSavePostResults.length > 0) {
+            postResults = [...preSavePostResults, ...postResults];
+          }
+
           // LOG_LEVEL=debug: log post-generation agent results
           if (isDebug) {
             for (const r of postResults) {
@@ -8659,7 +9313,23 @@ export async function generateRoutes(app: FastifyInstance) {
             return imgConnId;
           };
 
+          const chariotConfiguredForPost = resolvedAgents.some((agent) => agent.type === "chariot");
+          let chariotDebugStatus = chariotConfiguredForPost ? "not_returned" : "not_configured";
+          let chariotPatchDebugStatus = chariotConfiguredForPost ? "not_evaluated" : "not_configured";
+          let chariotWidgetUpdateCount = 0;
+
           for (const result of sortedResults) {
+            if (result.agentType === "chariot" || result.type === "game_widget_update") {
+              chariotDebugStatus = result.success ? "success" : `failed: ${result.error ?? "unknown error"}`;
+              if (!result.success) {
+                chariotPatchDebugStatus = "skipped_failed_result";
+              } else if (result.type !== "game_widget_update") {
+                chariotPatchDebugStatus = `unexpected_result_type:${result.type}`;
+              } else if (!result.data || typeof result.data !== "object") {
+                chariotPatchDebugStatus = "invalid_data";
+              }
+            }
+
             const resultMessageId =
               result.agentType === "lorebook-keeper" && lorebookKeeperProcessedMessageId
                 ? lorebookKeeperProcessedMessageId
@@ -8836,6 +9506,40 @@ export async function generateRoutes(app: FastifyInstance) {
                 });
               } catch {
                 // Non-critical — don't fail the whole generation
+              }
+            }
+
+            // Chariot → validate and commit HUD widget deltas to chat metadata.
+            if (
+              result.success &&
+              result.type === "game_widget_update" &&
+              result.data &&
+              typeof result.data === "object"
+            ) {
+              try {
+                const currentWidgets = Array.isArray(chatMeta.gameWidgetState)
+                  ? (chatMeta.gameWidgetState as HudWidget[])
+                  : activeHudWidgetsForAgents;
+                const widgetUpdates = normalizeChariotWidgetUpdates(result.data, currentWidgets);
+                chariotWidgetUpdateCount = widgetUpdates.length;
+                const applied = applyChariotWidgetUpdates(currentWidgets, widgetUpdates);
+                if (applied.changed) {
+                  await updateChatMetadataForTools({ gameWidgetState: applied.widgets });
+                  chariotPatchDebugStatus = "committed";
+                  logger.debug("[chariot] committed %d HUD widget update(s)", widgetUpdates.length);
+                  trySendSseEvent(reply, {
+                    type: "widget_state_patch",
+                    data: {
+                      widgets: applied.widgets,
+                      updates: widgetUpdates,
+                    },
+                  });
+                } else {
+                  chariotPatchDebugStatus = "no_change";
+                }
+              } catch (err) {
+                chariotPatchDebugStatus = `persistence_failed: ${err instanceof Error ? err.message : String(err)}`;
+                logger.warn(err, "[chariot] HUD widget persistence failed");
               }
             }
 
@@ -9777,6 +10481,19 @@ export async function generateRoutes(app: FastifyInstance) {
                 }
               }
             }
+          }
+
+          if (gameTarotDebug) {
+            debugLog(
+              "[debug/game/tarot-pipeline] post-generation summary %s",
+              JSON.stringify({
+                chariot: {
+                  status: chariotDebugStatus,
+                  patch: chariotPatchDebugStatus,
+                  widgetUpdates: chariotWidgetUpdateCount,
+                },
+              }),
+            );
           }
 
           // ── Text rewrite/editing agents: run after ALL other agents ──

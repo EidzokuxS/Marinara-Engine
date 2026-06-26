@@ -500,6 +500,7 @@ const gameSetupConfigSchema = z.object({
   rating: z.enum(["sfw", "nsfw"]).default("sfw"),
   gmCharacterId: z.string().nullable().optional(),
   partyCharacterIds: z.array(z.string()),
+  referenceCharacterIds: z.array(z.string()).optional(),
   personaId: z.string().nullable().optional(),
   sceneConnectionId: z.string().optional(),
   enableSpriteGeneration: z.boolean().optional(),
@@ -1275,6 +1276,21 @@ function mergeGameInventoryItems(...sources: ChatInventoryItem[][]): ChatInvento
     }
   }
   return [...merged.values()];
+}
+
+function buildReferenceCastIndexEntry(characterData: Record<string, any>): string | null {
+  const name = typeof characterData.name === "string" ? characterData.name.trim() : "";
+  if (!name) return null;
+  const source =
+    (typeof characterData.description === "string" && characterData.description.trim()) ||
+    (typeof characterData.personality === "string" && characterData.personality.trim()) ||
+    (typeof characterData.scenario === "string" && characterData.scenario.trim()) ||
+    (typeof characterData.extensions?.backstory === "string" && characterData.extensions.backstory.trim()) ||
+    (typeof characterData.backstory === "string" && characterData.backstory.trim()) ||
+    "No short description available.";
+  const oneLine = source.replace(/\s+/g, " ").trim();
+  const shortDescription = oneLine.length > 220 ? `${oneLine.slice(0, 217).trimEnd()}...` : oneLine;
+  return `${name}: ${shortDescription}`;
 }
 
 async function resolveConnection(
@@ -3024,7 +3040,7 @@ export async function gameRoutes(app: FastifyInstance) {
     const sessionMeta = parseMeta(sessionChat.metadata);
     // Tarot chain on by default for new game sessions (its natural home is the GM/Game mode):
     // Justice judges realism + harness dice, Emperor composes the turn scenario, Tower renders it.
-    const setupActiveAgentIds = ["justice", "emperor", ...(setupConfig.enableSpotifyDj ? ["spotify"] : [])];
+    const setupActiveAgentIds = ["justice", "emperor", "chariot", ...(setupConfig.enableSpotifyDj ? ["spotify"] : [])];
     const spotifySourceType = setupConfig.spotifySourceType ?? "liked";
     const gameChatParameters = mergeStoredGenerationParameters(
       defaultGenerationParameters,
@@ -3041,6 +3057,7 @@ export async function gameRoutes(app: FastifyInstance) {
       gameGmMode: setupConfig.gmMode,
       gameGmCharacterId: setupConfig.gmCharacterId || null,
       gamePartyCharacterIds: setupConfig.partyCharacterIds,
+      gameReferenceCharacterIds: setupConfig.referenceCharacterIds ?? [],
       gamePartyChatId: null,
       gameMap: null,
       gameMaps: [],
@@ -3191,6 +3208,23 @@ export async function gameRoutes(app: FastifyInstance) {
       }
     }
 
+    const referenceCharacterIndex: string[] = [];
+    const referenceCharacterIds = Array.from(
+      new Set((setupConfig.referenceCharacterIds ?? []).filter((id) => !setupConfig.partyCharacterIds.includes(id))),
+    ).filter((id) => id !== setupConfig.gmCharacterId);
+    for (const referenceCharacterId of referenceCharacterIds) {
+      const referenceCharacter = await characters.getById(referenceCharacterId);
+      if (!referenceCharacter) continue;
+      try {
+        const data =
+          typeof referenceCharacter.data === "string" ? JSON.parse(referenceCharacter.data) : referenceCharacter.data;
+        const indexEntry = buildReferenceCastIndexEntry(data as Record<string, any>);
+        if (indexEntry) referenceCharacterIndex.push(indexEntry);
+      } catch {
+        /* skip malformed reference character cards */
+      }
+    }
+
     // Also collect persona RPG stats
     let personaRpgStats: {
       enabled: boolean;
@@ -3255,6 +3289,7 @@ export async function gameRoutes(app: FastifyInstance) {
           playerName: personaName,
           partyCards: partyCards.length > 0 ? partyCards : undefined,
           partyNames,
+          referenceCharacterIndex: referenceCharacterIndex.length > 0 ? referenceCharacterIndex : undefined,
           gmCharacterCard: gmCharacterCard || null,
           enableCustomWidgets: setupConfig.enableCustomWidgets,
           lorebookContext: setupLorebookContext,

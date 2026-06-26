@@ -39,7 +39,9 @@ export type AgentResultType =
   | "game_map_update"
   | "game_state_transition"
   | "justice_verdict"
-  | "emperor_scenario";
+  | "emperor_scenario"
+  | "hermit_prose_revision"
+  | "game_widget_update";
 
 /** Configuration for a single agent. */
 export interface AgentConfig {
@@ -185,6 +187,8 @@ export const BUILT_IN_AGENT_IDS = {
   SECRET_PLOT_DRIVER: "secret-plot-driver",
   JUSTICE: "justice",
   EMPEROR: "emperor",
+  HERMIT: "hermit",
+  CHARIOT: "chariot",
 } as const;
 
 export type AgentCategory = "writer" | "tracker" | "misc";
@@ -202,6 +206,15 @@ export interface JusticeVerdict {
 export interface EmperorScenario {
   scenario: string;
   beats?: string[];
+  /** Engine directives owned by Emperor, emitted as existing GM tags after Tower renders prose. */
+  commands?: string[];
+}
+
+/** Hermit agent output — a prose-only revision of Tower narration. */
+export interface HermitProseRevision {
+  revision: string;
+  changed: boolean;
+  notes?: string[];
 }
 
 export interface BuiltInAgentMeta {
@@ -278,8 +291,26 @@ export const BUILT_IN_AGENTS: BuiltInAgentMeta[] = [
     enabledByDefault: false,
     category: "writer",
   },
+  {
+    id: "hermit",
+    name: "Hermit",
+    description:
+      "Полирует прозу Tower после генерации: ритм, ясность, повторы и стилистические шумы. Не меняет события, исходы, диалоги, механики, команды или виджеты.",
+    phase: "post_processing",
+    enabledByDefault: false,
+    category: "writer",
+  },
 
   // ── Tracker Agents ──
+  {
+    id: "chariot",
+    name: "Chariot",
+    description:
+      "Owns Game HUD widget updates. Reads the finished GM turn and current widget state, then proposes structured widget deltas for the harness to validate and commit.",
+    phase: "post_processing",
+    enabledByDefault: false,
+    category: "tracker",
+  },
   {
     id: "world-state",
     name: "World State",
@@ -544,6 +575,8 @@ export const DEFAULT_AGENT_TOOLS: Record<string, string[]> = {
   "prompt-reviewer": [],
   justice: [],
   emperor: [],
+  hermit: [],
+  chariot: [],
   combat: ["roll_dice", "update_game_state"],
   background: [],
   "character-tracker": ["update_game_state"],

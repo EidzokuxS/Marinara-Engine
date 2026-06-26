@@ -276,6 +276,7 @@ export function GameSetupWizard({ onComplete, onCancel, isLoading, characters }:
   const [gmMode, setGmMode] = useState<GameGmMode>("standalone");
   const [gmCharacterId, setGmCharacterId] = useState<string | null>(null);
   const [partyCharacterIds, setPartyCharacterIds] = useState<string[]>([]);
+  const [referenceCharacterIds, setReferenceCharacterIds] = useState<string[]>([]);
   const [playerGoals, setPlayerGoals] = useState(
     () => useUIStore.getState().rememberedGameSetupText?.playerGoals ?? "",
   );
@@ -284,6 +285,7 @@ export function GameSetupWizard({ onComplete, onCancel, isLoading, characters }:
   );
   const [gmSearch, setGmSearch] = useState("");
   const [partySearch, setPartySearch] = useState("");
+  const [referenceSearch, setReferenceSearch] = useState("");
   const [personaId, setPersonaId] = useState<string | null>(null);
   const [gmConnectionId, setGmConnectionId] = useState<string | null>(null);
   const [customizeParameters, setCustomizeParameters] = useState(false);
@@ -466,7 +468,15 @@ export function GameSetupWizard({ onComplete, onCancel, isLoading, characters }:
   };
 
   const togglePartyMember = (id: string) => {
+    setReferenceCharacterIds((prev) => prev.filter((referenceId) => referenceId !== id));
     setPartyCharacterIds((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
+  };
+
+  const toggleReferenceCharacter = (id: string) => {
+    setPartyCharacterIds((prev) => prev.filter((partyId) => partyId !== id));
+    setReferenceCharacterIds((prev) =>
+      prev.includes(id) ? prev.filter((referenceId) => referenceId !== id) : [...prev, id],
+    );
   };
 
   const filteredGmCharacters = useMemo(
@@ -483,11 +493,24 @@ export function GameSetupWizard({ onComplete, onCancel, isLoading, characters }:
     () =>
       characters.filter((c) => {
         if (c.id === gmCharacterId) return false;
+        if (referenceCharacterIds.includes(c.id)) return false;
         const query = partySearch.toLowerCase();
         const title = getCharacterTitle(c)?.toLowerCase() ?? "";
         return c.name.toLowerCase().includes(query) || title.includes(query);
       }),
-    [characters, gmCharacterId, partySearch],
+    [characters, gmCharacterId, partySearch, referenceCharacterIds],
+  );
+
+  const filteredReferenceCharacters = useMemo(
+    () =>
+      characters.filter((c) => {
+        if (c.id === gmCharacterId) return false;
+        if (partyCharacterIds.includes(c.id)) return false;
+        const query = referenceSearch.toLowerCase();
+        const title = getCharacterTitle(c)?.toLowerCase() ?? "";
+        return c.name.toLowerCase().includes(query) || title.includes(query);
+      }),
+    [characters, gmCharacterId, partyCharacterIds, referenceSearch],
   );
 
   const applySuggestion = useCallback((setter: (v: string) => void, value: string) => {
@@ -501,6 +524,12 @@ export function GameSetupWizard({ onComplete, onCancel, isLoading, characters }:
   useEffect(() => {
     setGenerationParameters(gmParameterDefaults);
   }, [gmParameterDefaults]);
+
+  useEffect(() => {
+    if (!gmCharacterId) return;
+    setPartyCharacterIds((prev) => prev.filter((id) => id !== gmCharacterId));
+    setReferenceCharacterIds((prev) => prev.filter((id) => id !== gmCharacterId));
+  }, [gmCharacterId]);
 
   const canStart = !!gmConnectionId;
   const normalizedLanguage = normalizeGameLanguage(language);
@@ -537,6 +566,7 @@ export function GameSetupWizard({ onComplete, onCancel, isLoading, characters }:
         gmMode,
         gmCharacterId: gmMode === "character" && gmCharacterId ? gmCharacterId : undefined,
         partyCharacterIds,
+        referenceCharacterIds: referenceCharacterIds.length > 0 ? referenceCharacterIds : undefined,
         playerGoals: playerGoals || "Have an adventure",
         personaId: personaId ?? undefined,
         sceneConnectionId: sceneModelValue && sceneModelValue !== "local" ? sceneModelValue : undefined,
@@ -1028,6 +1058,93 @@ export function GameSetupWizard({ onComplete, onCancel, isLoading, characters }:
                     );
                   })}
                   {filteredPartyCharacters.length === 0 && (
+                    <p className="px-3 py-2 text-[0.6875rem] text-[var(--muted-foreground)]">
+                      {characters.length === 0 ? "No characters found. Create characters first." : "No matches."}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* GM-only reference cast */}
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-[var(--foreground)]">
+                Reference Cast ({referenceCharacterIds.length} selected)
+              </label>
+              <p className="mb-2 text-[0.55rem] text-[var(--muted-foreground)]">
+                GM-only registry. Name and short description stay available; full cards load only once present in scene.
+              </p>
+              {referenceCharacterIds.length > 0 && (
+                <div className="mb-2 flex flex-col gap-1">
+                  {referenceCharacterIds.map((cid) => {
+                    const c = characters.find((ch) => ch.id === cid);
+                    if (!c) return null;
+                    return (
+                      <div
+                        key={cid}
+                        className="flex items-center gap-2.5 rounded-lg bg-[var(--primary)]/10 px-3 py-2 ring-1 ring-[var(--primary)]/30"
+                      >
+                        <CharacterAvatar character={c} />
+                        <div className="min-w-0 flex-1">
+                          <span className="block truncate text-xs">{c.name}</span>
+                          {getCharacterTitle(c) && (
+                            <span className="block truncate text-[0.625rem] italic text-[var(--muted-foreground)]">
+                              {getCharacterTitle(c)}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => toggleReferenceCharacter(cid)}
+                          className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--muted-foreground)] transition-colors hover:bg-[var(--destructive)]/15 hover:text-[var(--destructive)]"
+                          title="Remove"
+                        >
+                          <X size="0.6875rem" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="overflow-hidden rounded-lg bg-[var(--card)] ring-1 ring-[var(--border)]">
+                <div className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-2">
+                  <Search size="0.75rem" className="text-[var(--muted-foreground)]" />
+                  <input
+                    value={referenceSearch}
+                    onChange={(e) => setReferenceSearch(e.target.value)}
+                    placeholder="Search reference characters..."
+                    className="flex-1 bg-transparent text-xs outline-none placeholder:text-[var(--muted-foreground)]"
+                  />
+                </div>
+                <div className="max-h-36 overflow-y-auto">
+                  {filteredReferenceCharacters.map((c) => {
+                    const isSelected = referenceCharacterIds.includes(c.id);
+                    return (
+                      <button
+                        key={c.id}
+                        onClick={() => toggleReferenceCharacter(c.id)}
+                        className={cn(
+                          "flex w-full items-center gap-2.5 px-3 py-2 text-left transition-all hover:bg-[var(--accent)]",
+                          isSelected && "bg-[var(--primary)]/5",
+                        )}
+                      >
+                        <CharacterAvatar character={c} />
+                        <div className="min-w-0 flex-1">
+                          <span className="block truncate text-xs">{c.name}</span>
+                          {getCharacterTitle(c) && (
+                            <span className="block truncate text-[0.625rem] italic text-[var(--muted-foreground)]">
+                              {getCharacterTitle(c)}
+                            </span>
+                          )}
+                        </div>
+                        {isSelected ? (
+                          <span className="text-[0.625rem] text-[var(--primary)]">Added</span>
+                        ) : (
+                          <Plus size="0.75rem" className="text-[var(--muted-foreground)]" />
+                        )}
+                      </button>
+                    );
+                  })}
+                  {filteredReferenceCharacters.length === 0 && (
                     <p className="px-3 py-2 text-[0.6875rem] text-[var(--muted-foreground)]">
                       {characters.length === 0 ? "No characters found. Create characters first." : "No matches."}
                     </p>

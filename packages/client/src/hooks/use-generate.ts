@@ -275,11 +275,12 @@ import {
   forgetRecentMessageContentEdit,
   preserveRecentMessageContentEdit,
 } from "./use-chats";
+import { patchChatMetadata } from "./use-game";
 import { characterKeys } from "./use-characters";
 import { lorebookKeys } from "./use-lorebooks";
 import { playNotificationPing } from "../lib/notification-sound";
 import { stripGmTagsKeepReadables } from "../lib/game-tag-parser";
-import type { Chat, GameMap, Message } from "@marinara-engine/shared";
+import type { Chat, GameMap, HudWidget, Message } from "@marinara-engine/shared";
 
 function sortMessagesByCreatedAt(messages: Message[]): Message[] {
   return [...messages].sort((a, b) => {
@@ -521,6 +522,19 @@ function applyGameMapUpdate(qc: QueryClient, chatId: string, map: GameMap) {
       metadata: metadata as Chat["metadata"],
     });
     useGameModeStore.getState().upsertMap(map, true);
+  }
+}
+
+function applyWidgetStatePatch(qc: QueryClient, chatId: string, widgets: HudWidget[]) {
+  qc.setQueryData<Chat | undefined>(chatKeys.detail(chatId), (current) => {
+    return patchChatMetadata(current, { gameWidgetState: widgets }) ?? current;
+  });
+
+  const chatStore = useChatStore.getState();
+  if (chatStore.activeChat?.id === chatId) {
+    const patched = patchChatMetadata(chatStore.activeChat, { gameWidgetState: widgets });
+    if (patched) chatStore.setActiveChat(patched);
+    useGameModeStore.getState().setHudWidgets(widgets);
   }
 }
 
@@ -1159,6 +1173,62 @@ export function useGenerate() {
               break;
             }
 
+            case "game_roll_resolved": {
+              const roll = event.data as {
+                source?: string;
+                die?: string;
+                rolled?: number;
+                dc?: number;
+                modifier?: number;
+                total?: number;
+                margin?: number | null;
+                result?: string;
+                success?: boolean;
+                check?: string;
+                outcome?: string;
+                reasoning?: string;
+              };
+              console.warn("[Game Roll] resolved:", roll);
+              if (!isActiveChat()) break;
+
+              const rolled = typeof roll.rolled === "number" ? roll.rolled : null;
+              const dc = typeof roll.dc === "number" ? roll.dc : null;
+              const total = typeof roll.total === "number" ? roll.total : rolled;
+              const margin =
+                typeof roll.margin === "number" ? roll.margin : total !== null && dc !== null ? total - dc : null;
+              const result = typeof roll.result === "string" ? roll.result : "roll";
+              const check = typeof roll.check === "string" && roll.check.trim() ? roll.check.trim() : "Justice check";
+              const outcome = typeof roll.outcome === "string" ? roll.outcome.trim() : "";
+              const reasoning = typeof roll.reasoning === "string" ? roll.reasoning.trim() : "";
+              const outcomePreview = outcome.length > 140 ? `${outcome.slice(0, 137).trimEnd()}...` : outcome;
+              const label =
+                rolled !== null && dc !== null
+                  ? `d20 ${rolled} vs DC ${dc}${margin !== null ? ` (${margin >= 0 ? "+" : ""}${margin})` : ""}`
+                  : "roll resolved";
+              if (rolled !== null) {
+                useGameModeStore.getState().setDiceRollResult({
+                  source: typeof roll.source === "string" ? roll.source : "justice",
+                  check,
+                  notation: typeof roll.die === "string" ? roll.die : "1d20",
+                  rolls: [rolled],
+                  modifier: typeof roll.modifier === "number" ? roll.modifier : 0,
+                  total: total ?? rolled,
+                  dc: dc ?? undefined,
+                  margin,
+                  result,
+                  success: typeof roll.success === "boolean" ? roll.success : result === "success",
+                  outcome,
+                  reasoning,
+                });
+              }
+              addThoughtBubble(
+                "justice",
+                "Justice Roll",
+                `${check}\n${label} -> ${result}${outcomePreview ? `\n${outcomePreview}` : ""}`,
+              );
+              break;
+            }
+
             case "tool_call": {
               if (!debugMode) break;
               const data = event.data as { name?: unknown; arguments?: unknown; allowed?: unknown };
@@ -1275,6 +1345,13 @@ export function useGenerate() {
               console.warn(`[Generate] ${event.type} received:`, patch);
               if (!isActiveChat()) break;
               applyGameStatePatchToStore(params.chatId, patch, gameStatePatchAnchor);
+              break;
+            }
+
+            case "widget_state_patch": {
+              const data = event.data as { widgets?: HudWidget[] };
+              if (!isActiveChat() || !Array.isArray(data.widgets)) break;
+              applyWidgetStatePatch(qc, params.chatId, data.widgets);
               break;
             }
 
@@ -2011,6 +2088,12 @@ export function useGenerate() {
               applyGameStatePatchToStore(chatId, patch);
               break;
             }
+            case "widget_state_patch": {
+              const data = event.data as { widgets?: HudWidget[] };
+              if (!isActiveChat() || !Array.isArray(data.widgets)) break;
+              applyWidgetStatePatch(qc, chatId, data.widgets);
+              break;
+            }
             case "game_map_update": {
               const map = event.data as GameMap | null;
               if (map) applyGameMapUpdate(qc, chatId, map);
@@ -2249,6 +2332,21 @@ function formatAgentBubble(agentType: string, agentName: string, data: unknown):
       return changes.map((c: any) => `✏️ ${c.description}`).join("\n");
     }
 
+    case "hermit": {
+      if (d.parseError === true) return "Hermit could not parse its prose pass.";
+      const applied = d.applied && typeof d.applied === "object" ? (d.applied as Record<string, unknown>) : null;
+      if (applied && applied.accepted === false) {
+        const reason = typeof applied.reason === "string" ? applied.reason : "guard rejected revision";
+        return `Hermit rejected prose pass: ${reason}`;
+      }
+      const changed = (applied?.changed ?? d.changed) === true;
+      const notes = Array.isArray(d.notes)
+        ? (d.notes as unknown[]).filter((note): note is string => typeof note === "string" && note.trim().length > 0)
+        : [];
+      if (!changed) return "Hermit: prose kept as-is.";
+      return notes.length ? `Hermit polished prose: ${notes.slice(0, 3).join("; ")}` : "Hermit polished prose.";
+    }
+
     case "html": {
       const text = d.text as string;
       return `🎨 ${text || "HTML formatting active"}`;
@@ -2261,6 +2359,12 @@ function formatAgentBubble(agentType: string, agentName: string, data: unknown):
 
     case "secret-plot-driver": {
       return `🎭 The roleplay is following a secret plotline…`;
+    }
+
+    case "chariot": {
+      const updates = Array.isArray(d.updates) ? d.updates : Array.isArray(d.widgetUpdates) ? d.widgetUpdates : [];
+      if (!updates.length) return null;
+      return `🏇 HUD widgets updated: ${updates.length}`;
     }
 
     default:

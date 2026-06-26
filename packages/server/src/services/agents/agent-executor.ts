@@ -622,8 +622,14 @@ function shouldRunAgentIndividually(config: Pick<AgentExecConfig, "type">): bool
 function buildStandardAgentMessages(config: AgentExecConfig, template: string, context: AgentContext): ChatMessage[] {
   // Build the agent's system prompt with <role> + <lore> + <agents> + extras
   const systemParts: string[] = [];
+  const isJsonAgent = agentResponseIsJson(config);
   systemParts.push(`<role>`);
   systemParts.push(`You are a specialized agent. Fulfill your task and return the requested output.`);
+  if (isJsonAgent) {
+    systemParts.push(
+      `Your visible answer must be exactly one valid JSON value matching the requested schema. The first visible character must be { or [, and the last visible character must close that JSON value. Do not output markdown fences, prose before/after JSON, analysis headings, XML tags, or conversational commentary.`,
+    );
+  }
   systemParts.push(`</role>`);
   systemParts.push(``);
   systemParts.push(buildLoreBlock(context));
@@ -641,6 +647,14 @@ function buildStandardAgentMessages(config: AgentExecConfig, template: string, c
   // Build multi-turn message array for this agent (sliced to its own contextSize)
   const agentContextSize = normalizeAgentContextSize(config.settings.contextSize);
   return buildAgentMessages(systemParts.join("\n"), context, config.type, agentContextSize);
+}
+
+export function buildStandardAgentMessagesForTest(
+  config: AgentExecConfig,
+  template: string,
+  context: AgentContext,
+): ChatMessage[] {
+  return buildStandardAgentMessages(config, template, context);
 }
 
 export function buildKnowledgeRetrievalAgentMessagesForTest(
@@ -901,7 +915,7 @@ function buildAgentMessages(
   // the input look like `[assistant] roleplay + <committed_tracker_state>{...}`
   // — a pattern small/fine-tuned models mimic into their response, leaking
   // roleplay and tracker JSON that gets injected into the main prompt.
-  const skipTrackerAppend = isTextOutputAgentType(agentType);
+  const skipTrackerAppend = isTextOutputAgentType(agentType) || agentType === "hermit";
   if (recent.length > 0) {
     // Only attach committed tracker state to the last 3 assistant messages to save tokens
     const assistantIndices: number[] = [];
@@ -978,7 +992,11 @@ function buildAgentMessages(
   }
 
   if (finalParts.length > 0) {
-    finalParts.push("\nNow return the requested format(s).");
+    finalParts.push(
+      agentResponseIsJson({ type: agentType, settings: {} })
+        ? "\nNow return only the requested JSON. No markdown, no prose outside JSON, no analysis headings."
+        : "\nNow return the requested format(s).",
+    );
     const finalContent = finalParts.join("\n");
     const last = messages[messages.length - 1]!;
     if (last.role === "user") {
@@ -1062,7 +1080,7 @@ function buildAvailableSpritesBlock(context: AgentContext): string {
  * Build agent-specific context blocks (sprites, backgrounds, source material, etc.)
  * that go into the system message after lore.
  */
-function buildAgentExtras(context: AgentContext, agentTypes: string[] = []): string {
+export function buildAgentExtras(context: AgentContext, agentTypes: string[] = []): string {
   const parts: string[] = [];
 
   const escapeXml = (value: string) =>
@@ -1099,6 +1117,27 @@ function buildAgentExtras(context: AgentContext, agentTypes: string[] = []): str
     parts.push(`<current_game_state>`);
     parts.push(JSON.stringify(context.gameState));
     parts.push(`</current_game_state>`);
+  }
+
+  // Tarot: Justice owns realism/adjudication context. Do not expose this as a
+  // generic prompt block; it exists so Tower does not need the old GM brain.
+  if (agentTypes.includes("justice") && context.memory._justiceAdjudicationContext) {
+    parts.push(`<adjudication_context>`);
+    parts.push(JSON.stringify(context.memory._justiceAdjudicationContext));
+    parts.push(`</adjudication_context>`);
+  }
+
+  // Tarot: Emperor owns turn composition and durable Game directives.
+  if (agentTypes.includes("emperor") && context.memory._emperorCompositionContext) {
+    parts.push(`<composition_context>`);
+    parts.push(JSON.stringify(context.memory._emperorCompositionContext));
+    parts.push(`</composition_context>`);
+  }
+
+  if ((agentTypes.includes("justice") || agentTypes.includes("emperor")) && context.memory._tarotLoreContext) {
+    parts.push(`<game_lore_context>`);
+    parts.push(context.memory._tarotLoreContext as string);
+    parts.push(`</game_lore_context>`);
   }
 
   const gameImageStylePrompt =
@@ -1254,6 +1293,13 @@ function buildAgentExtras(context: AgentContext, agentTypes: string[] = []): str
     parts.push(`</secret_plot_state>`);
   }
 
+  // Tarot: current Game HUD widgets for Chariot, which owns widget deltas.
+  if (agentTypes.includes("chariot") && context.memory._activeHudWidgets) {
+    parts.push(`<active_hud_widgets>`);
+    parts.push(JSON.stringify(context.memory._activeHudWidgets));
+    parts.push(`</active_hud_widgets>`);
+  }
+
   // Tarot: the authoritative outcome from Justice, fed to the Emperor composer.
   if (context.memory._justiceResolution) {
     parts.push(`<justice_resolution>`);
@@ -1303,6 +1349,8 @@ const AGENT_RESULT_TYPE_MAP: Record<string, AgentResultType> = {
   "secret-plot-driver": "secret_plot",
   justice: "justice_verdict",
   emperor: "emperor_scenario",
+  hermit: "hermit_prose_revision",
+  chariot: "game_widget_update",
 };
 
 const AGENT_RESULT_TYPES = new Set<AgentResultType>([
@@ -1333,6 +1381,8 @@ const AGENT_RESULT_TYPES = new Set<AgentResultType>([
   "game_state_transition",
   "justice_verdict",
   "emperor_scenario",
+  "hermit_prose_revision",
+  "game_widget_update",
 ]);
 
 const TEXT_RESULT_TYPES = new Set<AgentResultType>(["context_injection", "director_event"]);
@@ -1388,6 +1438,8 @@ const JSON_AGENTS = new Set([
   "secret-plot-driver",
   "justice",
   "emperor",
+  "hermit",
+  "chariot",
 ]);
 
 /**
@@ -1451,12 +1503,15 @@ function parseAgentResponse(
   return { type: resultType, data: { text: sanitizeTextAgentResponse(config.type, responseText) } };
 }
 
-/** Extract JSON from a response that may contain markdown fences. */
-function extractJson(text: string): string {
+/** Extract JSON from a response that may contain markdown fences or stray prose. */
+export function extractJson(text: string): string {
   // Try markdown code fences
   const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
   if (fenceMatch) text = fenceMatch[1]!.trim();
   else {
+    const parseableCandidate = findParseableJsonCandidate(text);
+    if (parseableCandidate) return repairJson(parseableCandidate);
+
     // Try to find a bare JSON object or array
     const jsonMatch = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
     if (jsonMatch) text = jsonMatch[1]!;
@@ -1465,6 +1520,71 @@ function extractJson(text: string): string {
   // Repair common LLM JSON issues
   text = repairJson(text);
   return text;
+}
+
+function findParseableJsonCandidate(text: string): string | null {
+  const trimmed = text.trim();
+  try {
+    JSON.parse(trimmed);
+    return trimmed;
+  } catch {
+    // Keep scanning; many models prepend prose or VN bracket tags before JSON.
+  }
+
+  for (const opener of ["{", "["]) {
+    for (let start = text.indexOf(opener); start >= 0; start = text.indexOf(opener, start + 1)) {
+      const candidate = readBalancedJsonCandidate(text, start);
+      if (!candidate) continue;
+      try {
+        JSON.parse(repairJson(candidate));
+        return candidate;
+      } catch {
+        // Not JSON; keep looking.
+      }
+    }
+  }
+
+  return null;
+}
+
+function readBalancedJsonCandidate(text: string, start: number): string | null {
+  const first = text[start];
+  if (first !== "{" && first !== "[") return null;
+
+  const stack: string[] = [first === "{" ? "}" : "]"];
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start + 1; index < text.length; index += 1) {
+    const char = text[index] ?? "";
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === "{" || char === "[") {
+      stack.push(char === "{" ? "}" : "]");
+      continue;
+    }
+    if (char === "}" || char === "]") {
+      if (stack[stack.length - 1] !== char) return null;
+      stack.pop();
+      if (stack.length === 0) return text.slice(start, index + 1);
+    }
+  }
+
+  return null;
 }
 
 /** Fix common LLM JSON mistakes: trailing commas, comments, ellipsis placeholders. */
