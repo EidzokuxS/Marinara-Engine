@@ -2,6 +2,7 @@
 // Routes: Generation (SSE Streaming with Tool Use + Agent Pipeline)
 // ──────────────────────────────────────────────
 import type { FastifyInstance } from "fastify";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import {
@@ -113,6 +114,11 @@ import { matchCustomAgentActivation } from "./generate/agent-activation.js";
 import { listCharacterSprites } from "../services/game/sprite.service.js";
 import { generateChatBackground } from "../services/game/game-asset-generation.js";
 import { sanitizeGameNpcAvatarUrls } from "../services/game/npc-avatar-utils.js";
+import {
+  ensureBondNpcRecords,
+  parseBondReputationCommands,
+  upsertBondNpcFromCharacter,
+} from "../services/game/bond.service.js";
 import {
   parseCharacterCommands,
   parseDirectMessageCommands,
@@ -376,6 +382,7 @@ import {
   stripGmCommandTags,
   stripGmNarrativeCommandTags,
 } from "../services/game/segment-edits.js";
+import { processReputationActions } from "../services/game/reputation.service.js";
 import { listPartySprites, readPreferredFullBodySpriteBase64 } from "../services/game/sprite.service.js";
 import {
   generatePerceptionHints,
@@ -7862,6 +7869,40 @@ export async function generateRoutes(app: FastifyInstance) {
             });
 
             if (chatMode === "game" && !input.impersonate) {
+              const reputationActions = parseBondReputationCommands(fullResponse);
+              if (reputationActions.length > 0) {
+                try {
+                  const freshChat = await chats.getById(input.chatId);
+                  const freshMeta = freshChat ? (parseExtra(freshChat.metadata) as Record<string, unknown>) : chatMeta;
+                  const currentNpcs = Array.isArray(freshMeta.gameNpcs) ? (freshMeta.gameNpcs as GameNpc[]) : [];
+                  const bondNpcs = ensureBondNpcRecords(
+                    currentNpcs,
+                    reputationActions.map((action) => action.npcId),
+                  );
+                  const { npcs: updatedNpcs, changes, milestones } = processReputationActions(
+                    bondNpcs,
+                    reputationActions,
+                  );
+                  await chats.updateMetadata(input.chatId, { ...freshMeta, gameNpcs: updatedNpcs });
+                  chatMeta.gameNpcs = updatedNpcs;
+                  trySendSseEvent(reply, {
+                    type: "metadata_patch",
+                    data: {
+                      gameNpcs: updatedNpcs,
+                      reputationChanges: changes,
+                      reputationMilestones: milestones,
+                    },
+                  });
+                  logger.info(
+                    "[generate/game/reputation] chatId=%s applied=%d",
+                    input.chatId,
+                    reputationActions.length,
+                  );
+                } catch (err) {
+                  logger.warn(err, "[generate/game/reputation] Failed to apply reputation command");
+                }
+              }
+
               const mapUpdates = parseMapUpdateCommands(fullResponse);
               if (mapUpdates.length > 0) {
                 try {
@@ -9362,7 +9403,7 @@ export async function generateRoutes(app: FastifyInstance) {
                     const appearance = (char.appearance as string) || "";
                     const mood = (char.mood as string) || "";
                     const npc: GameNpc = {
-                      id: normalizeTextForMatch(name).replace(/[^\p{L}\p{N}]+/gu, "-") || newId(),
+                      id: normalizeTextForMatch(name).replace(/[^\p{L}\p{N}]+/gu, "-") || randomUUID(),
                       name,
                       emoji: "👤",
                       description: appearance,
@@ -9375,6 +9416,29 @@ export async function generateRoutes(app: FastifyInstance) {
                   }
                 } catch {
                   // Non-critical
+                }
+
+                try {
+                  const freshChat = await chats.getById(input.chatId);
+                  const freshMeta = freshChat ? (parseExtra(freshChat.metadata) as Record<string, unknown>) : chatMeta;
+                  const currentNpcs = Array.isArray(freshMeta.gameNpcs)
+                    ? sanitizeGameNpcAvatarUrls(freshMeta.gameNpcs as GameNpc[])
+                    : [];
+                  let nextNpcs = currentNpcs;
+                  for (const char of chars) {
+                    const name = (char.name as string) ?? "";
+                    if (!name) continue;
+                    if (charInfo.some((c) => normalizeTextForMatch(c.name) === normalizeTextForMatch(name))) continue;
+                    nextNpcs = upsertBondNpcFromCharacter(nextNpcs, char);
+                  }
+                  if (JSON.stringify(nextNpcs) !== JSON.stringify(currentNpcs)) {
+                    await chats.updateMetadata(input.chatId, { ...freshMeta, gameNpcs: nextNpcs });
+                    chatMeta.gameNpcs = nextNpcs;
+                    trySendSseEvent(reply, { type: "metadata_patch", data: { gameNpcs: nextNpcs } });
+                    logger.info("[generate/game/npcs] upserted tracked NPC registry from presentCharacters");
+                  }
+                } catch (err) {
+                  logger.warn(err, "[generate/game/npcs] Failed to upsert presentCharacters into gameNpcs");
                 }
               } catch (err) {
                 logger.error(err, "[generate] character-tracker persistence error");

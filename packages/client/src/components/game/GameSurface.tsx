@@ -4078,15 +4078,6 @@ function GameSurfaceComponent({
       }
     }
 
-    // NPC reputation actions from inline [reputation:] tags
-    if (tags.reputationActions.length > 0) {
-      const repActions = tags.reputationActions.map((ra) => ({
-        npcId: ra.npcName,
-        action: ra.action,
-      }));
-      _updateReputation.mutate({ chatId: activeChatId, actions: repActions });
-    }
-
     // Inventory updates — apply when the relevant segment is reached, not at turn start.
     if (tags.inventoryUpdates.length > 0) {
       const timedInventoryUpdates = parseSegmentInventoryUpdates(msg.content);

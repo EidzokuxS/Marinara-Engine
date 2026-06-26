@@ -1,5 +1,23 @@
 # Current Task
 
+## Bond / NPC Registry Source Of Truth
+
+- [x] Inspect how starting NPCs are generated during Game setup.
+- [x] Inspect how reputation/Bond mutations are applied during generated turns and party turns.
+- [x] Move ordinary Game `[reputation:]` tag application to the server generation pipeline.
+- [x] Remove duplicate client-side inline reputation mutation for saved GM turns.
+- [x] Upsert scene-tracked `presentCharacters` into canonical `gameNpcs`.
+- [x] Add regression coverage for Bond command parsing and NPC registry upsert.
+- [x] Run server tests, server lint, and client lint.
+
+## Bond / NPC Registry Review
+
+- Current behavior before this fix: local "Bond" was not a standalone subsystem. Setup generated `gameNpcs`, reputation math lived in `reputation.service.ts`, scene presence lived in `presentCharacters`, and ordinary GM `[reputation:]` tags depended on the client to call `/game/reputation/update`.
+- Fixed: generation now applies `[reputation:]` tags server-side after the assistant message is saved, then emits a metadata patch with updated NPCs, reputation changes, and milestones.
+- Fixed: the client no longer double-applies inline reputation tags from saved GM text.
+- Fixed: Character Tracker output now upserts non-player present characters into canonical `gameNpcs`, preserving setup/model descriptions while adding missing location/avatar/narration-derived NPC entries.
+- Verified: `pnpm --filter @marinara-engine/server test`, `pnpm --filter @marinara-engine/server lint`, and `pnpm --filter @marinara-engine/client lint`.
+
 ## Upstream Marinara Sync v2.0.5
 
 - [x] Commit and push current Tarot/Game work before upstream merge.
