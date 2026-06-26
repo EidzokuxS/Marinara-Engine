@@ -3,7 +3,8 @@
 // Multi-provider: ChubAI, JannyAI, CharacterTavern, Pygmalion, Wyvern
 // With login modals for Pygmalion & CharacterTavern NSFW, PNG download for all providers
 // ──────────────────────────────────────────────
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import {
   Search,
   Star,
@@ -48,6 +49,16 @@ const TAG_IMPORT_OPTIONS: Array<{ value: TagImportMode; label: string; descripti
   { value: "none", label: "No tags", description: "Skip source tags." },
   { value: "existing", label: "Existing only", description: "Keep tags already in Marinara." },
 ];
+
+const SOURCE_MENU_MIN_WIDTH = 180;
+const SOURCE_MENU_MARGIN = 8;
+
+function encodeProxyPath(path: unknown): string {
+  return String(path ?? "")
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
 
 interface BrowseCard {
   id: string;
@@ -185,11 +196,15 @@ function attachEmbeddedLorebookToCharacterJson(raw: Record<string, unknown>, emb
 }
 
 function optionalString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 }
 
-function optionalStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.map(String) : [];
+function optionalStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const values = value.map((item) => String(item).trim()).filter((item) => item.length > 0);
+  return values.length > 0 ? values : undefined;
 }
 
 function optionalRecord(value: unknown): Record<string, unknown> | undefined {
@@ -370,7 +385,7 @@ const chubProvider: ProviderConfig = {
   extraToggles: [],
   nsfwAvailable: true,
   nsfwMode: "free",
-  getAvatarUrl: (card) => `/api/bot-browser/chub/avatar/${card.id}`,
+  getAvatarUrl: (card) => `/api/bot-browser/chub/avatar/${encodeProxyPath(card.id)}`,
   getExternalUrl: (card) => `https://chub.ai/characters/${card.id}`,
   search: async (p) => {
     const preset = CHUB_SORT_PRESETS.find((pr) => pr.value === p.sort) ?? CHUB_SORT_PRESETS[0];
@@ -408,7 +423,7 @@ const chubProvider: ProviderConfig = {
         creator: (n.fullPath || "").split("/")[0] || "",
         tagline: n.tagline || "",
         tags: n.topics || [],
-        avatarUrl: `/api/bot-browser/chub/avatar/${n.fullPath}`,
+        avatarUrl: `/api/bot-browser/chub/avatar/${encodeProxyPath(n.fullPath)}`,
         stat1: n.starCount || 0,
         stat1Label: "Downloads",
         stat1Icon: "download" as const,
@@ -475,7 +490,7 @@ const jannyProvider: ProviderConfig = {
   extraToggles: [{ key: "showLowQuality", label: "Show Low Quality", icon: "🚫" }],
   nsfwAvailable: true,
   nsfwMode: "free",
-  getAvatarUrl: (card) => `/api/bot-browser/janny/avatar/${(card._raw as any)?.avatar || ""}`,
+  getAvatarUrl: (card) => `/api/bot-browser/janny/avatar/${encodeProxyPath((card._raw as any)?.avatar || "")}`,
   getExternalUrl: (card) => {
     const raw = card._raw as any;
     const slug = card.name
@@ -616,7 +631,7 @@ const jannyProvider: ProviderConfig = {
         creator: h.creatorUsername || "",
         tagline: (h.description || "").replace(/<[^>]*>/g, "").slice(0, 200),
         tags: jannyTagNames(h.tagIds),
-        avatarUrl: h.avatar ? `/api/bot-browser/janny/avatar/${h.avatar}` : "",
+        avatarUrl: h.avatar ? `/api/bot-browser/janny/avatar/${encodeProxyPath(h.avatar)}` : "",
         stat1: h.totalToken || 0,
         stat1Label: "Tokens",
         stat1Icon: "hash" as const,
@@ -696,11 +711,15 @@ const jannyProvider: ProviderConfig = {
         scenario: (char.scenario as string) || undefined,
         firstMessage: (char.firstMessage as string) || undefined,
         exampleDialogs: (char.exampleDialogs as string) || undefined,
+        alternateGreetings: optionalStringArray(char.alternateGreetings ?? char.alternate_greetings),
         creatorNotes: char.description
           ? typeof char.description === "string"
             ? char.description.replace(/<[^>]*>/g, "").trim()
             : undefined
           : undefined,
+        systemPrompt: optionalString(char.systemPrompt ?? char.system_prompt),
+        postHistoryInstructions: optionalString(char.postHistoryInstructions ?? char.post_history_instructions),
+        characterVersion: optionalString(char.characterVersion ?? char.character_version),
       };
     };
 
@@ -774,7 +793,7 @@ const chartavernProvider: ProviderConfig = {
   extraToggles: [{ key: "isOC", label: "Original Character", icon: "⭐" }],
   nsfwAvailable: false,
   nsfwMode: "login",
-  getAvatarUrl: (card) => `/api/bot-browser/chartavern/avatar/${card.id}`,
+  getAvatarUrl: (card) => `/api/bot-browser/chartavern/avatar/${encodeProxyPath(card.id)}`,
   getExternalUrl: (card) => `https://character-tavern.com/character/${card.id}`,
   search: async (p) => {
     const params = new URLSearchParams({
@@ -801,7 +820,7 @@ const chartavernProvider: ProviderConfig = {
         creator: h.author || (h.path || "").split("/")[0] || "",
         tagline: h.tagline || "",
         tags: Array.isArray(h.tags) ? h.tags : [],
-        avatarUrl: h.path ? `/api/bot-browser/chartavern/avatar/${h.path}` : "",
+        avatarUrl: h.path ? `/api/bot-browser/chartavern/avatar/${encodeProxyPath(h.path)}` : "",
         stat1: h.downloads || 0,
         stat1Label: "Downloads",
         stat1Icon: "download" as const,
@@ -869,7 +888,7 @@ const pygmalionProvider: ProviderConfig = {
     const av = raw?.avatarUrl;
     if (!av) return "";
     if (av.startsWith("http")) return `/api/bot-browser/pygmalion/avatar/${encodeURIComponent(av)}`;
-    return `/api/bot-browser/pygmalion/avatar/${av}`;
+    return `/api/bot-browser/pygmalion/avatar/${encodeProxyPath(av)}`;
   },
   getExternalUrl: (card) => `https://pygmalion.chat/character/${card.id}`,
   search: async (p) => {
@@ -896,7 +915,7 @@ const pygmalionProvider: ProviderConfig = {
         if (av) {
           avatarProxyUrl = av.startsWith("http")
             ? `/api/bot-browser/pygmalion/avatar/${encodeURIComponent(av)}`
-            : `/api/bot-browser/pygmalion/avatar/${av}`;
+            : `/api/bot-browser/pygmalion/avatar/${encodeProxyPath(av)}`;
         }
         return {
           id: c.id || "",
@@ -934,6 +953,16 @@ const pygmalionProvider: ProviderConfig = {
       firstMessage: p.greeting || undefined,
       exampleDialogs: p.mesExample || undefined,
       creatorNotes: p.characterNotes || undefined,
+      systemPrompt: optionalString(p.systemPrompt ?? p.system_prompt ?? char.systemPrompt ?? char.system_prompt),
+      postHistoryInstructions: optionalString(
+        p.postHistoryInstructions ??
+          p.post_history_instructions ??
+          char.postHistoryInstructions ??
+          char.post_history_instructions,
+      ),
+      characterVersion: optionalString(
+        p.characterVersion ?? p.character_version ?? char.characterVersion ?? char.character_version,
+      ),
       alternateGreetings: Array.isArray(p.alternateGreetings) ? p.alternateGreetings.filter(Boolean) : [],
     };
   },
@@ -973,7 +1002,7 @@ const wyvernProvider: ProviderConfig = {
     const src = raw?.avatar_url || raw?.avatar;
     if (!src) return "";
     if (src.startsWith("http")) return `/api/bot-browser/wyvern/avatar/${encodeURIComponent(src)}`;
-    return `/api/bot-browser/wyvern/avatar/${src}/public`;
+    return `/api/bot-browser/wyvern/avatar/${encodeProxyPath(src)}/public`;
   },
   getExternalUrl: (card) => `https://app.wyvern.chat/characters/${card.id}`,
   search: async (p) => {
@@ -1002,7 +1031,7 @@ const wyvernProvider: ProviderConfig = {
         if (src) {
           avatarProxyUrl = src.startsWith("http")
             ? `/api/bot-browser/wyvern/avatar/${encodeURIComponent(src)}`
-            : `/api/bot-browser/wyvern/avatar/${src}/public`;
+            : `/api/bot-browser/wyvern/avatar/${encodeProxyPath(src)}/public`;
         }
         return {
           id: c.id || "",
@@ -1040,6 +1069,9 @@ const wyvernProvider: ProviderConfig = {
       firstMessage: c.first_mes || undefined,
       exampleDialogs: c.mes_example || undefined,
       creatorNotes: c.creator_notes || undefined,
+      systemPrompt: optionalString(c.systemPrompt ?? c.system_prompt),
+      postHistoryInstructions: optionalString(c.postHistoryInstructions ?? c.post_history_instructions),
+      characterVersion: optionalString(c.characterVersion ?? c.character_version),
       alternateGreetings: Array.isArray(c.alternate_greetings) ? c.alternate_greetings.filter(Boolean) : [],
       hasLorebook: !!(c.lorebooks?.length > 0),
     };
@@ -1124,7 +1156,7 @@ const datacatProvider: ProviderConfig = {
     const av = raw?.avatar || "";
     if (!av) return "";
     if (av.startsWith("http")) return `/api/bot-browser/datacat/avatar/${encodeURIComponent(av)}`;
-    return `/api/bot-browser/datacat/avatar/${av}`;
+    return `/api/bot-browser/datacat/avatar/${encodeProxyPath(av)}`;
   },
   getExternalUrl: (card) => {
     const raw = card._raw as any;
@@ -1204,7 +1236,7 @@ const datacatProvider: ProviderConfig = {
         const avatarProxyUrl = av
           ? av.startsWith("http")
             ? `/api/bot-browser/datacat/avatar/${encodeURIComponent(av)}`
-            : `/api/bot-browser/datacat/avatar/${av}`
+            : `/api/bot-browser/datacat/avatar/${encodeProxyPath(av)}`
           : "";
         const charId = c.characterId || c.character_id || c.id || "";
         return {
@@ -1248,6 +1280,9 @@ const datacatProvider: ProviderConfig = {
             firstMessage: d.first_mes || undefined,
             exampleDialogs: d.mes_example || undefined,
             creatorNotes: d.creator_notes || undefined,
+            systemPrompt: optionalString(d.systemPrompt ?? d.system_prompt),
+            postHistoryInstructions: optionalString(d.postHistoryInstructions ?? d.post_history_instructions),
+            characterVersion: optionalString(d.characterVersion ?? d.character_version),
             alternateGreetings: Array.isArray(d.alternate_greetings) ? d.alternate_greetings.filter(Boolean) : [],
           };
         }
@@ -1268,6 +1303,9 @@ const datacatProvider: ProviderConfig = {
         scenario: c.scenario || undefined,
         firstMessage: c.first_message || undefined,
         creatorNotes: plainDesc || undefined,
+        systemPrompt: optionalString(c.systemPrompt ?? c.system_prompt),
+        postHistoryInstructions: optionalString(c.postHistoryInstructions ?? c.post_history_instructions),
+        characterVersion: optionalString(c.characterVersion ?? c.character_version),
       };
     } catch {
       return null;
@@ -1303,7 +1341,49 @@ export function BotBrowserView() {
 
   const [sourceId, setSourceId] = useState("chub");
   const [sourceOpen, setSourceOpen] = useState(false);
+  const sourceButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [sourceMenuPosition, setSourceMenuPosition] = useState<{
+    left: number;
+    top: number;
+    maxHeight: number;
+  } | null>(null);
   const provider = useMemo(() => getProvider(sourceId), [sourceId]);
+
+  const updateSourceMenuPosition = useCallback(() => {
+    const button = sourceButtonRef.current;
+    if (!button) {
+      setSourceMenuPosition(null);
+      return;
+    }
+
+    const rect = button.getBoundingClientRect();
+    const width = Math.max(SOURCE_MENU_MIN_WIDTH, rect.width);
+    const left = Math.min(
+      Math.max(SOURCE_MENU_MARGIN, rect.left),
+      Math.max(SOURCE_MENU_MARGIN, window.innerWidth - width - SOURCE_MENU_MARGIN),
+    );
+    const top = rect.bottom + 4;
+    setSourceMenuPosition({
+      left,
+      top,
+      maxHeight: Math.max(96, window.innerHeight - top - SOURCE_MENU_MARGIN),
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!sourceOpen) {
+      setSourceMenuPosition(null);
+      return;
+    }
+
+    updateSourceMenuPosition();
+    window.addEventListener("resize", updateSourceMenuPosition);
+    window.addEventListener("scroll", updateSourceMenuPosition, true);
+    return () => {
+      window.removeEventListener("resize", updateSourceMenuPosition);
+      window.removeEventListener("scroll", updateSourceMenuPosition, true);
+    };
+  }, [sourceOpen, updateSourceMenuPosition]);
 
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState(provider.defaultSort);
@@ -1339,6 +1419,10 @@ export function BotBrowserView() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [tagImportMode, setTagImportMode] = useState<TagImportMode>("all");
+  const mainScrollRef = useRef<HTMLDivElement | null>(null);
+  const resultsScrollTopRef = useRef(0);
+  const restoreResultsScrollRef = useRef(false);
+  const openDetailScrollRef = useRef(false);
 
   // ── Auth state ──
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -1512,7 +1596,29 @@ export function BotBrowserView() {
     };
   }, [doSearch, query]);
 
+  useLayoutEffect(() => {
+    const scrollContainer = mainScrollRef.current;
+    if (!scrollContainer) return;
+
+    if (selectedCard && openDetailScrollRef.current) {
+      openDetailScrollRef.current = false;
+      scrollContainer.scrollTop = 0;
+      return;
+    }
+
+    if (!selectedCard && restoreResultsScrollRef.current) {
+      restoreResultsScrollRef.current = false;
+      const savedTop = resultsScrollTopRef.current;
+      scrollContainer.scrollTop = savedTop;
+      requestAnimationFrame(() => {
+        scrollContainer.scrollTop = savedTop;
+      });
+    }
+  }, [selectedCard]);
+
   const openDetail = async (card: BrowseCard) => {
+    resultsScrollTopRef.current = mainScrollRef.current?.scrollTop ?? 0;
+    openDetailScrollRef.current = true;
     setSelectedCard(card);
     setDetail(null);
     setDetailLoading(true);
@@ -1521,6 +1627,7 @@ export function BotBrowserView() {
       setDetail(d);
     } catch {
       toast.error("Failed to load character details");
+      restoreResultsScrollRef.current = true;
       setSelectedCard(null);
     } finally {
       setDetailLoading(false);
@@ -1589,6 +1696,9 @@ export function BotBrowserView() {
           first_mes: cardDetail?.firstMessage || "",
           mes_example: cardDetail?.exampleDialogs || "",
           creator_notes: cardDetail?.creatorNotes || "",
+          system_prompt: cardDetail?.systemPrompt || "",
+          post_history_instructions: cardDetail?.postHistoryInstructions || "",
+          character_version: cardDetail?.characterVersion || "",
           tags: card.tags,
           creator: card.creator,
           alternate_greetings: cardDetail?.alternateGreetings || [],
@@ -1785,28 +1895,39 @@ export function BotBrowserView() {
   };
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="mari-chrome-token-scope flex h-full flex-col overflow-hidden">
       {/* ═══ Header ═══ */}
-      <div className="relative flex h-12 flex-shrink-0 items-center gap-3 px-4">
+      <div className="relative flex h-12 flex-shrink-0 items-center gap-3 bg-[var(--card)]/80 px-4 backdrop-blur-sm">
         <div className="absolute inset-x-0 bottom-0 h-px bg-[var(--border)]/30" />
         <button
           onClick={closeBotBrowser}
-          className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+          className="mari-chrome-control mari-chrome-control--small px-2 py-1.5 text-xs"
         >
           <ArrowLeft size="0.875rem" /> Back
         </button>
-        <h2 className="text-sm font-semibold text-[var(--foreground)]">Browser</h2>
+        <h2 className="mari-chrome-text-strong text-sm font-semibold">Browser</h2>
         <div className="relative ml-2">
           <button
+            ref={sourceButtonRef}
             onClick={() => setSourceOpen((v) => !v)}
-            className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[var(--accent)]"
+            className="mari-chrome-control mari-chrome-control--small px-3 py-1.5 text-xs"
           >
             <span>{provider.icon}</span>
             <span>{provider.name}</span>
             <ChevronDown size="0.625rem" className={cn("transition-transform", sourceOpen && "rotate-180")} />
           </button>
-          {sourceOpen && (
-            <div className="absolute left-0 top-full z-50 mt-1 min-w-[180px] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--card)] shadow-xl">
+        </div>
+        {sourceOpen &&
+          sourceMenuPosition &&
+          createPortal(
+            <div
+              className="mari-chrome-token-scope mari-chrome-selection-bar fixed z-[9999] min-w-[180px] overflow-y-auto shadow-xl"
+              style={{
+                left: sourceMenuPosition.left,
+                top: sourceMenuPosition.top,
+                maxHeight: sourceMenuPosition.maxHeight,
+              }}
+            >
               {ALL_PROVIDERS.map((p) => (
                 <button
                   key={p.id}
@@ -1814,7 +1935,7 @@ export function BotBrowserView() {
                   className={cn(
                     "flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-xs transition-colors",
                     p.id === sourceId
-                      ? "bg-[var(--primary)]/15 text-[var(--primary)] font-semibold"
+                      ? "mari-chrome-accent-surface mari-accent-animated font-semibold"
                       : "hover:bg-[var(--accent)]",
                   )}
                 >
@@ -1823,9 +1944,9 @@ export function BotBrowserView() {
                   {p.id === sourceId && <span className="ml-auto text-[0.6rem]">✓</span>}
                 </button>
               ))}
-            </div>
+            </div>,
+            document.body,
           )}
-        </div>
         {/* Auth indicator for login providers */}
         {sourceId === "pygmalion" && pygLoggedIn && (
           <span className="ml-auto flex items-center gap-1 text-[0.65rem] text-emerald-400">
@@ -1842,23 +1963,23 @@ export function BotBrowserView() {
       <div className="flex flex-1 overflow-hidden">
         {/* ═══ Tag Sidebar ═══ */}
         {showTagPanel && (
-          <div className="flex w-[260px] flex-shrink-0 flex-col border-r border-[var(--border)] bg-[var(--card)]/50">
-            <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
-              <span className="flex items-center gap-1.5 text-xs font-semibold">
+          <div className="flex w-[260px] flex-shrink-0 flex-col border-r border-[var(--marinara-chat-chrome-panel-divider)] bg-[var(--marinara-chat-chrome-panel-bg)]/80">
+            <div className="flex items-center justify-between border-b border-[var(--marinara-chat-chrome-panel-divider)] px-3 py-2">
+              <span className="mari-chrome-text-strong flex items-center gap-1.5 text-xs font-semibold">
                 <Tag size="0.75rem" /> Tags
               </span>
               <div className="flex items-center gap-1">
                 {(includeTags.length > 0 || excludeTags.length > 0) && (
                   <button
                     onClick={clearAllTags}
-                    className="rounded px-1.5 py-0.5 text-[0.6rem] text-[var(--destructive)] hover:bg-[var(--destructive)]/10"
+                    className="mari-chrome-control mari-chrome-control--danger min-h-0 px-1.5 py-0.5 text-[0.6rem]"
                   >
                     Clear
                   </button>
                 )}
                 <button
                   onClick={() => setShowTagPanel(false)}
-                  className="rounded p-0.5 text-[var(--muted-foreground)] hover:bg-[var(--accent)]"
+                  className="mari-chrome-control mari-chrome-control--small min-h-0 p-0.5"
                 >
                   <X size="0.75rem" />
                 </button>
@@ -1876,11 +1997,11 @@ export function BotBrowserView() {
                   }
                 }}
                 placeholder="Search tags..."
-                className="w-full rounded-md border border-[var(--border)] bg-[var(--secondary)] px-2.5 py-1.5 text-xs outline-none transition-colors focus:border-[var(--primary)]"
+                className="mari-chrome-field mari-chrome-field--compact w-full px-2.5 py-1.5 text-xs"
               />
             </div>
             {(includeTags.length > 0 || excludeTags.length > 0) && (
-              <div className="flex flex-wrap gap-1 border-b border-[var(--border)] px-3 pb-2">
+              <div className="flex flex-wrap gap-1 border-b border-[var(--marinara-chat-chrome-panel-divider)] px-3 pb-2">
                 {includeTags.map((tag) => (
                   <span
                     key={`inc-${tag}`}
@@ -1937,7 +2058,7 @@ export function BotBrowserView() {
                   return (
                     <div
                       key={tag}
-                      className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-[var(--accent)]/50"
+                      className="mari-chrome-text flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-[var(--accent)]/50"
                     >
                       <button
                         onClick={() => toggleIncludeTag(tag)}
@@ -1971,7 +2092,7 @@ export function BotBrowserView() {
         )}
 
         {/* ═══ Main area ═══ */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div ref={mainScrollRef} className="flex-1 overflow-y-auto p-4">
           {selectedCard ? (
             <DetailView
               card={selectedCard}
@@ -1980,6 +2101,7 @@ export function BotBrowserView() {
               importing={importing}
               provider={provider}
               onBack={() => {
+                restoreResultsScrollRef.current = true;
                 setSelectedCard(null);
                 setDetail(null);
               }}
@@ -1995,7 +2117,7 @@ export function BotBrowserView() {
                 <div className="relative min-w-[200px] flex-1">
                   <Search
                     size="0.875rem"
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)]"
+                    className="mari-chrome-field-icon pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"
                   />
                   <input
                     type="text"
@@ -2005,12 +2127,12 @@ export function BotBrowserView() {
                       setPage(1);
                     }}
                     placeholder="Search characters..."
-                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--secondary)] py-2 pl-9 pr-8 text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none transition-colors focus:border-[var(--primary)] disabled:cursor-not-allowed disabled:opacity-60"
+                    className="mari-chrome-field h-10 w-full py-0 pl-9 pr-8 text-sm md:h-9"
                   />
                   {query && (
                     <button
                       onClick={() => setQuery("")}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                      className="mari-chrome-control mari-chrome-control--small absolute right-1.5 top-1/2 h-7 min-h-0 w-7 -translate-y-1/2 p-0"
                     >
                       <X size="0.75rem" />
                     </button>
@@ -2023,7 +2145,7 @@ export function BotBrowserView() {
                     setSort(e.target.value);
                     setPage(1);
                   }}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-3 py-2 text-xs text-[var(--foreground)] outline-none"
+                  className="mari-chrome-field h-10 px-3 py-0 text-xs md:h-9"
                 >
                   {sortGroups.map((group) =>
                     group.label ? (
@@ -2047,15 +2169,15 @@ export function BotBrowserView() {
                 <button
                   onClick={() => setShowTagPanel((v) => !v)}
                   className={cn(
-                    "flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition-colors",
+                    "mari-chrome-control h-10 px-3 py-0 text-xs md:h-9",
                     showTagPanel || includeTags.length > 0 || excludeTags.length > 0
-                      ? "border-[var(--primary)]/40 bg-[var(--primary)]/10 text-[var(--primary)]"
-                      : "border-[var(--border)] bg-[var(--secondary)] hover:bg-[var(--accent)]",
+                      ? "mari-chrome-control--selected"
+                      : "",
                   )}
                 >
                   <Tag size="0.75rem" /> Tags
                   {(includeTags.length > 0 || excludeTags.length > 0) && (
-                    <span className="rounded-full bg-[var(--primary)]/20 px-1.5 text-[0.6rem] font-semibold">
+                    <span className="rounded-md bg-[var(--marinara-chat-chrome-highlight-bg)] px-1.5 text-[0.6rem] font-semibold">
                       {includeTags.length + excludeTags.length}
                     </span>
                   )}
@@ -2068,15 +2190,13 @@ export function BotBrowserView() {
                   <button
                     onClick={() => setShowFiltersPanel((v) => !v)}
                     className={cn(
-                      "flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition-colors",
-                      showFiltersPanel || hasActiveFeatures
-                        ? "border-[var(--primary)]/40 bg-[var(--primary)]/10 text-[var(--primary)]"
-                        : "border-[var(--border)] bg-[var(--secondary)] hover:bg-[var(--accent)]",
+                      "mari-chrome-control h-10 px-3 py-0 text-xs md:h-9",
+                      (showFiltersPanel || hasActiveFeatures) && "mari-chrome-control--selected",
                     )}
                   >
                     <SlidersHorizontal size="0.75rem" /> Filters
                     {hasActiveFeatures && (
-                      <span className="rounded-full bg-[var(--primary)]/20 px-1.5 text-[0.6rem] font-semibold">
+                      <span className="rounded-md bg-[var(--marinara-chat-chrome-highlight-bg)] px-1.5 text-[0.6rem] font-semibold">
                         {activeFeatureCount}
                       </span>
                     )}
@@ -2092,7 +2212,7 @@ export function BotBrowserView() {
                   return (
                     <label
                       className={cn(
-                        "flex select-none items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-3 py-2 text-xs",
+                        "mari-chrome-control h-10 select-none px-3 py-0 text-xs md:h-9",
                         nsfwGreyedOut
                           ? "cursor-not-allowed opacity-40"
                           : effectiveNsfwAvailable
@@ -2147,7 +2267,7 @@ export function BotBrowserView() {
                           if (sourceId === "pygmalion") handlePygmalionLogout();
                           else if (sourceId === "chartavern") handleCtLogout();
                         }}
-                        className="flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-2.5 py-2 text-[0.65rem] text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--destructive)]"
+                        className="mari-chrome-control mari-chrome-control--small px-2.5 py-2 text-[0.65rem] hover:text-[var(--destructive)]"
                         title="Log out"
                       >
                         <LogOut size="0.625rem" /> Logout
@@ -2156,7 +2276,7 @@ export function BotBrowserView() {
                   ) : (
                     <button
                       onClick={() => setShowLoginModal(true)}
-                      className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-3 py-2 text-xs transition-colors hover:bg-[var(--accent)]"
+                      className="mari-chrome-control h-10 px-3 py-0 text-xs md:h-9"
                     >
                       <LogIn size="0.75rem" /> Log In
                     </button>
@@ -2169,7 +2289,7 @@ export function BotBrowserView() {
 
                 <button
                   onClick={doSearch}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--secondary)] p-2 text-xs transition-colors hover:bg-[var(--accent)]"
+                  className="mari-chrome-control h-10 w-10 p-0 text-xs md:h-9 md:w-9"
                   title="Refresh"
                 >
                   <RefreshCw size="0.75rem" />
@@ -2178,10 +2298,10 @@ export function BotBrowserView() {
 
               {/* ═══ Filters panel ═══ */}
               {showFiltersPanel && (
-                <div className="flex flex-wrap gap-6 rounded-lg border border-[var(--border)] bg-[var(--secondary)]/50 px-4 py-3">
+                <div className="mari-chrome-selection-bar flex flex-wrap gap-6 px-4 py-3">
                   {(provider.features.length > 0 || provider.extraToggles.length > 0) && (
                     <div className="flex flex-col gap-2">
-                      <span className="text-[0.65rem] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+                      <span className="mari-chrome-text-muted text-[0.65rem] font-semibold uppercase tracking-wider">
                         Character Must Have
                       </span>
                       {provider.features.map((f) => (
@@ -2214,19 +2334,19 @@ export function BotBrowserView() {
                   )}
                   {(provider.hasSortDirection || provider.hasTokenFilters) && (
                     <div className="flex flex-col gap-2">
-                      <span className="text-[0.65rem] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+                      <span className="mari-chrome-text-muted text-[0.65rem] font-semibold uppercase tracking-wider">
                         Advanced Options
                       </span>
                       {provider.hasSortDirection && (
                         <div className="flex items-center gap-2">
-                          <label className="w-24 text-xs text-[var(--muted-foreground)]">Sort Direction</label>
+                          <label className="mari-chrome-text-muted w-24 text-xs">Sort Direction</label>
                           <select
                             value={sortAsc ? "asc" : "desc"}
                             onChange={(e) => {
                               setSortAsc(e.target.value === "asc");
                               setPage(1);
                             }}
-                            className="rounded border border-[var(--border)] bg-[var(--secondary)] px-2 py-1 text-xs outline-none"
+                            className="mari-chrome-field mari-chrome-field--compact px-2 py-1 text-xs"
                           >
                             <option value="desc">Descending</option>
                             <option value="asc">Ascending</option>
@@ -2236,7 +2356,7 @@ export function BotBrowserView() {
                       {provider.hasTokenFilters && (
                         <>
                           <div className="flex items-center gap-2">
-                            <label className="w-24 text-xs text-[var(--muted-foreground)]">Min Tokens</label>
+                            <label className="mari-chrome-text-muted w-24 text-xs">Min Tokens</label>
                             <input
                               type="number"
                               value={minTokens}
@@ -2245,11 +2365,11 @@ export function BotBrowserView() {
                                 setPage(1);
                               }}
                               placeholder="50"
-                              className="w-20 rounded border border-[var(--border)] bg-[var(--secondary)] px-2 py-1 text-xs outline-none focus:border-[var(--primary)]"
+                              className="mari-chrome-field mari-chrome-field--compact w-20 px-2 py-1 text-xs"
                             />
                           </div>
                           <div className="flex items-center gap-2">
-                            <label className="w-24 text-xs text-[var(--muted-foreground)]">Max Output Tokens</label>
+                            <label className="mari-chrome-text-muted w-24 text-xs">Max Output Tokens</label>
                             <input
                               type="number"
                               value={maxTokens}
@@ -2258,7 +2378,7 @@ export function BotBrowserView() {
                                 setPage(1);
                               }}
                               placeholder="100000"
-                              className="w-20 rounded border border-[var(--border)] bg-[var(--secondary)] px-2 py-1 text-xs outline-none focus:border-[var(--primary)]"
+                              className="mari-chrome-field mari-chrome-field--compact w-20 px-2 py-1 text-xs"
                             />
                           </div>
                         </>
@@ -2278,7 +2398,7 @@ export function BotBrowserView() {
                   <span className="text-sm text-[var(--destructive)]">{error}</span>
                   <button
                     onClick={doSearch}
-                    className="flex items-center gap-1.5 rounded-lg bg-[var(--primary)]/15 px-4 py-2 text-xs font-medium text-[var(--primary)] transition-colors hover:bg-[var(--primary)]/25"
+                    className="mari-chrome-control mari-chrome-control--selected px-4 py-2 text-xs"
                   >
                     <RefreshCw size="0.75rem" /> Retry
                   </button>
@@ -2299,7 +2419,7 @@ export function BotBrowserView() {
                       <button
                         disabled={page <= 1}
                         onClick={() => setPage((p) => Math.max(1, p - 1))}
-                        className="rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] disabled:opacity-40"
+                        className="mari-chrome-control mari-chrome-control--small px-3 py-1.5 text-xs"
                       >
                         Previous
                       </button>
@@ -2310,7 +2430,7 @@ export function BotBrowserView() {
                       <button
                         disabled={page >= totalPages && totalPages > 1}
                         onClick={() => setPage((p) => p + 1)}
-                        className="rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] disabled:opacity-40"
+                        className="mari-chrome-control mari-chrome-control--small px-3 py-1.5 text-xs"
                       >
                         Next
                       </button>
@@ -2349,21 +2469,21 @@ export function BotBrowserView() {
         >
           <div className="absolute inset-0 bg-black/60" onClick={() => setPendingDatacatSwitch(false)} />
           <div
-            className="relative w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl"
+            className="mari-chrome-selection-bar relative w-full max-w-md shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-3">
-              <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--foreground)]">
+            <div className="flex items-center justify-between border-b border-[var(--marinara-chat-chrome-panel-divider)] px-5 py-3">
+              <h3 className="mari-chrome-text-strong flex items-center gap-2 text-sm font-bold">
                 <span className="text-amber-400">⚠️</span> DataCat is NSFW only
               </h3>
               <button
                 onClick={() => setPendingDatacatSwitch(false)}
-                className="rounded p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+                className="mari-chrome-control mari-chrome-control--small p-1"
               >
                 <X size="1rem" />
               </button>
             </div>
-            <div className="flex flex-col gap-3 p-5 text-sm text-[var(--foreground)]">
+            <div className="mari-chrome-text flex flex-col gap-3 p-5 text-sm">
               <p>
                 Every character on DataCat is tagged NSFW upstream, so the NSFW filter is locked on for this provider.
               </p>
@@ -2374,13 +2494,13 @@ export function BotBrowserView() {
                     setPendingDatacatSwitch(false);
                     performSwitch("datacat");
                   }}
-                  className="flex-1 rounded-lg bg-pink-600 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-pink-500"
+                  className="mari-panel-gradient-button mari-panel-gradient--browser flex-1 px-4 py-2 text-xs"
                 >
                   Continue to DataCat
                 </button>
                 <button
                   onClick={() => setPendingDatacatSwitch(false)}
-                  className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-4 py-2 text-xs font-medium transition-colors hover:bg-[var(--accent)]"
+                  className="mari-chrome-control flex-1 px-4 py-2 text-xs"
                 >
                   Don't continue to DataCat
                 </button>
@@ -2438,12 +2558,12 @@ function LoginModal({
     >
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
       <div
-        className="relative w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl"
+        className="mari-chrome-selection-bar relative w-full max-w-md shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-3">
-          <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--foreground)]">
+        <div className="flex items-center justify-between border-b border-[var(--marinara-chat-chrome-panel-divider)] px-5 py-3">
+          <h3 className="mari-chrome-text-strong flex items-center gap-2 text-sm font-bold">
             {isPyg ? (
               <>
                 <KeyRound size="1rem" className="text-amber-400" /> Pygmalion Authentication
@@ -2454,10 +2574,7 @@ function LoginModal({
               </>
             )}
           </h3>
-          <button
-            onClick={onClose}
-            className="rounded p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
-          >
+          <button onClick={onClose} className="mari-chrome-control mari-chrome-control--small p-1">
             <X size="1rem" />
           </button>
         </div>
@@ -2487,7 +2604,7 @@ function LoginModal({
                   disabled={isLoggedIn || loginLoading}
                   placeholder="Paste your Pygmalion auth token here"
                   rows={3}
-                  className="w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-3 py-2 font-mono text-xs outline-none transition-colors focus:border-[var(--primary)] disabled:opacity-50"
+                  className="mari-chrome-field w-full resize-y px-3 py-2 font-mono text-xs disabled:opacity-50"
                 />
               </div>
               <details open={showPygHelp} onToggle={(e) => setShowPygHelp((e.target as HTMLDetailsElement).open)}>
@@ -2534,10 +2651,7 @@ function LoginModal({
                     Save & Connect
                   </button>
                 ) : (
-                  <button
-                    onClick={onPygLogout}
-                    className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-4 py-2 text-xs font-medium transition-colors hover:bg-[var(--accent)]"
-                  >
+                  <button onClick={onPygLogout} className="mari-chrome-control px-4 py-2 text-xs">
                     <LogOut size="0.75rem" /> Log Out
                   </button>
                 )}
@@ -2545,7 +2659,7 @@ function LoginModal({
                   href="https://pygmalion.chat"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-4 py-2 text-xs font-medium transition-colors hover:bg-[var(--accent)]"
+                  className="mari-chrome-control px-4 py-2 text-xs"
                 >
                   <ExternalLink size="0.75rem" /> Website
                 </a>
@@ -2561,7 +2675,7 @@ function LoginModal({
                   disabled={isLoggedIn || loginLoading}
                   placeholder="Paste your session cookie value here"
                   rows={3}
-                  className="w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-3 py-2 text-sm outline-none transition-colors focus:border-[var(--primary)] disabled:opacity-50"
+                  className="mari-chrome-field w-full resize-y px-3 py-2 text-sm disabled:opacity-50"
                 />
               </div>
               <details open={showHelp} onToggle={(e) => setShowHelp((e.target as HTMLDetailsElement).open)}>
@@ -2606,10 +2720,7 @@ function LoginModal({
                     Save & Connect
                   </button>
                 ) : (
-                  <button
-                    onClick={onCtLogout}
-                    className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-4 py-2 text-xs font-medium transition-colors hover:bg-[var(--accent)]"
-                  >
+                  <button onClick={onCtLogout} className="mari-chrome-control px-4 py-2 text-xs">
                     <LogOut size="0.75rem" /> Log Out
                   </button>
                 )}
@@ -2617,7 +2728,7 @@ function LoginModal({
                   href="https://character-tavern.com"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-4 py-2 text-xs font-medium transition-colors hover:bg-[var(--accent)]"
+                  className="mari-chrome-control px-4 py-2 text-xs"
                 >
                   <ExternalLink size="0.75rem" /> CharacterTavern
                 </a>
@@ -2643,7 +2754,7 @@ function CardTile({ card, onClick }: { card: BrowseCard; onClick: () => void }) 
   return (
     <button
       onClick={onClick}
-      className="group flex flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] text-left transition-all hover:border-pink-500/40 hover:shadow-lg hover:shadow-pink-500/10 active:scale-[0.98]"
+      className="group flex flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] text-left transition-all hover:border-[var(--marinara-chat-chrome-button-border-hover)] hover:shadow-lg hover:shadow-[var(--glow-primary)] active:scale-[0.98]"
     >
       <div className="relative aspect-square w-full overflow-hidden bg-[var(--secondary)]">
         {imgError || !card.avatarUrl ? (
@@ -2671,7 +2782,7 @@ function CardTile({ card, onClick }: { card: BrowseCard; onClick: () => void }) 
         {card.tagline && (
           <p className="line-clamp-2 text-xs text-[var(--muted-foreground)] opacity-70">{card.tagline}</p>
         )}
-        <div className="mt-auto flex items-center gap-2 pt-1.5 text-[0.65rem] text-pink-400/80">
+        <div className="mari-chrome-text-muted mt-auto flex items-center gap-2 pt-1.5 text-[0.65rem]">
           {card.stat1 > 0 && card.stat1Label && (
             <span className="flex items-center gap-0.5" title={card.stat1Label}>
               <Stat1Icon size="0.625rem" /> {fmtNum(card.stat1)}
@@ -2741,6 +2852,9 @@ function DetailView({
         first_mes: d?.firstMessage || "",
         mes_example: d?.exampleDialogs || "",
         creator_notes: d?.creatorNotes || "",
+        system_prompt: d?.systemPrompt || "",
+        post_history_instructions: d?.postHistoryInstructions || "",
+        character_version: d?.characterVersion || "",
         tags: card.tags || [],
         creator: card.creator || "",
         alternate_greetings: d?.alternateGreetings || [],
@@ -2772,10 +2886,7 @@ function DetailView({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-2">
-        <button
-          onClick={onBack}
-          className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
-        >
+        <button onClick={onBack} className="mari-chrome-control mari-chrome-control--small px-2 py-1.5 text-xs">
           <ChevronLeft size="0.875rem" /> Back to results
         </button>
         <div className="flex-1" />
@@ -2783,7 +2894,7 @@ function DetailView({
           href={card.externalUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-[var(--muted-foreground)] transition-colors hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+          className="mari-chrome-control mari-chrome-control--small px-2 py-1.5 text-xs"
         >
           <ExternalLink size="0.75rem" /> View on {provider.siteName}
         </a>
@@ -2841,7 +2952,7 @@ function DetailView({
               <button
                 onClick={() => onImport(card)}
                 disabled={importing}
-                className="flex items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2.5 text-xs font-medium text-[var(--primary-foreground)] transition-all hover:opacity-90 active:scale-95 disabled:opacity-50"
+                className="mari-panel-gradient-button mari-panel-gradient--browser px-4 py-2.5 text-xs"
               >
                 {importing ? <Loader2 size="0.875rem" className="animate-spin" /> : <Download size="0.875rem" />}
                 {importing ? "Importing..." : "Import"}
@@ -2849,12 +2960,12 @@ function DetailView({
               <button
                 onClick={handleDownloadPng}
                 disabled={downloading}
-                className="flex items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-4 py-2 text-xs font-medium text-[var(--foreground)] transition-all hover:bg-[var(--accent)] active:scale-95 disabled:opacity-50"
+                className="mari-chrome-control px-4 py-2 text-xs"
               >
                 {downloading ? <Loader2 size="0.75rem" className="animate-spin" /> : <Download size="0.75rem" />}
                 {downloading ? "Building PNG..." : "Download as PNG"}
               </button>
-              <div className="flex flex-col gap-1 rounded-lg bg-[var(--secondary)] p-2.5 text-xs text-pink-400/80">
+              <div className="mari-chrome-text-muted flex flex-col gap-1 rounded-lg bg-[var(--secondary)] p-2.5 text-xs">
                 {card.stat1 > 0 && card.stat1Label && (
                   <span className="flex items-center gap-1.5">
                     {(() => {
@@ -3000,11 +3111,11 @@ async function buildCharacterCardPng(avatarUrl: string, charData: Record<string,
       first_mes: charData.first_mes || "",
       mes_example: charData.mes_example || "",
       creator_notes: charData.creator_notes || "",
-      system_prompt: "",
-      post_history_instructions: "",
+      system_prompt: charData.system_prompt || "",
+      post_history_instructions: charData.post_history_instructions || "",
       tags: charData.tags || [],
       creator: charData.creator || "",
-      character_version: "",
+      character_version: charData.character_version || "",
       alternate_greetings: charData.alternate_greetings || [],
       extensions: charData.extensions || {},
     },

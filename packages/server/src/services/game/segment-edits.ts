@@ -20,7 +20,7 @@ import { formatSkillCheckResultSummary, type SkillCheckResult } from "@marinara-
  * are preserved as plain text because the roll result is canonical history.
  */
 export function stripGmCommandTags(content: string): string {
-  let text = preserveResolvedSkillCheckResults(content)
+  let text = stripZtStateComments(preserveResolvedSkillCheckResults(content))
     .replace(/\[music:\s*[^\]]+\]/gi, "")
     .replace(/\[sfx:\s*[^\]]+\]/gi, "")
     .replace(/\[bg:\s*[^\]]+\]/gi, "")
@@ -48,6 +48,26 @@ export function stripGmCommandTags(content: string): string {
   text = text.replace(/\[(?!Note:|Book:)\w+:[^\]]*\]/g, "");
   text = stripDanglingTagClosers(text);
   return text.trim();
+}
+
+/** Strip every GM command/readable tag from narrative-only text. */
+export function stripGmNarrativeCommandTags(content: string): string {
+  let text = stripGmCommandTags(content);
+  text = stripBalancedTag(text, "[Note:");
+  text = stripBalancedTag(text, "[Book:");
+  text = stripBareItalicLines(text);
+  text = stripDanglingTagClosers(text).replace(/\n{3,}/g, "\n\n").trim();
+  return normalizeVisibleProseTypography(text);
+}
+
+/** Normalize typography banned from final Game prose. */
+export function normalizeVisibleProseTypography(content: string): string {
+  return content
+    .replace(/\s*\u2014\s*/g, ", ")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/,\s+([,.;:!?])/g, "$1")
+    .replace(/\n[ \t]+/g, "\n")
+    .trim();
 }
 
 function preserveResolvedSkillCheckResults(content: string): string {
@@ -124,6 +144,16 @@ function parseResolvedSkillCheckBody(body: string): SkillCheckResult | null {
 /** Remove dangling closers left behind by malformed or partially stripped tags. */
 function stripDanglingTagClosers(text: string): string {
   return text.replace(/^\s*[\]}]+\s*$/gm, "");
+}
+
+/** Remove unlabeled thought/emphasis lines; Game thoughts must use VN prefixes. */
+function stripBareItalicLines(text: string): string {
+  return text.replace(/^\s*\*[^*\r\n][^*\r\n]*\*\s*$/gm, "");
+}
+
+/** Remove donor SillyTavern continuity comments from visible Game text. */
+function stripZtStateComments(text: string): string {
+  return text.replace(/<!--\s*ZT_STATE:[\s\S]*?-->/gi, "");
 }
 
 /** Strip a balanced-bracket tag (handles nested brackets like JSON). */

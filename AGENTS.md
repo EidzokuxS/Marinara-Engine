@@ -11,8 +11,11 @@ This file is a thin maintainer note for contributors using Codex. Canonical work
 
 - Start with `pnpm install`.
 - Run `pnpm check` as the baseline validation command.
-- Run `pnpm db:push` when server or database changes need schema verification.
 - Run `pnpm version:check` when you touch release metadata, version-bearing files, or README release references.
+
+## Temporary Tests
+
+- Do not keep `.test.ts` files in the repo. If an agent creates one for local proof, remove it after the test is done.
 
 ## Repo-Specific Cautions
 
@@ -71,4 +74,4 @@ Android-specific rule:
 ## Frontend Changes
 
 - **Read `packages/client/.instructions.md` before editing any client code.** It is the authoritative reference for architecture, patterns, conventions, and common-mistake avoidance.
-- Validate with `pnpm check` (TypeScript + ESLint). There is no automated test suite.
+- Validate with `pnpm check` (TypeScript + ESLint). Use `pnpm regression:prompt` for prompt/lorebook/macro regressions and `pnpm smoke:ui` for the browser shell smoke suite when the change touches those areas.

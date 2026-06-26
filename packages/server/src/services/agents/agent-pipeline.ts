@@ -14,6 +14,8 @@ import type { AgentResult, AgentContext, AgentPhase } from "@marinara-engine/sha
 import type { BaseLLMProvider } from "../llm/base-provider.js";
 import { executeAgent, executeAgentBatch, type AgentExecConfig, type AgentToolContext } from "./agent-executor.js";
 import { logger } from "../../lib/logger.js";
+import { settleAgentJobsWithConcurrencyLimit } from "./agent-concurrency.js";
+export { settleAgentJobsWithConcurrencyLimit } from "./agent-concurrency.js";
 
 /** A fully resolved agent ready for execution. */
 export interface ResolvedAgent extends AgentExecConfig {
@@ -44,6 +46,9 @@ interface AgentGroup {
   maxParallelJobs: number;
   agents: ResolvedAgent[];
 }
+
+export const AGENT_PHASE_MAX_CONCURRENT_GROUPS = 8;
+const AGENT_GROUP_MAX_CONCURRENT_TOOL_CALLS = 4;
 
 export function normalizeAgentMaxParallelJobs(value: unknown): number {
   const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
@@ -146,9 +151,11 @@ async function executeGroup(
   onResult?: AgentResultCallback,
 ): Promise<AgentResult[]> {
   const groupContext = buildAgentContext(group.agents[0]!, context);
-  // Separate tool-using agents (can't be batched) from regular agents
-  const toolAgents = group.agents.filter((a) => a.toolContext?.tools.length);
-  const batchAgents = group.agents.filter((a) => !a.toolContext?.tools.length);
+  // Separate tool-using agents (can't be batched) from regular agents.
+  // Spotify post-processing is intentionally batched as JSON intent first; playback
+  // is applied after parsing the grouped response so it cannot fire early mid-agent.
+  const toolAgents = group.agents.filter((a) => shouldUseToolsDuringAgentExecution(a));
+  const batchAgents = group.agents.filter((a) => !shouldUseToolsDuringAgentExecution(a));
 
   logger.debug("[agent-pipeline] executeGroup: %d batchable, %d tool-using %j", batchAgents.length, toolAgents.length, {
     batch: batchAgents.map((a) => a.type),
@@ -165,31 +172,58 @@ async function executeGroup(
     }
   };
 
-  const allResults: AgentResult[] = [];
-
-  // Run regular agents as a batch
-  if (batchAgents.length > 0) {
-    const batchResults = await executeAgentBatch(batchAgents, groupContext, group.provider, group.model);
-    for (const result of batchResults) {
-      safeOnResult(result);
-    }
-    allResults.push(...batchResults);
-  }
-
-  // Run tool-using agents individually (they need the tool loop)
-  for (const agent of toolAgents) {
-    const result = await executeAgent(
-      agent,
-      buildAgentContext(agent, context),
-      agent.provider,
-      agent.model,
-      agent.toolContext,
+  const batchResultsPromise =
+    batchAgents.length > 0
+      ? executeAgentBatch(batchAgents, groupContext, group.provider, group.model).then((results) => {
+          for (const result of results) {
+            safeOnResult(result);
+          }
+          return results;
+        })
+      : Promise.resolve([] as AgentResult[]);
+  if (toolAgents.length > AGENT_GROUP_MAX_CONCURRENT_TOOL_CALLS) {
+    logger.warn(
+      "[agent-pipeline] Limiting %d tool-using agent request(s) to %d concurrent request(s)",
+      toolAgents.length,
+      AGENT_GROUP_MAX_CONCURRENT_TOOL_CALLS,
     );
-    safeOnResult(result);
-    allResults.push(result);
   }
+  const toolResultsPromise = settleAgentJobsWithConcurrencyLimit(
+    toolAgents,
+    AGENT_GROUP_MAX_CONCURRENT_TOOL_CALLS,
+    (agent) =>
+      executeAgent(agent, buildAgentContext(agent, context), agent.provider, agent.model, agent.toolContext).then((result) => {
+        safeOnResult(result);
+        return result;
+      }),
+  ).then((settled) =>
+    settled.map((entry, index) => {
+      if (entry.status === "fulfilled") return entry.value;
 
-  return allResults;
+      const agent = toolAgents[index]!;
+      logger.error(entry.reason, "[agent-pipeline] Tool agent FAILED for %s", agent.type);
+      const errorResult: AgentResult = {
+        agentId: agent.id,
+        agentType: agent.type,
+        type: "context_injection",
+        data: null,
+        tokensUsed: 0,
+        durationMs: 0,
+        success: false,
+        error: entry.reason instanceof Error ? entry.reason.message : "Tool agent execution failed",
+      };
+      safeOnResult(errorResult);
+      return errorResult;
+    }),
+  );
+
+  const [batchResults, toolResults] = await Promise.all([batchResultsPromise, toolResultsPromise]);
+  return [...batchResults, ...toolResults];
+}
+
+function shouldUseToolsDuringAgentExecution(agent: ResolvedAgent): boolean {
+  if (!agent.toolContext?.tools.length) return false;
+  return !(agent.phase === "post_processing" && agent.type === "spotify");
 }
 
 /**
@@ -214,8 +248,20 @@ async function executePhase(
     groups.map((g) => `[${g.agents.map((a) => a.type).join(", ")}] (model: ${g.model})`),
   );
 
-  // Run groups in parallel (different providers/models can work concurrently)
-  const settled = await Promise.allSettled(groups.map((group) => executeGroup(group, context, onResult)));
+  if (groups.length > AGENT_PHASE_MAX_CONCURRENT_GROUPS) {
+    logger.warn(
+      '[agent-pipeline] Phase "%s": limiting %d job groups to %d concurrent agent request group(s)',
+      phase,
+      groups.length,
+      AGENT_PHASE_MAX_CONCURRENT_GROUPS,
+    );
+  }
+
+  const settled = await settleAgentJobsWithConcurrencyLimit(
+    groups,
+    AGENT_PHASE_MAX_CONCURRENT_GROUPS,
+    (group) => executeGroup(group, context, onResult),
+  );
 
   const results: AgentResult[] = [];
   for (let i = 0; i < settled.length; i++) {
@@ -284,13 +330,26 @@ export async function runPreGenerationAgents(
   for (const result of results) {
     if (!result.success) continue;
 
-    // prose-guardian & director produce text to inject
-    if (result.type === "context_injection" || result.type === "director_event") {
+    // Director and context-injection agents produce text to inject.
+    if (result.type === "director_event") {
+      const text =
+        typeof result.data === "string"
+          ? result.data
+          : typeof (result.data as any)?.direction === "string"
+            ? (result.data as any).direction
+            : typeof (result.data as any)?.text === "string"
+              ? (result.data as any).text
+              : "";
+      const agentName = agents.find((agent) => agent.type === result.agentType)?.name;
+      if (text.trim()) injections.push({ agentType: result.agentType, agentName, text: text.trim() });
+      continue;
+    }
+
+    if (result.type === "context_injection") {
       const text = typeof result.data === "string" ? result.data : ((result.data as any)?.text ?? "");
       const agentName = agents.find((agent) => agent.type === result.agentType)?.name;
       if (text) injections.push({ agentType: result.agentType, agentName, text });
     }
-    // prompt_review is informational — the onResult callback streams it
   }
 
   return injections;

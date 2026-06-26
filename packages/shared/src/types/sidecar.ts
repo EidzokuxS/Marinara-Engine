@@ -76,6 +76,8 @@ export interface SidecarConfig {
   topK: number;
   /** GPU layers to offload (-1 = try max GPU offload first, then fall back if startup fails). */
   gpuLayers: number;
+  /** Start llama.cpp with Jinja chat templates so OpenAI-compatible native tool calls can work. */
+  enableNativeToolCalls: boolean;
   /** Which runtime target to install for llama.cpp-based local inference. */
   runtimePreference: SidecarRuntimePreference;
 }
@@ -147,6 +149,8 @@ export interface SceneSegmentEffect {
 export interface SceneIllustrationRequest {
   /** 0-based narration segment where the illustration should replace the background. */
   segment?: number;
+  /** Short visual title for the illustrated moment. */
+  title?: string;
   /** Image-generation prompt describing the important moment. */
   prompt: string;
   /** Names of visible referenced characters, if known. */
@@ -253,6 +257,8 @@ export interface SidecarModelInfo {
   filename: string;
   /** Approximate file size in bytes. */
   sizeBytes: number;
+  /** Exact downloadable file size in bytes, when known. Used for validation only. */
+  downloadSizeBytes?: number;
   /** Approximate RAM needed at runtime. */
   ramBytes: number;
   /** HuggingFace download URL when the preset downloads a local file directly. */
@@ -286,6 +292,7 @@ export const SIDECAR_DEFAULT_CONFIG: SidecarConfig = {
   topP: 0.95,
   topK: 64,
   gpuLayers: -1,
+  enableNativeToolCalls: true,
   runtimePreference: "auto",
 };
 
@@ -304,6 +311,7 @@ export const SIDECAR_MODELS: SidecarModelInfo[] = [
     label: "Gemma 4 E2B — Q8 (Best Quality)",
     filename: "gemma-4-E2B-it-Q8_0.gguf",
     sizeBytes: 5_400_000_000,
+    downloadSizeBytes: 5_048_350_848,
     ramBytes: 5_800_000_000,
     downloadUrl: "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q8_0.gguf",
   },
@@ -313,6 +321,7 @@ export const SIDECAR_MODELS: SidecarModelInfo[] = [
     label: "Gemma 4 E2B — Q4_K_M (Smaller, Faster)",
     filename: "gemma-4-E2B-it-Q4_K_M.gguf",
     sizeBytes: 3_200_000_000,
+    downloadSizeBytes: 3_106_736_256,
     ramBytes: 3_600_000_000,
     downloadUrl: "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf",
   },

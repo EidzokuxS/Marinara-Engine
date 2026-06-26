@@ -27,6 +27,7 @@ export function NewChatConnectionGate({ mode, onClose }: NewChatConnectionGatePr
   const { data: chatPresetsData } = useChatPresets();
   const applyChatPreset = useApplyChatPreset();
   const openRightPanel = useUIStore((s) => s.openRightPanel);
+  const setSidebarOpen = useUIStore((s) => s.setSidebarOpen);
   const [connectionId, setConnectionId] = useState<string>("");
 
   const connectionRows = useMemo(
@@ -59,21 +60,21 @@ export function NewChatConnectionGate({ mode, onClose }: NewChatConnectionGatePr
         mode,
         characterIds: [],
         connectionId,
+        promptPresetId: starred?.settings.promptPresetId ?? undefined,
       },
       {
-        onSuccess: async (chat) => {
+        onSuccess: (chat) => {
           const store = useChatStore.getState();
           store.setPendingNewChatMode(null);
+          if (typeof window !== "undefined" && window.innerWidth < 768) setSidebarOpen(false);
           store.setActiveChatId(chat.id);
-          if (starred) {
-            try {
-              await applyChatPreset.mutateAsync({ presetId: starred.id, chatId: chat.id });
-            } catch {
-              /* non-fatal — chat still opens with system defaults */
-            }
-          }
           store.setShouldOpenSettings(true);
           store.setShouldOpenWizard(true);
+          if (starred) {
+            void applyChatPreset.mutateAsync({ presetId: starred.id, chatId: chat.id, connectionId }).catch(() => {
+              /* non-fatal — chat still opens with system defaults */
+            });
+          }
         },
       },
     );
@@ -87,14 +88,11 @@ export function NewChatConnectionGate({ mode, onClose }: NewChatConnectionGatePr
       <div className="fixed inset-0 z-50 flex items-center justify-center p-3 max-md:pt-[max(0.75rem,env(safe-area-inset-top))] max-md:pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4">
         <div className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-sm flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-2xl sm:max-h-[min(90dvh,38rem)]">
           <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-4 py-3">
-            <div className="flex items-center gap-2">
-              <span className="text-[var(--primary)]">{MODE_META[mode].icon}</span>
-              <div>
-                <h3 className="text-sm font-semibold">Set Up {MODE_META[mode].label}</h3>
-                <p className="text-[0.6875rem] text-[var(--muted-foreground)]">
-                  Choose a connection before we create the chat.
-                </p>
-              </div>
+            <div>
+              <h3 className="text-sm font-semibold">Set Up {MODE_META[mode].label}</h3>
+              <p className="text-[0.6875rem] text-[var(--muted-foreground)]">
+                Choose a connection before we create the chat.
+              </p>
             </div>
             <button
               onClick={onClose}

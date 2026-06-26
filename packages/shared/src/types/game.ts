@@ -166,11 +166,13 @@ export interface GameSetupConfig {
   /** Content rating: sfw or nsfw */
   rating: "sfw" | "nsfw";
   /** Character ID to use as GM (only when gmMode is "character") */
-  gmCharacterId?: string;
+  gmCharacterId?: string | null;
   /** Party member IDs; library character IDs or `npc:<slug>` tracked-NPC IDs. */
   partyCharacterIds: string[];
+  /** GM-only library character IDs used as offscreen canon/reference cast, not party members. */
+  referenceCharacterIds?: string[];
   /** User's persona ID */
-  personaId?: string;
+  personaId?: string | null;
   /** Connection to use for the scene wrap-up turn (backgrounds, music, widgets, etc.).
    *  When omitted, falls back to sidecar (if available) or skips the wrap-up. */
   sceneConnectionId?: string;
@@ -180,13 +182,17 @@ export interface GameSetupConfig {
   imageConnectionId?: string;
   /** Unified art style prompt applied to all generated images (auto-generated at setup) */
   artStylePrompt?: string;
+  /** Optional image style profile applied to generated images in this game. */
+  imageStyleProfileId?: string | null;
   /** Lorebook IDs to activate for this game */
   activeLorebookIds?: string[];
   /** Enable custom HUD widgets (model designs them at game start and updates during play) */
   enableCustomWidgets?: boolean;
-  /** Enable Spotify DJ for this game and use Spotify music instead of local game music assets. */
+  /** User-defined starting HUD widgets. When present, these replace model-designed setup widgets. */
+  customHudWidgets?: HudWidget[];
+  /** Enable Music DJ for this game and use Spotify music instead of local game music assets. */
   enableSpotifyDj?: boolean;
-  /** Music source constraint for Spotify DJ. */
+  /** Music source constraint for Music DJ. */
   spotifySourceType?: GameSpotifySourceType;
   /** Spotify playlist ID used when spotifySourceType is "playlist". */
   spotifyPlaylistId?: string | null;
@@ -200,12 +206,22 @@ export interface GameSetupConfig {
   language?: string;
   /** Optional generation parameter overrides applied from the moment the game is created. */
   generationParameters?: Partial<GenerationParameters>;
+  /** Prompt preset whose Game prompt should drive the GM instruction block. */
+  promptPresetId?: string | null;
+  /** Game-mode GM instruction override. Empty/null uses the built-in default prompt. */
+  gameSystemPrompt?: string | null;
+  /** Additional game-mode generation instructions appended to the GM format reminder. */
+  gameSpecialInstructions?: string | null;
 }
 
 // ── Dice ──
 
 /** Result of a dice roll. */
 export interface DiceRollResult {
+  /** Optional source label, e.g. "justice" for Tarot adjudication rolls. */
+  source?: string;
+  /** Human-readable reason for the roll, e.g. "Pick the locked apartment door". */
+  check?: string;
   /** The notation used, e.g. "2d6+3" */
   notation: string;
   /** Individual die results */
@@ -214,6 +230,18 @@ export interface DiceRollResult {
   modifier: number;
   /** Final total */
   total: number;
+  /** Optional target number for checks. */
+  dc?: number;
+  /** Optional total - dc margin for checks. */
+  margin?: number | null;
+  /** Optional check result branch, e.g. "success" or "fail". */
+  result?: string;
+  /** Optional check success flag. */
+  success?: boolean;
+  /** Authoritative outcome selected by the harness. */
+  outcome?: string;
+  /** Short adjudication reason from the owning agent. */
+  reasoning?: string;
 }
 
 /** Result of a skill check resolution. */
