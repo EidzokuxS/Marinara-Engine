@@ -3833,7 +3833,8 @@ export async function gameRoutes(app: FastifyInstance) {
     const sessionMeta = parseMeta(sessionChat.metadata);
     // Tarot chain on by default for new game sessions (its natural home is the GM/Game mode):
     // Justice judges realism + harness dice, Emperor composes the turn scenario,
-    // Tower renders it, Hermit applies the Zetta prose pass, Chariot updates HUD state.
+    // Tower renders through the main GM harness, Hermit applies the Zetta prose pass,
+    // Chariot updates HUD state.
     const setupActiveAgentIds = [
       ...GAME_TAROT_DEFAULT_AGENT_IDS,
       ...(setupConfig.enableSpotifyDj ? ["spotify"] : []),

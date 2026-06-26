@@ -365,7 +365,7 @@ describe("Tarot context routing", () => {
     assert.doesNotMatch(chariotPrompt, /DC scale/);
   });
 
-  it("keeps Hermit in the default Tarot Game stack", () => {
-    assert.deepEqual([...GAME_TAROT_DEFAULT_AGENT_IDS], ["justice", "emperor", "hermit", "chariot"]);
+  it("keeps the full default Tarot Game stack visible", () => {
+    assert.deepEqual([...GAME_TAROT_DEFAULT_AGENT_IDS], ["justice", "emperor", "tower", "hermit", "chariot"]);
   });
 });

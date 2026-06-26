@@ -42,5 +42,5 @@ export function resolveLorebookScopeExclusions(
 
 export function filterGameInternalAgentIds(chatMode: unknown, agentIds: string[]): string[] {
   if (chatMode !== "game") return agentIds;
-  return agentIds.filter((agentId) => agentId !== "lorebook-keeper");
+  return agentIds.filter((agentId) => agentId !== "lorebook-keeper" && agentId !== "tower");
 }

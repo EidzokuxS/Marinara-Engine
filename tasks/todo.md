@@ -364,3 +364,10 @@
 - [x] Backfill Hermit into existing Game chats that already use Emperor.
 - [x] Replace invented prose cleanup wording with Zetta Onyx v1.55 banned vocabulary, seven prose-ban families, and BOLT v2 audit language.
 - [x] Verify shared build, server tests, server lint, diff hygiene, server dist build, and local backend restart.
+
+## Current Task: Restore Tower In Visible Tarot Chain
+
+- [x] Confirm Tower still runs as the main Game narrative renderer.
+- [x] Add Tower to the visible default Tarot Game stack.
+- [x] Keep Tower out of the generic agent executor because the GM harness owns its execution.
+- [x] Verify build/tests/lint and push.

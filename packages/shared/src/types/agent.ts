@@ -487,6 +487,18 @@ export const BUILT_IN_AGENTS: BuiltInAgentMeta[] = [
     modeAllowlist: ["game"],
   },
   {
+    id: "tower",
+    name: "Tower",
+    description: "Tarot Game narrative renderer. Harness-owned main generation role that turns Emperor's brief into scene prose.",
+    author: DEFAULT_AGENT_AUTHOR,
+    phase: "pre_generation",
+    enabledByDefault: false,
+    category: "writer",
+    libraryHidden: true,
+    runtimeDisabled: true,
+    modeAllowlist: ["game"],
+  },
+  {
     id: "hermit",
     name: "Hermit",
     description: "Tarot Game prose editor. Polishes Tower narration without changing mechanics.",

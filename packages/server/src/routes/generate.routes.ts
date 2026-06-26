@@ -28,6 +28,7 @@ import {
   trackerFieldLocksAreEmpty,
   appendRollToHudWidgets,
   ensureDefaultGameplayHudWidgets,
+  GAME_TAROT_DEFAULT_AGENT_IDS,
   customAgentHasCapability,
   supportsXhighReasoningEffort,
   DEFAULT_CONVERSATION_PROMPT,
@@ -2091,12 +2092,14 @@ export async function generateRoutes(app: FastifyInstance) {
         if (gameMusicDjEnabled && !normalizedPersistedChatActiveAgentIds.includes("spotify")) {
           normalizedPersistedChatActiveAgentIds.push("spotify");
         }
-        const shouldBackfillHermit =
-          chatMode === "game" &&
-          normalizedPersistedChatActiveAgentIds.includes("emperor") &&
-          !normalizedPersistedChatActiveAgentIds.includes("hermit");
-        if (shouldBackfillHermit) {
-          normalizedPersistedChatActiveAgentIds.push("hermit");
+        const shouldBackfillGameTarotDefaults =
+          chatMode === "game" && normalizedPersistedChatActiveAgentIds.includes("emperor");
+        if (shouldBackfillGameTarotDefaults) {
+          for (const agentId of GAME_TAROT_DEFAULT_AGENT_IDS) {
+            if (!normalizedPersistedChatActiveAgentIds.includes(agentId)) {
+              normalizedPersistedChatActiveAgentIds.push(agentId);
+            }
+          }
         }
         const rawChatActiveAgentIds: string[] = filterGameInternalAgentIds(
           chatMode,
@@ -2113,7 +2116,7 @@ export async function generateRoutes(app: FastifyInstance) {
             .map((agent) => agent.type as string),
         );
         const chatActiveAgentIds = rawChatActiveAgentIds.filter((agentId) => !deletedBuiltInAgentTypes.has(agentId));
-        if (shouldBackfillHermit && chatActiveAgentIds.includes("hermit")) {
+        if (shouldBackfillGameTarotDefaults) {
           chatMeta.activeAgentIds = normalizedPersistedChatActiveAgentIds;
           await chats.updateMetadata(input.chatId, { ...chatMeta, activeAgentIds: normalizedPersistedChatActiveAgentIds });
         }
