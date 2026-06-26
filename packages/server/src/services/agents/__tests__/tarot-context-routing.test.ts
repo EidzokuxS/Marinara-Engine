@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { getDefaultAgentPrompt, type AgentContext } from "@marinara-engine/shared";
+import { GAME_TAROT_DEFAULT_AGENT_IDS, getDefaultAgentPrompt, type AgentContext } from "@marinara-engine/shared";
 import {
   buildGmSystemPrompt,
   buildGmFormatReminder,
@@ -351,6 +351,9 @@ describe("Tarot context routing", () => {
     assert.match(hermitPrompt, /bare standalone italic thought lines/);
     assert.match(hermitPrompt, /Remove donor ZT_STATE leakage/);
     assert.match(hermitPrompt, /dossier loops/);
+    assert.match(hermitPrompt, /not \/ never \/ no longer \/ not quite \/ not yet/);
+    assert.match(hermitPrompt, /banned_vocabulary/);
+    assert.match(hermitPrompt, /narration, dialogue, and interior alike/);
     assert.match(hermitPrompt, /Never add the donor SillyTavern bracket header/);
     assert.match(hermitPrompt, /Это НЕ сценарная роль/);
     assert.match(hermitPrompt, /speaker labels/);
@@ -360,5 +363,9 @@ describe("Tarot context routing", () => {
     assert.match(chariotPrompt, /Onyx panel discipline/);
     assert.match(chariotPrompt, /только трекеры, которые ИЗМЕНИЛИСЬ/);
     assert.doesNotMatch(chariotPrompt, /DC scale/);
+  });
+
+  it("keeps Hermit in the default Tarot Game stack", () => {
+    assert.deepEqual([...GAME_TAROT_DEFAULT_AGENT_IDS], ["justice", "emperor", "hermit", "chariot"]);
   });
 });

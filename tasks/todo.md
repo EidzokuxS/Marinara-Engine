@@ -356,3 +356,11 @@
 - Tower reads only the visible scene impact, not raw mechanics authority.
 - The widget generator should choose templates by genre and crunch level, then let the model customize labels, currencies, thresholds, icons, and display flavor.
 - Scene styling should come from a bounded theme packet: current location/mood/danger/time-of-day can tune widget chrome, accent, and input surface without changing layout or hurting readability.
+
+## Current Task: Hermit Zetta Prose Filter Activation
+
+- [x] Find why Zetta prose bans were absent in live Game narration.
+- [x] Add Hermit to the default Tarot Game stack.
+- [x] Backfill Hermit into existing Game chats that already use Emperor.
+- [x] Replace invented prose cleanup wording with Zetta Onyx v1.55 banned vocabulary, seven prose-ban families, and BOLT v2 audit language.
+- [x] Verify shared build, server tests, server lint, diff hygiene, server dist build, and local backend restart.

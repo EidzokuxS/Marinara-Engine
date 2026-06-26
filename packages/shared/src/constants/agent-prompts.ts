@@ -795,7 +795,8 @@ Onyx prose discipline:
 
 Humanizer/deslop pass:
 - Prefer active human subjects, specific physical facts, and varied sentence length. Cut throat-clearing, fake significance, "serves as" padding, self-posed question/answer beats, false ranges, listicle cadence, automatic three-item lists, and repeated metaphor loops.
-- Remove negative parallelism and tailing negations: "not X, but Y", "doesn't X, doesn't Y", "Not this. That.", and similar reset formulas. State the concrete event directly.
+- Zetta negation scan: every sentence built on "not / never / no longer / not quite / not yet", plus "not X, but Y", "X, not Y", negative enumerations, litotes, and apophasis, either becomes a positive statement of what IS or stays a character's plain spoken refusal. Rewrite the whole sentence; never delete meaning.
+- For VN thought lines, this rule is mandatory and comes from Zetta Internal Thoughts: interiority follows <zt_prose_bans> and <banned_vocabulary> in narration, dialogue, and interior alike. Preserve the VN prefix; rewrite owned NPC thought in that character's direct first-person present voice when ownership is clear.
 - Avoid staccato punchline stacks. One short sentence can land; three clipped fragments in a row read like generated drama and should be rebuilt into human cadence.
 
 Zetta Onyx v1.55 banned vocabulary — replace these words/phrases in final prose when they appear:
@@ -804,9 +805,9 @@ fresh meat; breath hitching; breath catching; husky; catching in throat; pupils 
 Zetta prose bans — actively rewrite these seven families in EVERY channel:
 1. Word-as-object: tasting, weighing, rolling, or repeating a word/name. Make the character act on what the word means.
 2. Novelty-tagging: "interesting", "that's new", "you're full of surprises", coy stalls, "we'll see". Replace with a concrete want, decision, pressure, or reaction.
-3. Crowd-foil: vague "most people/everyone else/people" contrast crowds. Replace with a specific remembered person/event or cut it.
+3. Crowd-foil: leaning on a faceless majority or "everyone else" as the yardstick, including "most people", "everyone else", bare "people" as contrast crowd, "the first/only/last person who...", "nobody/no one else does X", "not everyone would", "rare enough that I noticed", "I rarely X". Replace with a specific remembered person/event or cut it.
 4. Bottled atmosphere: velvet/silk/husky voice, thick/charged air, stretched silence, pregnant pause. Use body/room facts with a source.
-5. Negation-as-description: "not X, but Y", "Not quite a smile", negative enumerations, litotes, apophasis. Say what IS. One-word spoken refusals are fine.
+5. Negation-as-description: "not X, but Y", "not / never / no longer / not quite / not yet", negative enumerations, litotes, apophasis. Say what IS. One-word spoken refusals are fine.
 6. Option-menu verdict: "either X or Y", "Interesting. Or dangerous.", tricolons of readings on a person. Commit to one read and let later turns prove it right or wrong.
 7. Cosmic fluff: world tilted/narrowed/fell away, something dark/ancient/feral, "[noun] was a [adjective] thing". Name the visible event.
 

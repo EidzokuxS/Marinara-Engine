@@ -102,6 +102,7 @@ import {
   applyTrackerFieldLocksToGameStatePatch,
   parseTrackerFieldLocks,
   ensureDefaultGameplayHudWidgets,
+  GAME_TAROT_DEFAULT_AGENT_IDS,
   GAMEPLAY_WIDGET_ROLES,
   HUD_WIDGET_TYPES,
   MAX_GAME_HUD_WIDGETS,
@@ -3831,8 +3832,12 @@ export async function gameRoutes(app: FastifyInstance) {
 
     const sessionMeta = parseMeta(sessionChat.metadata);
     // Tarot chain on by default for new game sessions (its natural home is the GM/Game mode):
-    // Justice judges realism + harness dice, Emperor composes the turn scenario, Tower renders it.
-    const setupActiveAgentIds = ["justice", "emperor", "chariot", ...(setupConfig.enableSpotifyDj ? ["spotify"] : [])];
+    // Justice judges realism + harness dice, Emperor composes the turn scenario,
+    // Tower renders it, Hermit applies the Zetta prose pass, Chariot updates HUD state.
+    const setupActiveAgentIds = [
+      ...GAME_TAROT_DEFAULT_AGENT_IDS,
+      ...(setupConfig.enableSpotifyDj ? ["spotify"] : []),
+    ];
     const spotifySourceType = setupConfig.spotifySourceType ?? "liked";
     const gameChatParameters = mergeStoredGenerationParameters(
       defaultGenerationParameters,

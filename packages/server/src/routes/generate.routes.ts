@@ -2091,6 +2091,13 @@ export async function generateRoutes(app: FastifyInstance) {
         if (gameMusicDjEnabled && !normalizedPersistedChatActiveAgentIds.includes("spotify")) {
           normalizedPersistedChatActiveAgentIds.push("spotify");
         }
+        const shouldBackfillHermit =
+          chatMode === "game" &&
+          normalizedPersistedChatActiveAgentIds.includes("emperor") &&
+          !normalizedPersistedChatActiveAgentIds.includes("hermit");
+        if (shouldBackfillHermit) {
+          normalizedPersistedChatActiveAgentIds.push("hermit");
+        }
         const rawChatActiveAgentIds: string[] = filterGameInternalAgentIds(
           chatMode,
           normalizedPersistedChatActiveAgentIds,
@@ -2106,6 +2113,10 @@ export async function generateRoutes(app: FastifyInstance) {
             .map((agent) => agent.type as string),
         );
         const chatActiveAgentIds = rawChatActiveAgentIds.filter((agentId) => !deletedBuiltInAgentTypes.has(agentId));
+        if (shouldBackfillHermit && chatActiveAgentIds.includes("hermit")) {
+          chatMeta.activeAgentIds = normalizedPersistedChatActiveAgentIds;
+          await chats.updateMetadata(input.chatId, { ...chatMeta, activeAgentIds: normalizedPersistedChatActiveAgentIds });
+        }
         const agentPromptTemplateSelections = normalizeAgentPromptTemplateSelectionMap(chatMeta.agentPromptTemplateIds);
         const hasPerChatAgentList = chatActiveAgentIds.length > 0;
         const perChatAgentSet = new Set(chatActiveAgentIds);
