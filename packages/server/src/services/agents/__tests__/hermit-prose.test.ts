@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { applyHermitProseRevision, extractEngineDirectives } from "../tarot/hermit-prose.js";
+import {
+  applyHermitProseRevision,
+  buildHermitRevisionRepairInstruction,
+  extractEngineDirectives,
+} from "../tarot/hermit-prose.js";
 
 describe("Hermit prose revisions", () => {
   it("accepts a compact prose-only revision", () => {
@@ -94,5 +98,20 @@ describe("Hermit prose revisions", () => {
 
     assert.equal(result.accepted, false);
     assert.equal(result.reason, "dialogue_prefix_drift");
+  });
+
+  it("builds Hermit repair instructions with exact required dialogue prefixes", () => {
+    const original = '[Yuki] [main] [excited]: "Rare Monster!"\n\n[choices: "Buy it"|"Ask"]';
+    const instruction = buildHermitRevisionRepairInstruction(original, "dialogue_prefix_drift", {
+      revision: '[Yuro] [main] [excited]: "Rare Monster!"\n\n[choices: "Buy it"|"Ask"]',
+      changed: true,
+      notes: ["speaker drift"],
+    });
+
+    assert.match(instruction, /<hermit_repair_request>/);
+    assert.match(instruction, /\[Yuki\] \[main\] \[excited\]:/);
+    assert.match(instruction, /\[choices: "Buy it"\|"Ask"\]/);
+    assert.match(instruction, /dialogue_prefix_drift/);
+    assert.match(instruction, /previous_rejected_revision_excerpt/);
   });
 });

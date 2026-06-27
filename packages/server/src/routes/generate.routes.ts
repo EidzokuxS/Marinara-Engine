@@ -113,7 +113,10 @@ import {
   buildEmperorScenarioRepairInstruction,
   extractEmperorScenario,
 } from "../services/agents/tarot/emperor-scenario.js";
-import { applyHermitProseRevision } from "../services/agents/tarot/hermit-prose.js";
+import {
+  applyHermitProseRevision,
+  buildHermitRevisionRepairInstruction,
+} from "../services/agents/tarot/hermit-prose.js";
 import { matchCustomAgentActivation } from "./generate/agent-activation.js";
 import { listCharacterSprites } from "../services/game/sprite.service.js";
 import { generateChatBackground } from "../services/game/game-asset-generation.js";
@@ -626,6 +629,15 @@ function compactGameNpcsForTarot(value: unknown): Array<Record<string, unknown>>
 
 function isAbortLikeError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
+}
+
+function shouldRetryRejectedHermitRevision(reason: string | null): boolean {
+  return (
+    reason === "dialogue_prefix_drift" ||
+    reason === "engine_directive_drift" ||
+    reason === "revision_too_expansive" ||
+    reason === "empty_revision"
+  );
 }
 
 function customAgentCanApplyResult(
@@ -7608,6 +7620,40 @@ export async function generateRoutes(app: FastifyInstance) {
                           streaming: false,
                           preGenInjections: undefined,
                           parallelResults: undefined,
+                        },
+                        hermitAgent.provider,
+                        hermitAgent.model,
+                        hermitAgent.toolContext,
+                      );
+                      hermitRetried = true;
+                      if (retryResult.success) {
+                        hermitResult = retryResult;
+                        applied = applyHermitProseRevision(visibleGameProse, hermitResult.data);
+                      }
+                    }
+                    if (
+                      !applied.accepted &&
+                      shouldRetryRejectedHermitRevision(applied.reason) &&
+                      !abortController.signal.aborted
+                    ) {
+                      logger.warn("[hermit] rejected prose revision (%s); retrying Hermit repair", applied.reason);
+                      const retryResult = await executeAgent(
+                        hermitAgent,
+                        {
+                          ...agentContext,
+                          recentMessages: [],
+                          mainResponse: visibleGameProse,
+                          streaming: false,
+                          preGenInjections: undefined,
+                          parallelResults: undefined,
+                          memory: {
+                            ...agentContext.memory,
+                            _hermitRepairInstruction: buildHermitRevisionRepairInstruction(
+                              visibleGameProse,
+                              applied.reason,
+                              hermitResult.data,
+                            ),
+                          },
                         },
                         hermitAgent.provider,
                         hermitAgent.model,

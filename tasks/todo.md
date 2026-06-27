@@ -431,3 +431,13 @@
 - [x] Restart the backend on `:7860` from fresh dist.
 - [x] Smoke `/api/health`, `/api/themes`, `/api/extensions`, `/api/chats`, `/assets/index.js`, and `/`.
 - [x] Commit and push.
+
+## Current Task: Hermit Repair After Visible-Surface Drift
+
+- [x] Inspect live failure source in `agent_runs` and current Game chat state.
+- [x] Identify Hermit `dialogue_prefix_drift` after speaker label changed from the Tower prose.
+- [x] Add Hermit-owned repair instructions for exact VN prefixes and engine directives.
+- [x] Route Hermit repair context only to Hermit.
+- [x] Run focused and full server verification.
+- [x] Rebuild/restart backend and smoke the failed Game turn on a temporary chat.
+- [x] Commit and push.

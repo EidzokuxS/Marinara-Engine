@@ -139,6 +139,31 @@ describe("agent message routing", () => {
     assert.doesNotMatch(hermitMessages.map((message) => message.content).join("\n\n"), /emperor_repair_request/);
   });
 
+  it("routes Hermit repair instructions only into Hermit context", () => {
+    const baseContext = contextForHermit();
+    const context: AgentContext = {
+      ...baseContext,
+      memory: {
+        ...baseContext.memory,
+        _hermitRepairInstruction: "<hermit_repair_request>repair prose surface</hermit_repair_request>",
+      },
+    };
+
+    const hermitMessages = buildStandardAgentMessagesForTest(
+      agentConfig("hermit"),
+      getDefaultAgentPrompt("hermit"),
+      context,
+    );
+    const emperorMessages = buildStandardAgentMessagesForTest(
+      agentConfig("emperor"),
+      getDefaultAgentPrompt("emperor"),
+      context,
+    );
+
+    assert.match(hermitMessages.map((message) => message.content).join("\n\n"), /hermit_repair_request/);
+    assert.doesNotMatch(emperorMessages.map((message) => message.content).join("\n\n"), /hermit_repair_request/);
+  });
+
   it("raises Tarot reasoning agent max tokens to the Game generation budget", () => {
     const settings = applyGameTarotReasoningMaxTokens({
       agentType: "emperor",

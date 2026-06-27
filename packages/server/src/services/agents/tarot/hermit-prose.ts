@@ -140,8 +140,60 @@ export function extractEngineDirectives(text: string): string[] {
   return Array.from(text.matchAll(ENGINE_DIRECTIVE_RE), (match) => match[0] ?? "");
 }
 
+export function buildHermitRevisionRepairInstruction(originalText: string, reason: string | null, data: unknown): string {
+  const original = originalText.trim();
+  const parsed = normalizeHermitProseRevision(data);
+  const originalDialoguePrefixes = extractDialoguePrefixes(original);
+  const originalDirectives = extractEngineDirectives(original);
+  const previousRevision = parsed?.revision.trim() ?? "";
+  const notes = parsed?.notes?.length ? parsed.notes.slice(0, 6) : [];
+
+  const parts = [
+    `<hermit_repair_request>`,
+    `Your previous Hermit result failed the visible prose contract: ${escapeRepairText(reason ?? "unsafe_revision")}.`,
+    `Repair your own Hermit output. Keep the prose-quality edits, but preserve every mechanical surface exactly.`,
+    ``,
+    `Hard requirements:`,
+    `- Preserve every VN dialogue prefix byte-for-byte: speaker name, lane, emotion, punctuation, and order.`,
+    `- Preserve every Game engine directive byte-for-byte: no added tags, removed tags, renamed tags, or reordered tags.`,
+    `- Preserve active speaker identities. Do not rename NPCs, the player, or any label from the original prose.`,
+    `- Return only the normal hermit_prose_revision JSON object.`,
+  ];
+
+  if (originalDialoguePrefixes.length > 0) {
+    parts.push(``, `<required_vn_dialogue_prefixes>`);
+    for (const prefix of originalDialoguePrefixes) parts.push(prefix);
+    parts.push(`</required_vn_dialogue_prefixes>`);
+  }
+
+  if (originalDirectives.length > 0) {
+    parts.push(``, `<required_engine_directives>`);
+    for (const directive of originalDirectives) parts.push(directive);
+    parts.push(`</required_engine_directives>`);
+  }
+
+  if (previousRevision) {
+    parts.push(``, `<previous_rejected_revision_excerpt>`);
+    parts.push(escapeRepairText(previousRevision.slice(0, 2500)));
+    parts.push(`</previous_rejected_revision_excerpt>`);
+  }
+
+  if (notes.length > 0) {
+    parts.push(``, `<previous_notes>`);
+    for (const note of notes) parts.push(`- ${escapeRepairText(note)}`);
+    parts.push(`</previous_notes>`);
+  }
+
+  parts.push(`</hermit_repair_request>`);
+  return parts.join("\n");
+}
+
 function extractDialoguePrefixes(text: string): string[] {
   return Array.from(text.matchAll(VN_DIALOGUE_PREFIX_RE), (match) => (match[1] ?? "").trim());
+}
+
+function escapeRepairText(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function sameStringList(left: string[], right: string[]): boolean {
