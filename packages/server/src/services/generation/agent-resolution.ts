@@ -12,7 +12,7 @@ import {
   findKnownModel,
   type APIProvider,
 } from "@marinara-engine/shared";
-import type { BaseLLMProvider } from "../llm/base-provider.js";
+import type { BaseLLMProvider, ChatOptions } from "../llm/base-provider.js";
 import { createLLMProvider } from "../llm/provider-registry.js";
 import { getLocalSidecarProvider, LOCAL_SIDECAR_MODEL } from "../llm/local-sidecar.js";
 import { sidecarModelService } from "../sidecar/sidecar-model.service.js";
@@ -50,10 +50,21 @@ type ResolveAgentPipelineAgentsArgs = {
   chatCustomParameters: Record<string, unknown>;
   chatMaxOutputTokens: number | null;
   chatMaxParallelJobs: number;
+  chatReasoningEffort?: ChatOptions["reasoningEffort"] | null;
   activeMusicPlayerSource?: "spotify" | "youtube" | "custom" | null;
   chatMetadata?: Record<string, unknown>;
   resolveBaseUrl(connection: { baseUrl: string | null; provider: string }): string;
 };
+
+const GAME_TAROT_REASONING_AGENT_TYPES = new Set(["justice", "emperor", "hermit", "chariot"]);
+
+function resolveAgentReasoningEffort(
+  agentType: string,
+  chatReasoningEffort: ChatOptions["reasoningEffort"] | null | undefined,
+): ChatOptions["reasoningEffort"] | null {
+  if (!chatReasoningEffort) return null;
+  return GAME_TAROT_REASONING_AGENT_TYPES.has(agentType) ? chatReasoningEffort : null;
+}
 
 type AgentProviderCacheEntry = {
   provider: BaseLLMProvider;
@@ -213,6 +224,7 @@ export async function resolveAgentPipelineAgents({
   chatCustomParameters,
   chatMaxOutputTokens,
   chatMaxParallelJobs,
+  chatReasoningEffort,
   activeMusicPlayerSource,
   chatMetadata,
   resolveBaseUrl,
@@ -350,6 +362,7 @@ export async function resolveAgentPipelineAgents({
       customParameters: resolvedProvider.entry.customParameters,
       maxOutputTokens: resolvedProvider.entry.maxOutputTokens,
       maxParallelJobs: resolvedProvider.entry.maxParallelJobs,
+      reasoningEffort: resolveAgentReasoningEffort(cfg.type as string, chatReasoningEffort),
     });
   }
 
@@ -427,6 +440,7 @@ export async function resolveAgentPipelineAgents({
       customParameters: builtInConnection.entry.customParameters,
       maxOutputTokens: builtInConnection.entry.maxOutputTokens,
       maxParallelJobs: builtInConnection.entry.maxParallelJobs,
+      reasoningEffort: resolveAgentReasoningEffort(builtIn.id, chatReasoningEffort),
     });
   }
 

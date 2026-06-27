@@ -4050,6 +4050,7 @@ export async function generateRoutes(app: FastifyInstance) {
           chatCustomParameters: connectionParams?.customParameters ?? {},
           chatMaxOutputTokens: chatConnectionMaxOutputTokens,
           chatMaxParallelJobs: chatConnectionMaxParallelJobs,
+          chatReasoningEffort: chatMode === "game" ? resolvedEffort : null,
           activeMusicPlayerSource,
           chatMetadata: chatMeta,
           resolveBaseUrl,

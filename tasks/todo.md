@@ -382,3 +382,17 @@
 - [x] Run Hermit's strict non-streaming retry when the first Hermit call returns invalid JSON or empty content.
 - [x] Verify build/tests/lint and temp Game userflow smoke.
 - [x] Commit and push.
+
+## Current Task: Tarot Agent Reasoning
+
+- [x] Verify main Game reasoning path versus agent executor path.
+- [x] Add provider-native reasoning fields to agent execution and debug events.
+- [x] Propagate Game reasoning effort to Tarot Game agents.
+- [x] Split BOLT v2 into explicit private subprompt rooms for Justice, Emperor, Hermit, Chariot, and Tower.
+- [x] Verify tests/typecheck/build and temp Game playtest proves agent reasoning is active.
+  - `pnpm --filter @marinara-engine/shared build`
+  - `pnpm --filter @marinara-engine/server test`
+  - `pnpm --filter @marinara-engine/server lint`
+  - `pnpm --filter @marinara-engine/server build`
+  - Temp smoke `tmp-userflow/hermit-prose-smoke/summary-2026-06-27T07-05-29-515Z.json`: 2/2 turns, `justice>emperor>hermit>chariot`, all four agents request `reasoningEffort: high`, `enableThinking: true`, and report reasoning tokens.
+- [x] Commit and push.

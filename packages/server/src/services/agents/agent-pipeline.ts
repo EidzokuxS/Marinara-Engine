@@ -66,7 +66,7 @@ function groupByProviderModel(agents: ResolvedAgent[]): AgentGroup[] {
   for (const agent of agents) {
     // Use a composite key: object reference hash + model
     // Two agents share a group if they have the same provider instance and model
-    const key = `${providerKey(agent.provider)}::${agent.model}::${postProcessingDataKey(agent)}`;
+    const key = `${providerKey(agent.provider)}::${agent.model}::${agent.reasoningEffort ?? "no-reasoning"}::${postProcessingDataKey(agent)}`;
     let group = groups.get(key);
     if (!group) {
       group = {

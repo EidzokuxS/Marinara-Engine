@@ -295,6 +295,8 @@ export interface AgentCallDebugEvent {
   model: string;
   temperature: number;
   maxTokens: number;
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max";
+  enableThinking?: boolean;
   messageCount: number;
   messages?: AgentCallDebugMessage[];
   tools?: string[];

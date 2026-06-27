@@ -595,8 +595,8 @@ export class OpenAIProvider extends BaseLLMProvider {
   }
 
   private shouldSendGLMEnableThinking(model: string): boolean {
-    if (this.isGenericCustomProvider() || !this.isGLMModel(model)) return false;
-    return this.isNativeGLMEndpoint() || this.providerKind === "nanogpt";
+    if (!this.isGLMModel(model)) return false;
+    return this.isNativeGLMEndpoint() || this.providerKind === "nanogpt" || this.isGenericCustomProvider();
   }
 
   private hasActiveReasoningEffort(reasoningEffort?: string | null): boolean {
@@ -940,6 +940,8 @@ export class OpenAIProvider extends BaseLLMProvider {
       if (normalizedResponseFormat) {
         body.response_format = normalizedResponseFormat;
       }
+    } else if (this.shouldSendParameter(options, "reasoningEffort") && this.shouldSendGLMEnableThinking(options.model)) {
+      this.applyChatCompletionsReasoning(body, options);
     }
 
     this.applyOpenRouterServiceTier(body, options);
@@ -1197,6 +1199,8 @@ export class OpenAIProvider extends BaseLLMProvider {
       if (normalizedResponseFormat) {
         body.response_format = normalizedResponseFormat;
       }
+    } else if (this.shouldSendParameter(options, "reasoningEffort") && this.shouldSendGLMEnableThinking(options.model)) {
+      this.applyChatCompletionsReasoning(body, options);
     }
 
     this.applyOpenRouterServiceTier(body, options);

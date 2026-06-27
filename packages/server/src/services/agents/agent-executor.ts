@@ -3,7 +3,14 @@
 // ──────────────────────────────────────────────
 import { existsSync, readdirSync, statSync, type Dirent } from "node:fs";
 import { basename, extname, join, relative, resolve } from "node:path";
-import type { BaseLLMProvider, ChatMessage, LLMToolDefinition, LLMToolCall, LLMUsage } from "../llm/base-provider.js";
+import type {
+  BaseLLMProvider,
+  ChatMessage,
+  ChatOptions,
+  LLMToolDefinition,
+  LLMToolCall,
+  LLMUsage,
+} from "../llm/base-provider.js";
 import type { AgentResult, AgentContext, AgentResultType, AgentCallDebugEvent, WrapFormat } from "@marinara-engine/shared";
 import {
   compactQuestProgressForContext,
@@ -58,6 +65,7 @@ export interface AgentExecConfig {
   settings: Record<string, unknown>;
   customParameters?: Record<string, unknown>;
   maxOutputTokens?: number | null;
+  reasoningEffort?: ChatOptions["reasoningEffort"] | null;
 }
 
 /** Optional tool context for agents that need function calling. */
@@ -278,6 +286,22 @@ function applyAgentMaxTokensCaps(provider: BaseLLMProvider, maxTokens: number, m
   return Math.min(cappedByConnection, Math.floor(modelMaxOutput));
 }
 
+function agentReasoningEffort(config: Pick<AgentExecConfig, "reasoningEffort">): ChatOptions["reasoningEffort"] | undefined {
+  return config.reasoningEffort ?? undefined;
+}
+
+function agentThinkingEnabled(config: Pick<AgentExecConfig, "reasoningEffort">): boolean {
+  return !!agentReasoningEffort(config);
+}
+
+function agentReasoningOptions(config: Pick<AgentExecConfig, "reasoningEffort">): Pick<ChatOptions, "enableThinking" | "reasoningEffort"> {
+  const reasoningEffort = agentReasoningEffort(config);
+  return {
+    enableThinking: !!reasoningEffort,
+    reasoningEffort,
+  };
+}
+
 function debugMessages(messages: ChatMessage[]): AgentCallDebugEvent["messages"] {
   return messages.map((message) => {
     const next: NonNullable<AgentCallDebugEvent["messages"]>[number] = {
@@ -321,7 +345,10 @@ function agentDebugBase(
   model: string,
   temperature: number,
   maxTokens: number,
-): Pick<AgentCallDebugEvent, "agentId" | "agentType" | "agentName" | "phase" | "model" | "temperature" | "maxTokens"> {
+): Pick<
+  AgentCallDebugEvent,
+  "agentId" | "agentType" | "agentName" | "phase" | "model" | "temperature" | "maxTokens" | "reasoningEffort"
+> & { enableThinking?: boolean } {
   return {
     agentId: config.id,
     agentType: config.type,
@@ -330,6 +357,8 @@ function agentDebugBase(
     model,
     temperature,
     maxTokens,
+    reasoningEffort: agentReasoningEffort(config),
+    enableThinking: agentThinkingEnabled(config),
   };
 }
 
@@ -419,6 +448,7 @@ export async function executeAgent(
       model,
       temperature,
       maxTokens,
+      ...agentReasoningOptions(config),
       customParameters,
       stream: streamResponses,
       onToken: streamResponses
@@ -462,6 +492,7 @@ export async function executeAgent(
         model,
         temperature,
         maxTokens,
+        ...agentReasoningOptions(config),
         customParameters,
         stream: streamResponses,
         onToken: streamResponses
@@ -557,6 +588,7 @@ async function executeAgentWithTools(
       model,
       temperature,
       maxTokens,
+      ...agentReasoningOptions(config),
       customParameters,
       stream: streamResponses,
       tools: toolContext.tools,
@@ -638,6 +670,7 @@ async function executeAgentWithTools(
     model,
     temperature,
     maxTokens,
+    ...agentReasoningOptions(config),
     customParameters,
     stream: streamResponses,
     signal: toolLoopSignal,
@@ -751,6 +784,7 @@ export async function executeAgentBatch(
   const perAgentTokens = configs.map((c) => normalizeAgentMaxTokens(c.settings.maxTokens));
   const temperature = Math.min(...configs.map((c) => normalizeAgentTemperature(c.settings.temperature)));
   const customParameters = agentCustomParameters(configs[0]!);
+  const batchReasoning = agentReasoningOptions(configs[0]!);
   const rawBatchMaxTokens = perAgentTokens.reduce((sum, tokens) => sum + tokens, 0);
   const modelMaxOutput = configs[0]!.maxOutputTokens;
   const batchMaxTokens = applyAgentMaxTokensCaps(provider, rawBatchMaxTokens, modelMaxOutput);
@@ -798,6 +832,8 @@ export async function executeAgentBatch(
       model,
       temperature,
       maxTokens: batchMaxTokens,
+      reasoningEffort: batchReasoning.reasoningEffort,
+      enableThinking: batchReasoning.enableThinking,
       messageCount: messages.length,
       messages: debugMessages(messages),
       batchedAgentTypes: configs.map((config) => config.type),
@@ -810,6 +846,7 @@ export async function executeAgentBatch(
       model,
       temperature,
       maxTokens: batchMaxTokens,
+      ...batchReasoning,
       customParameters,
       stream: streamResponses,
       onToken: streamResponses
@@ -838,6 +875,8 @@ export async function executeAgentBatch(
       model,
       temperature,
       maxTokens: batchMaxTokens,
+      reasoningEffort: batchReasoning.reasoningEffort,
+      enableThinking: batchReasoning.enableThinking,
       messageCount: messages.length,
       durationMs,
       finishReason: result.finishReason,
@@ -900,6 +939,8 @@ export async function executeAgentBatch(
       model,
       temperature,
       maxTokens: batchMaxTokens,
+      reasoningEffort: batchReasoning.reasoningEffort,
+      enableThinking: batchReasoning.enableThinking,
       messageCount: 0,
       durationMs: Date.now() - startTime,
       error: errMsg,

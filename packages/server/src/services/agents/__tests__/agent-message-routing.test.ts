@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { getDefaultAgentPrompt, type AgentContext } from "@marinara-engine/shared";
-import { buildStandardAgentMessagesForTest, type AgentExecConfig } from "../agent-executor.js";
+import { getDefaultAgentPrompt, type AgentCallDebugEvent, type AgentContext } from "@marinara-engine/shared";
+import { buildStandardAgentMessagesForTest, executeAgent, type AgentExecConfig } from "../agent-executor.js";
+import type { BaseLLMProvider, ChatMessage, ChatOptions } from "../../llm/base-provider.js";
 
 function agentConfig(type: string): AgentExecConfig {
   return {
@@ -55,5 +56,44 @@ describe("agent message routing", () => {
     assert.match(joined, /<assistant_response>\s*The corridor narrows\.\s*<\/assistant_response>/);
     assert.doesNotMatch(joined, /<committed_tracker_state>/);
     assert.doesNotMatch(joined, /recentEvents/);
+  });
+
+  it("passes reasoning effort into Tarot agent provider calls and debug events", async () => {
+    let seenOptions: ChatOptions | null = null;
+    const debugEvents: AgentCallDebugEvent[] = [];
+    const provider = {
+      maxTokensOverrideValue: null,
+      async chatComplete(_messages: ChatMessage[], options: ChatOptions) {
+        seenOptions = options;
+        return {
+          content: '{"revision":"The corridor narrows.","changed":false,"notes":[]}',
+          toolCalls: [],
+          finishReason: "stop",
+          usage: { promptTokens: 10, completionTokens: 4, totalTokens: 14, completionReasoningTokens: 2 },
+        };
+      },
+    } as unknown as BaseLLMProvider;
+
+    const config: AgentExecConfig = {
+      ...agentConfig("hermit"),
+      reasoningEffort: "high",
+    };
+    const context: AgentContext = {
+      ...contextForHermit(),
+      agentDebug: (event) => debugEvents.push(event),
+    };
+
+    const result = await executeAgent(config, context, provider, "glm-5.2");
+
+    assert.equal(result.success, true);
+    const capturedOptions = seenOptions as ChatOptions | null;
+    assert.ok(capturedOptions);
+    assert.equal(capturedOptions.reasoningEffort, "high");
+    assert.equal(capturedOptions.enableThinking, true);
+    const request = debugEvents.find((event) => event.stage === "request");
+    const response = debugEvents.find((event) => event.stage === "response");
+    assert.equal(request?.reasoningEffort, "high");
+    assert.equal(request?.enableThinking, true);
+    assert.equal(response?.reasoningTokens, 2);
   });
 });

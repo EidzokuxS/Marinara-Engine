@@ -215,22 +215,23 @@ describe("Tarot context routing", () => {
     assert.match(reminder, /<bolt_private_turn_audit>/);
     assert.match(reminder, /BOLT v2 private writing room \(adapted from Zetta Onyx v1\.55\)/);
     assert.match(reminder, /<visible_scene_contract>/);
-    assert.match(reminder, /PLAN \/ SCOUT/);
-    assert.match(reminder, /PLAN \/ TIME/);
+    assert.match(reminder, /BOLT\/SCOUT/);
+    assert.match(reminder, /BOLT\/TIME/);
     assert.match(reminder, /private time math/);
-    assert.match(reminder, /PLAN \/ DIRECTOR/);
+    assert.match(reminder, /BOLT\/DIRECTOR/);
     assert.match(reminder, /Offscreen named NPCs and established factions keep living/);
     assert.match(reminder, /Tower renders only convergence already present in <turn_scenario>/);
     assert.match(reminder, /current clock \(Day 1, 21:10\)/);
     assert.match(reminder, /weather\/location context \(Current weather: fog\)/);
     assert.match(reminder, /<time_skip_engine>/);
-    assert.match(reminder, /DRAFT \/ PROSE/);
-    assert.match(reminder, /AUDIT \/ Force/);
-    assert.match(reminder, /AUDIT \/ Slop/);
+    assert.match(reminder, /BOLT\/PROSE/);
+    assert.match(reminder, /BOLT\/AUDIT-FORCE/);
+    assert.match(reminder, /BOLT\/AUDIT-SLOP/);
     assert.match(reminder, /<humanizer_deslop>/);
     assert.match(reminder, /<banned_vocabulary>/);
     assert.match(reminder, /<do_not_repeat_descriptions>/);
-    assert.match(reminder, /Freaky-Balanced adult routing/);
+    assert.match(reminder, /BOLT\/AUDIT-ADULT/);
+    assert.match(reminder, /Freaky-Balanced adult register/);
     assert.match(reminder, /adult register is active in every NSFW scene/);
     assert.match(reminder, /sex\/intimacy stay slow-burn and require established charge/);
     assert.match(reminder, /Tower renders prose only/);
@@ -324,6 +325,8 @@ describe("Tarot context routing", () => {
 
     assert.match(justicePrompt, /Onyx action discipline/);
     assert.match(justicePrompt, /DC scale: 1-5 trivial, 6-10 easy, 11-15 moderate/);
+    assert.match(justicePrompt, /Private BOLT v2 adjudication room/);
+    assert.match(justicePrompt, /BOLT\/ROLL-GATE/);
     assert.doesNotMatch(justicePrompt, /widgetId/);
 
     assert.match(emperorPrompt, /Onyx composition discipline/);
@@ -343,6 +346,8 @@ describe("Tarot context routing", () => {
     assert.match(emperorPrompt, /fiction authorized at full force/);
     assert.match(emperorPrompt, /Character Force applies/);
     assert.match(emperorPrompt, /Adult register активен в каждой сцене/);
+    assert.match(emperorPrompt, /Private BOLT v2 composition room/);
+    assert.match(emperorPrompt, /BOLT\/DIRECTIVES/);
 
     assert.match(hermitPrompt, /Onyx prose discipline/);
     assert.match(hermitPrompt, /Zetta Onyx v1\.55/);
@@ -364,11 +369,15 @@ describe("Tarot context routing", () => {
     assert.match(hermitPrompt, /Never add the donor SillyTavern bracket header/);
     assert.match(hermitPrompt, /Это НЕ сценарная роль/);
     assert.match(hermitPrompt, /speaker labels/);
+    assert.match(hermitPrompt, /BOLT\/CONTRACT/);
+    assert.match(hermitPrompt, /BOLT\/AUDIT/);
     assert.doesNotMatch(hermitPrompt, /DC scale/);
     assert.doesNotMatch(hermitPrompt, /widgetId/);
 
     assert.match(chariotPrompt, /Onyx panel discipline/);
     assert.match(chariotPrompt, /только трекеры, которые ИЗМЕНИЛИСЬ/);
+    assert.match(chariotPrompt, /Private BOLT v2 widget room/);
+    assert.match(chariotPrompt, /BOLT\/CANON/);
     assert.doesNotMatch(chariotPrompt, /DC scale/);
   });
 
