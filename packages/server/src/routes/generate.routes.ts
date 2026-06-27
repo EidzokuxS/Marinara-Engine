@@ -109,7 +109,10 @@ import { DATA_DIR } from "../utils/data-dir.js";
 import { executeAgent, normalizeAgentContextSize, resolveAgentResultType } from "../services/agents/agent-executor.js";
 import { resolveJustice } from "../services/agents/tarot/justice-resolve.js";
 import { applyChariotWidgetUpdates, normalizeChariotWidgetUpdates } from "../services/agents/tarot/chariot-widgets.js";
-import { normalizeEmperorGameCommands } from "../services/agents/tarot/emperor-commands.js";
+import {
+  buildEmperorScenarioRepairInstruction,
+  extractEmperorScenario,
+} from "../services/agents/tarot/emperor-scenario.js";
 import { applyHermitProseRevision } from "../services/agents/tarot/hermit-prose.js";
 import { matchCustomAgentActivation } from "./generate/agent-activation.js";
 import { listCharacterSprites } from "../services/game/sprite.service.js";
@@ -4048,6 +4051,7 @@ export async function generateRoutes(app: FastifyInstance) {
           chatProvider: provider,
           chatModel: conn.model,
           chatCustomParameters: connectionParams?.customParameters ?? {},
+          chatGenerationMaxTokens: chatMode === "game" ? maxTokens : null,
           chatMaxOutputTokens: chatConnectionMaxOutputTokens,
           chatMaxParallelJobs: chatConnectionMaxParallelJobs,
           chatReasoningEffort: chatMode === "game" ? resolvedEffort : null,
@@ -6112,7 +6116,7 @@ export async function generateRoutes(app: FastifyInstance) {
             try {
               emperorDebugStatus = "running";
               const tarotMode = chatMeta.tarotMode === "world" ? "world" : "player";
-              const emperorContext: AgentContext = {
+              const emperorContextBase: AgentContext = {
                 ...agentContext,
                 memory: {
                   ...agentContext.memory,
@@ -6121,24 +6125,48 @@ export async function generateRoutes(app: FastifyInstance) {
                   ...(worldForecastText ? { _worldForecast: worldForecastText } : {}),
                 },
               };
-              const emperorResult = await executeAgent(
+              let emperorResult = await executeAgent(
                 emperorAgent,
-                emperorContext,
+                emperorContextBase,
                 emperorAgent.provider,
                 emperorAgent.model,
               );
               emperorDebugStatus = emperorResult.success
                 ? "success"
                 : `failed: ${emperorResult.error ?? "unknown error"}`;
+              let emperorExtraction = emperorResult.success
+                ? extractEmperorScenario(emperorResult.data)
+                : { scenario: null, commands: [], reason: "empty_data" as const };
+
+              if (emperorResult.success && !emperorExtraction.scenario) {
+                sendAgentEvent(emperorResult);
+                emperorDebugStatus = `retrying_${emperorExtraction.reason}`;
+                logger.warn("[emperor] invalid scenario (%s) — retrying Emperor repair", emperorExtraction.reason);
+                const repairContext: AgentContext = {
+                  ...emperorContextBase,
+                  memory: {
+                    ...emperorContextBase.memory,
+                    _emperorRepairInstruction: buildEmperorScenarioRepairInstruction(emperorResult.data),
+                  },
+                };
+                emperorResult = await executeAgent(emperorAgent, repairContext, emperorAgent.provider, emperorAgent.model);
+                emperorDebugStatus = emperorResult.success
+                  ? "retry_success"
+                  : `retry_failed: ${emperorResult.error ?? "unknown error"}`;
+                emperorExtraction = emperorResult.success
+                  ? extractEmperorScenario(emperorResult.data)
+                  : { scenario: null, commands: [], reason: "empty_data" as const };
+              }
+
               if (emperorResult.success && emperorResult.data && typeof emperorResult.data === "object") {
                 const emperorData = emperorResult.data as Record<string, unknown>;
-                const scenario = emperorData.scenario;
-                const emperorCommands = normalizeEmperorGameCommands(emperorData.commands);
+                const scenario = emperorExtraction.scenario;
+                const emperorCommands = emperorExtraction.commands;
                 emperorData.commands = emperorCommands;
                 if (emperorCommands.length > 0) {
                   emperorGameCommandBlock = emperorCommands.join("\n");
                 }
-                if (typeof scenario === "string" && scenario.trim()) {
+                if (scenario) {
                   logger.debug("[emperor] composed scenario (%d chars)", scenario.length);
                   emperorDebugStatus = "injected";
                   const emperorDirective =
@@ -6149,8 +6177,8 @@ export async function generateRoutes(app: FastifyInstance) {
                         "Ты рассказчик: разверни её живой прозой. НЕ меняй суть и исход, НЕ добавляй новых событий сверх сценария.";
                   emperorScenarioBlock = `${emperorDirective}\n${wrapContent(scenario, "turn_scenario", wrapFormat)}`;
                 } else {
-                  emperorDebugStatus = "invalid_scenario";
-                  logger.warn("[emperor] empty or invalid scenario — falling back to raw justice resolution");
+                  emperorDebugStatus = `invalid_scenario:${emperorExtraction.reason}`;
+                  logger.warn("[emperor] empty or invalid scenario after repair (%s)", emperorExtraction.reason);
                 }
               }
               sendAgentEvent(emperorResult);

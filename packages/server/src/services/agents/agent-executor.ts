@@ -2006,6 +2006,10 @@ export function buildAgentExtras(context: AgentContext, agentTypes: string[] = [
     parts.push(`</composition_context>`);
   }
 
+  if (agentTypes.includes("emperor") && typeof context.memory._emperorRepairInstruction === "string") {
+    parts.push(context.memory._emperorRepairInstruction);
+  }
+
   if ((agentTypes.includes("justice") || agentTypes.includes("emperor")) && context.memory._tarotLoreContext) {
     parts.push(`<game_lore_context>`);
     parts.push(context.memory._tarotLoreContext as string);

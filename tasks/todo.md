@@ -396,3 +396,16 @@
   - `pnpm --filter @marinara-engine/server build`
   - Temp smoke `tmp-userflow/hermit-prose-smoke/summary-2026-06-27T07-05-29-515Z.json`: 2/2 turns, `justice>emperor>hermit>chariot`, all four agents request `reasoningEffort: high`, `enableThinking: true`, and report reasoning tokens.
 - [x] Commit and push.
+
+## Current Task: Emperor Scenario Repair
+
+- [x] Keep Emperor as the required composition owner; do not bypass to Justice/Tower.
+- [x] Normalize Emperor-owned structured output (`scenario`, `turn_scenario`, `turnScenario`, or `beats`) into `turn_scenario`.
+- [x] Retry Emperor once with a repair instruction when its first result has no usable scenario.
+- [x] Raise Game Tarot reasoning agent output budget from the default 4096 cap to the Game generation budget.
+- [x] Verify focused tests/build and temp Game userflow.
+  - `pnpm --filter @marinara-engine/server test`
+  - `pnpm --filter @marinara-engine/server lint`
+  - `pnpm --filter @marinara-engine/server build`
+  - Temp smoke `tmp-userflow/hermit-prose-smoke/summary-2026-06-27T07-57-21-883Z.json`: 1/1 turn, `justice>emperor>hermit>chariot`, no SSE error, all Tarot agents request `maxTokens: 16384`, `reasoningEffort: high`, `enableThinking: true`.
+- [x] Commit and push.

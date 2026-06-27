@@ -48,6 +48,7 @@ type ResolveAgentPipelineAgentsArgs = {
   chatProvider: BaseLLMProvider;
   chatModel: string;
   chatCustomParameters: Record<string, unknown>;
+  chatGenerationMaxTokens?: number | null;
   chatMaxOutputTokens: number | null;
   chatMaxParallelJobs: number;
   chatReasoningEffort?: ChatOptions["reasoningEffort"] | null;
@@ -64,6 +65,25 @@ function resolveAgentReasoningEffort(
 ): ChatOptions["reasoningEffort"] | null {
   if (!chatReasoningEffort) return null;
   return GAME_TAROT_REASONING_AGENT_TYPES.has(agentType) ? chatReasoningEffort : null;
+}
+
+function numericSetting(value: unknown): number | null {
+  const parsed = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
+}
+
+export function applyGameTarotReasoningMaxTokens(args: {
+  agentType: string;
+  settings: Record<string, unknown>;
+  chatReasoningEffort?: ChatOptions["reasoningEffort"] | null;
+  chatGenerationMaxTokens?: number | null;
+}): Record<string, unknown> {
+  if (!resolveAgentReasoningEffort(args.agentType, args.chatReasoningEffort)) return args.settings;
+  const chatMaxTokens = numericSetting(args.chatGenerationMaxTokens);
+  if (!chatMaxTokens) return args.settings;
+  const currentMaxTokens = numericSetting(args.settings.maxTokens);
+  if (currentMaxTokens && currentMaxTokens >= chatMaxTokens) return args.settings;
+  return { ...args.settings, maxTokens: chatMaxTokens };
 }
 
 type AgentProviderCacheEntry = {
@@ -222,6 +242,7 @@ export async function resolveAgentPipelineAgents({
   chatProvider,
   chatModel,
   chatCustomParameters,
+  chatGenerationMaxTokens,
   chatMaxOutputTokens,
   chatMaxParallelJobs,
   chatReasoningEffort,
@@ -290,6 +311,12 @@ export async function resolveAgentPipelineAgents({
     }
     settings = applyTextRewriteAgentChatSettings(cfg.type as string, settings, chatMetadata);
     settings = applyKnowledgeAgentChatSettings(cfg.type as string, settings, chatMetadata);
+    settings = applyGameTarotReasoningMaxTokens({
+      agentType: cfg.type as string,
+      settings,
+      chatReasoningEffort,
+      chatGenerationMaxTokens,
+    });
     if (
       cfg.type === "spotify" &&
       settings.musicProvider !== "youtube" &&
@@ -410,6 +437,12 @@ export async function resolveAgentPipelineAgents({
     }
     builtInSettings = applyTextRewriteAgentChatSettings(builtIn.id, builtInSettings, chatMetadata);
     builtInSettings = applyKnowledgeAgentChatSettings(builtIn.id, builtInSettings, chatMetadata);
+    builtInSettings = applyGameTarotReasoningMaxTokens({
+      agentType: builtIn.id,
+      settings: builtInSettings,
+      chatReasoningEffort,
+      chatGenerationMaxTokens,
+    });
     if (
       builtIn.id === "spotify" &&
       builtInSettings.musicProvider !== "youtube" &&
