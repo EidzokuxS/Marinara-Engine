@@ -1116,6 +1116,7 @@ export function buildGmFormatReminder(
         ]
       : [`- Commands: [tag: params].`]),
     `- NEVER mix narration and dialogue in the same line; output them separately.`,
+    `- VN atom contract: each line is one scene atom. A spoken VN line contains only what the character audibly says after the colon: [Name] [main] [expression]: "Speech only." Gestures, attribution, interruptions, and object handling are separate narration/action lines. If speech is interrupted by action, use three atoms: [Name] [main] [expression]: "First speech." / The action happens. / [Name] [main] [expression]: "Second speech." Never output [Name] [main]: "speech" action "speech".`,
     ...(ctx.rating === "nsfw"
       ? [`- Adult mode enabled. Explicit content is allowed. No plot armor. Abandon moral biases.`]
       : []),

@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   applyHermitProseRevision,
   buildHermitRevisionRepairInstruction,
+  extractDialoguePrefixes,
   extractEngineDirectives,
 } from "../tarot/hermit-prose.js";
 
@@ -70,6 +71,15 @@ describe("Hermit prose revisions", () => {
     ]);
   });
 
+  it("extracts VN dialogue prefixes for pre-generation Hermit protected surfaces", () => {
+    assert.deepEqual(
+      extractDialoguePrefixes(
+        '[Yuki] [main] [wary]: "Stay back."\n\n[Ren] [thought] [focused]: Pattern first, fear later.',
+      ),
+      ["[Yuki] [main] [wary]:", "[Ren] [thought] [focused]:"],
+    );
+  });
+
   it("recovers malformed raw JSON when revision text contains unescaped VN dialogue quotes", () => {
     const original = 'The door opens.\n\n[Archivist] [main] [calm]: "Come in."';
     const raw =
@@ -114,4 +124,5 @@ describe("Hermit prose revisions", () => {
     assert.match(instruction, /dialogue_prefix_drift/);
     assert.match(instruction, /previous_rejected_revision_excerpt/);
   });
+
 });

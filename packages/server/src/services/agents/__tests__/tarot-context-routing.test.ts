@@ -240,6 +240,10 @@ describe("Tarot context routing", () => {
     assert.match(reminder, /Do not emit engine command tags/);
     assert.match(reminder, /write \[Player\] \[thought\]/);
     assert.match(reminder, /VN lines: \[Name\] \[main\|side\|whisper:Target\]/);
+    assert.match(reminder, /VN atom contract/);
+    assert.match(reminder, /each line is one scene atom/);
+    assert.match(reminder, /If speech is interrupted by action, use three atoms/);
+    assert.match(reminder, /Never output \[Name\] \[main\]: "speech" action "speech"/);
     assert.match(reminder, /\[Name\] \[side\] \[thinking\] is spoken or visible aside/);
     assert.match(reminder, /Run a humanizer\/deslop pass before final output/);
     assert.doesNotMatch(reminder, /\[Player\] \[main\]/);
@@ -369,6 +373,11 @@ describe("Tarot context routing", () => {
     assert.match(hermitPrompt, /Never add the donor SillyTavern bracket header/);
     assert.match(hermitPrompt, /Это НЕ сценарная роль/);
     assert.match(hermitPrompt, /speaker labels/);
+    assert.match(hermitPrompt, /Protected surfaces/);
+    assert.match(hermitPrompt, /immutable markup/);
+    assert.match(hermitPrompt, /байт-в-байт/);
+    assert.match(hermitPrompt, /VN atom format/);
+    assert.match(hermitPrompt, /spoken line содержит только слышимую реплику/);
     assert.match(hermitPrompt, /BOLT\/CONTRACT/);
     assert.match(hermitPrompt, /BOLT\/AUDIT/);
     assert.doesNotMatch(hermitPrompt, /DC scale/);

@@ -34,7 +34,7 @@ function contextForHermit(): AgentContext {
         },
       } as AgentContext["recentMessages"][number],
     ],
-    mainResponse: "The corridor narrows.",
+    mainResponse: '[Yuki] [main] [wary]: "The corridor narrows."\n\n[choices: "Go on"|"Turn back"]',
     gameState: null,
     characters: [],
     persona: null,
@@ -56,7 +56,10 @@ describe("agent message routing", () => {
     );
     const joined = messages.map((message) => message.content).join("\n\n");
 
-    assert.match(joined, /<assistant_response>\s*The corridor narrows\.\s*<\/assistant_response>/);
+    assert.match(joined, /<assistant_response>\s*\[Yuki\] \[main\] \[wary\]: "The corridor narrows\."/);
+    assert.match(joined, /<hermit_protected_surfaces>/);
+    assert.match(joined, /<immutable_vn_dialogue_prefixes>\s*\[Yuki\] \[main\] \[wary\]:/);
+    assert.match(joined, /<immutable_engine_directives>\s*\[choices: "Go on"\|"Turn back"\]/);
     assert.doesNotMatch(joined, /<committed_tracker_state>/);
     assert.doesNotMatch(joined, /recentEvents/);
   });

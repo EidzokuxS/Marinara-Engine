@@ -157,6 +157,8 @@ export function buildHermitRevisionRepairInstruction(originalText: string, reaso
     `- Preserve every VN dialogue prefix byte-for-byte: speaker name, lane, emotion, punctuation, and order.`,
     `- Preserve every Game engine directive byte-for-byte: no added tags, removed tags, renamed tags, or reordered tags.`,
     `- Preserve active speaker identities. Do not rename NPCs, the player, or any label from the original prose.`,
+    `- Preserve VN atom format: a spoken [Name] [main|side|whisper] line contains only one quoted speech payload after the colon. Narration/action lives on its own line.`,
+    `- If Tower mixed speech/action/speech inside one VN line, join the speech fragments under the existing prefix and move the action to an adjacent narration line without adding a new event.`,
     `- Return only the normal hermit_prose_revision JSON object.`,
   ];
 
@@ -188,7 +190,7 @@ export function buildHermitRevisionRepairInstruction(originalText: string, reaso
   return parts.join("\n");
 }
 
-function extractDialoguePrefixes(text: string): string[] {
+export function extractDialoguePrefixes(text: string): string[] {
   return Array.from(text.matchAll(VN_DIALOGUE_PREFIX_RE), (match) => (match[1] ?? "").trim());
 }
 

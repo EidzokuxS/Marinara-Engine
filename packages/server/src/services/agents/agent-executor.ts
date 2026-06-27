@@ -25,7 +25,11 @@ import { logger } from "../../lib/logger.js";
 import { wrapContent } from "../prompt/format-engine.js";
 import { settleAgentJobsWithConcurrencyLimit } from "./agent-concurrency.js";
 import { getAssetManifest } from "../game/asset-manifest.service.js";
-import { normalizeHermitProseRevision } from "./tarot/hermit-prose.js";
+import {
+  extractDialoguePrefixes,
+  extractEngineDirectives,
+  normalizeHermitProseRevision,
+} from "./tarot/hermit-prose.js";
 
 const MAX_AGENT_CONTEXT_MESSAGES = 200;
 const EXPRESSION_AGENT_RECENT_CONTEXT_MESSAGES = 2;
@@ -1829,9 +1833,18 @@ function buildAgentMessages(
   const finalParts: string[] = [];
 
   if (context.mainResponse) {
+    const assistantResponse = options.preserveAssistantResponseMarkup
+      ? context.mainResponse
+      : stripHtmlTags(context.mainResponse);
     finalParts.push(`<assistant_response>`);
-    finalParts.push(options.preserveAssistantResponseMarkup ? context.mainResponse : stripHtmlTags(context.mainResponse));
+    finalParts.push(assistantResponse);
     finalParts.push(`</assistant_response>`);
+
+    const protectedSurfaceBlock =
+      agentType === "hermit" ? buildHermitProtectedSurfaceBlock(assistantResponse) : null;
+    if (protectedSurfaceBlock) {
+      finalParts.push(`\n${protectedSurfaceBlock}`);
+    }
   }
 
   if (context.preGenInjections?.length) {
@@ -1872,6 +1885,37 @@ function buildAgentMessages(
   }
 
   return messages;
+}
+
+function buildHermitProtectedSurfaceBlock(assistantResponse: string): string | null {
+  const dialoguePrefixes = extractDialoguePrefixes(assistantResponse);
+  const engineDirectives = extractEngineDirectives(assistantResponse);
+  if (dialoguePrefixes.length === 0 && engineDirectives.length === 0) return null;
+
+  const parts = [
+    `<hermit_protected_surfaces>`,
+    `Use this checklist before writing JSON. These are markup, identity, and mechanics surfaces from <assistant_response>. Copy each entry byte-for-byte into the revision, in the same order. Edit only the prose around or after them.`,
+  ];
+
+  if (dialoguePrefixes.length > 0) {
+    parts.push(``, `<immutable_vn_dialogue_prefixes>`);
+    for (const prefix of dialoguePrefixes) parts.push(prefix);
+    parts.push(`</immutable_vn_dialogue_prefixes>`);
+  }
+
+  if (engineDirectives.length > 0) {
+    parts.push(``, `<immutable_engine_directives>`);
+    for (const directive of engineDirectives) parts.push(directive);
+    parts.push(`</immutable_engine_directives>`);
+  }
+
+  parts.push(
+    ``,
+    `Pre-output audit: if any listed prefix/directive is missing, renamed, reordered, or retyped in your revision, fix the revision before returning JSON.`,
+    `</hermit_protected_surfaces>`,
+  );
+
+  return parts.join("\n");
 }
 
 /**

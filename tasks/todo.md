@@ -441,3 +441,12 @@
 - [x] Run focused and full server verification.
 - [x] Rebuild/restart backend and smoke the failed Game turn on a temporary chat.
 - [x] Commit and push.
+
+## Current Task: Prevent Hermit Surface Drift At Source
+
+- [x] Record correction: bad Hermit answers should be prevented before generation, with rejection kept as a safety gate.
+- [x] Add primary Hermit protected-surface context with exact VN prefixes and engine directives.
+- [x] Strengthen Hermit's default prompt around immutable markup and pre-output audit.
+- [x] Replace mechanical VN mixed-line rejection with a clearer Tower/Hermit VN atom generation contract.
+- [x] Run focused/full verification and temp Game smoke.
+- [x] Commit, restart backend, and push.
