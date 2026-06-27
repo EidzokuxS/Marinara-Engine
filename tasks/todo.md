@@ -409,3 +409,15 @@
   - `pnpm --filter @marinara-engine/server build`
   - Temp smoke `tmp-userflow/hermit-prose-smoke/summary-2026-06-27T07-57-21-883Z.json`: 1/1 turn, `justice>emperor>hermit>chariot`, no SSE error, all Tarot agents request `maxTokens: 16384`, `reasoningEffort: high`, `enableThinking: true`.
 - [x] Commit and push.
+
+## Current Task: Direct Game Address Routing
+
+- [x] Verify current direct-address behavior.
+- [x] Skip Tarot action agents on `[To the GM]` / `[To the party]` turns while preserving ordinary GM response.
+- [x] Add regression coverage for direct-address detection and Tarot action agent skip set.
+- [x] Run tests/build and direct-address smoke.
+  - `pnpm --filter @marinara-engine/server test`
+  - `pnpm --filter @marinara-engine/server lint`
+  - `pnpm --filter @marinara-engine/server build`
+  - Temp direct GM smoke chat `z8q5HLyR9RGPpv0zjoJTH`: `message_saved=1`, `errors=[]`, `tarotAgentStarts=[]`, `tarotAgentResults=[]`.
+- [x] Commit and push.

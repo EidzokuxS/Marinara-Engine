@@ -374,6 +374,11 @@ import {
   type GmPromptContext,
 } from "../services/game/gm-prompts.js";
 import {
+  detectGameDirectAddressMode,
+  isGameTarotActionAgentType,
+  type GameDirectAddressMode,
+} from "../services/game/direct-address.js";
+import {
   applyMapUpdateCommand,
   getGameMapsFromMeta,
   parseMapUpdateCommands,
@@ -4378,6 +4383,7 @@ export async function generateRoutes(app: FastifyInstance) {
         }
 
         let tarotTowerNarrativeOnly = false;
+        let gameDirectAddressMode: GameDirectAddressMode | undefined;
         let tarotAgentContextPackets: {
           emperorComposition?: Record<string, unknown>;
           justiceAdjudication?: Record<string, unknown>;
@@ -4385,6 +4391,9 @@ export async function generateRoutes(app: FastifyInstance) {
         let gameLoreContextForTarot: string | null = null;
 
         if (chatMode === "game") {
+          const latestGameUserMsg = [...finalMessages].reverse().find((m) => m.role === "user");
+          const latestGameUserContent = latestGameUserMsg?.content.trimStart() ?? "";
+          gameDirectAddressMode = detectGameDirectAddressMode(latestGameUserContent);
           const selectedGamePrompt =
             resolvedPreset && presetId
               ? resolvePresetModePrompt(resolvedPreset as Record<string, unknown>, "game")
@@ -4394,7 +4403,7 @@ export async function generateRoutes(app: FastifyInstance) {
             !(typeof chatMeta.gameSystemPrompt === "string" && chatMeta.gameSystemPrompt.trim().length > 0)
               ? { ...chatMeta, gameSystemPrompt: selectedGamePrompt }
               : chatMeta;
-          tarotTowerNarrativeOnly = resolvedAgents.some((agent) => agent.type === "emperor");
+          tarotTowerNarrativeOnly = !gameDirectAddressMode && resolvedAgents.some((agent) => agent.type === "emperor");
           const { gmCtx, gameActiveState, sessionNumber, gameTurnNumber, gameTime, gameMap, hasSceneModel } =
             await injectGameGmPromptRuntime({
               messages: finalMessages,
@@ -4540,13 +4549,8 @@ export async function generateRoutes(app: FastifyInstance) {
           // sit closest to generation in the model's attention window.
           // Detect special address prefixes from the latest user message so the
           // prompt block is only sent when actually relevant.
-          const latestUserMsg = [...finalMessages].reverse().find((m) => m.role === "user");
-          const latestUserContent = latestUserMsg?.content.trimStart() ?? "";
-          const addressMode = latestUserContent.startsWith("[To the party]")
-            ? "party"
-            : latestUserContent.startsWith("[To the GM]")
-              ? "gm"
-              : undefined;
+          const latestUserContent = latestGameUserContent;
+          const addressMode = gameDirectAddressMode;
           const playerDiceRollSubmitted = /\[dice\b/i.test(latestUserContent);
           const formatReminder = resolvePromptMacros(
             buildGmFormatReminder({
@@ -5436,6 +5440,9 @@ export async function generateRoutes(app: FastifyInstance) {
         let pipelineAgents = resolvedAgents.filter(
           (a) => !textRewriteAgentIds.has(a.id) && a.type !== "lorebook-keeper" && a.type !== "hermit",
         );
+        if (chatMode === "game" && gameDirectAddressMode) {
+          pipelineAgents = pipelineAgents.filter((a) => !isGameTarotActionAgentType(a.type));
+        }
 
         // When manualTrackers is enabled, strip tracker-category agents from the
         // automatic pipeline — the user will trigger them manually via retry-agents.
@@ -5610,7 +5617,9 @@ export async function generateRoutes(app: FastifyInstance) {
         };
 
         const gameTarotDebug = (isDebug || requestDebug) && chatMode === "game";
-        const hasResolvedAgent = (type: string) => resolvedAgents.some((agent) => agent.type === type);
+        const hasResolvedAgent = (type: string) =>
+          resolvedAgents.some((agent) => agent.type === type) &&
+          !(chatMode === "game" && gameDirectAddressMode && isGameTarotActionAgentType(type));
         let justiceDebugStatus = hasResolvedAgent("justice")
           ? input.regenerateMessageId
             ? "skipped_regenerate"
@@ -6111,7 +6120,7 @@ export async function generateRoutes(app: FastifyInstance) {
           // ── Emperor: compose the turn scenario AFTER Justice (sequential chain link) ──
           // Emperor runs manually here (excluded from the batched pipeline) so it can
           // consume this turn's Justice outcome. Tower then renders Emperor's scenario.
-          const emperorAgent = resolvedAgents.find((a) => a.type === "emperor");
+          const emperorAgent = gameDirectAddressMode ? undefined : resolvedAgents.find((a) => a.type === "emperor");
           if (emperorAgent) {
             try {
               emperorDebugStatus = "running";
@@ -7542,7 +7551,7 @@ export async function generateRoutes(app: FastifyInstance) {
                 ? beforeGameProsePass.length - visibleGameProse.length
                 : 0;
 
-              const hermitAgent = resolvedAgents.find((agent) => agent.type === "hermit");
+              const hermitAgent = gameDirectAddressMode ? undefined : resolvedAgents.find((agent) => agent.type === "hermit");
               if (hermitAgent && visibleGameProse && !abortController.signal.aborted) {
                 try {
                   let hermitResult = await executeAgent(
@@ -8733,7 +8742,8 @@ export async function generateRoutes(app: FastifyInstance) {
             return imgConnId;
           };
 
-          const chariotConfiguredForPost = resolvedAgents.some((agent) => agent.type === "chariot");
+          const chariotConfiguredForPost =
+            !gameDirectAddressMode && resolvedAgents.some((agent) => agent.type === "chariot");
           let chariotDebugStatus = chariotConfiguredForPost ? "not_returned" : "not_configured";
           let chariotPatchDebugStatus = chariotConfiguredForPost ? "not_evaluated" : "not_configured";
           let chariotWidgetUpdateCount = 0;

@@ -6,6 +6,7 @@ import { buildStandardAgentMessagesForTest, executeAgent, type AgentExecConfig }
 import type { BaseLLMProvider, ChatMessage, ChatOptions } from "../../llm/base-provider.js";
 import { extractEmperorScenario } from "../tarot/emperor-scenario.js";
 import { applyGameTarotReasoningMaxTokens } from "../../generation/agent-resolution.js";
+import { detectGameDirectAddressMode, isGameTarotActionAgentType } from "../../game/direct-address.js";
 
 function agentConfig(type: string): AgentExecConfig {
   return {
@@ -156,5 +157,18 @@ describe("agent message routing", () => {
       }).maxTokens,
       4096,
     );
+  });
+
+  it("detects direct Game address turns and marks only Tarot action agents for skipping", () => {
+    assert.equal(detectGameDirectAddressMode("  [To the GM] can we pause here?"), "gm");
+    assert.equal(detectGameDirectAddressMode("[To the party] Stay behind me."), "party");
+    assert.equal(detectGameDirectAddressMode("I open the door."), undefined);
+
+    assert.equal(isGameTarotActionAgentType("justice"), true);
+    assert.equal(isGameTarotActionAgentType("emperor"), true);
+    assert.equal(isGameTarotActionAgentType("hermit"), true);
+    assert.equal(isGameTarotActionAgentType("chariot"), true);
+    assert.equal(isGameTarotActionAgentType("knowledge-retrieval"), false);
+    assert.equal(isGameTarotActionAgentType("director"), false);
   });
 });
