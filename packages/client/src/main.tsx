@@ -39,7 +39,36 @@ function scheduleAfterFirstLoad(callback: () => void) {
   window.addEventListener("load", schedule, { once: true });
 }
 
+async function clearLoopbackRuntimeCaches() {
+  if ("serviceWorker" in navigator) {
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.allSettled(registrations.map((registration) => registration.unregister()));
+    } catch {
+      // Best-effort cleanup for stale local PWA state.
+    }
+  }
+
+  if ("caches" in window) {
+    try {
+      const keys = await caches.keys();
+      await Promise.allSettled(keys.map((key) => caches.delete(key)));
+    } catch {
+      // Best-effort cleanup for stale local PWA state.
+    }
+  }
+}
+
 function registerServiceWorker() {
+  const hostname = window.location.hostname.toLowerCase();
+  const isLoopbackHost = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  if (isLoopbackHost) {
+    scheduleAfterFirstLoad(() => {
+      void clearLoopbackRuntimeCaches();
+    });
+    return;
+  }
+
   scheduleAfterFirstLoad(() => {
     void import("virtual:pwa-register")
       .then(({ registerSW }) => {

@@ -421,3 +421,13 @@
   - `pnpm --filter @marinara-engine/server build`
   - Temp direct GM smoke chat `z8q5HLyR9RGPpv0zjoJTH`: `message_saved=1`, `errors=[]`, `tarotAgentStarts=[]`, `tarotAgentResults=[]`.
 - [x] Commit and push.
+
+## Current Task: Loopback Workbox Network Errors
+
+- [x] Verify backend health and API endpoints are alive while the browser reports Workbox `no-response`.
+- [x] Identify local PWA service worker interception of `/api/*` as the visible browser error source.
+- [x] Disable service worker registration on loopback hosts and clear stale local runtime caches.
+- [x] Build client and server dist.
+- [x] Restart the backend on `:7860` from fresh dist.
+- [x] Smoke `/api/health`, `/api/themes`, `/api/extensions`, `/api/chats`, `/assets/index.js`, and `/`.
+- [x] Commit and push.
