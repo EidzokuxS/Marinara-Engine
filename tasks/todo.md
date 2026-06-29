@@ -450,3 +450,18 @@
 - [x] Replace mechanical VN mixed-line rejection with a clearer Tower/Hermit VN atom generation contract.
 - [x] Run focused/full verification and temp Game smoke.
 - [x] Commit, restart backend, and push.
+
+## Current Task: Adapt Zetta Onyx v1.61
+
+- [x] Locate donor preset and build script.
+- [x] Diff v1.60 to v1.61 changed prompt blocks.
+- [x] Adapt the no-favorites/impartial simulation frame into GM, Tower, and Tarot agent contracts.
+- [x] Update prompt coverage tests.
+- [x] Run focused/full verification, rebuild, restart, commit, and push.
+
+## Current Task Review: Adapt Zetta Onyx v1.61
+
+- Donor diff confirmed v1.61 changes the main/BOLT/BOLT v2 frame around impartial simulation and no-favorites treatment.
+- GM/Tower prompts now carry a Zetta Onyx v1.61 no-favorites frame in the sim contract, visible scene contract, Tower contract, and BOLT audit.
+- Justice, Emperor, and Hermit now receive the same v1.61 impartiality contract in their owning responsibilities.
+- Verification passed: shared build, focused Tarot context test, full server test, server lint, server build, and backend health smoke on `:7860`.
