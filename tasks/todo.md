@@ -480,3 +480,19 @@
 - GM/Tower prompts now carry `<language_contract>` next to the visible scene and BOLT contracts; BOLT audits the same contract.
 - Emperor and Hermit prompts now carry the v1.64 language/script lock and full-force clarification in their owned responsibilities.
 - Verification passed: shared build, focused Tarot context test, full server test, server lint, server build, and backend health smoke on `:7860`.
+
+## Current Task: Canon Vault / Brave Search Architecture
+
+- [x] Use `krypton-planning` for the architecture plan.
+- [x] Inspect existing Game setup/generation, Tarot context routing, lorebook/knowledge agent boundaries, and storage schemas.
+- [x] Create `docs/goals/canon-vault-hierophant/PLAN.md`.
+- [x] Create `docs/goals/canon-vault-hierophant/GOAL.md`.
+- [x] Review plan shape and commit/push planning artifacts.
+
+## Current Task Review: Canon Vault / Brave Search Architecture
+
+- Planned a server-owned Canon Vault and hidden Tarot support agent `Hierophant`.
+- Planned Brave Search as a bounded backend research source, not a direct model/Tower tool.
+- Planned role-specific canon packets for setup, Justice, Emperor, Tower, and UI.
+- Planned source UI, claim override controls, cache/budget/rate-limit boundaries, and kill criteria.
+- Planned acceptance evidence: 5 setup universes and 2 runtime mini-campaign playtests in temp chats.
