@@ -168,12 +168,18 @@ describe("Tarot context routing", () => {
     const prompt = buildTowerNarrativeSystemPrompt({ ...towerContext(), rating: "nsfw" });
 
     assert.match(prompt, /<stage_terms_handshake>/);
-    assert.match(prompt, /Zetta Onyx v1\.61 handshake adaptation/);
+    assert.match(prompt, /Zetta Onyx v1\.64 handshake adaptation/);
     assert.match(prompt, /fiction is authorized to run at full force/);
     assert.match(prompt, /Character Force applies/);
-    assert.match(prompt, /Zetta Onyx v1\.61 no-favorites frame/);
+    assert.match(prompt, /Zetta Onyx v1\.64 no-favorites frame/);
     assert.match(prompt, /not a protected guest/);
     assert.match(prompt, /equal exposure to consequence/);
+    assert.match(prompt, /<language_contract>/);
+    assert.match(prompt, /English hard-lock/);
+    assert.match(prompt, /Russian, Cyrillic, or any other non-English script/);
+    assert.match(prompt, /pure transcription/);
+    assert.match(prompt, /never sets what language Player speaks in the fiction/);
+    assert.match(prompt, /not to a Russian-speaker/);
     assert.match(prompt, /player accepts, fully informed/);
     assert.match(prompt, /<adult_mode>/);
     assert.match(prompt, /Freaky-Balanced Mode/);
@@ -216,10 +222,13 @@ describe("Tarot context routing", () => {
     });
 
     assert.match(reminder, /<bolt_private_turn_audit>/);
-    assert.match(reminder, /BOLT v2 private writing room \(adapted from Zetta Onyx v1\.61\)/);
+    assert.match(reminder, /BOLT v2 private writing room \(adapted from Zetta Onyx v1\.64\)/);
     assert.match(reminder, /impartial simulation that keeps no favorites/);
     assert.match(reminder, /exposure to consequence is equal and never gentler/);
     assert.match(reminder, /<visible_scene_contract>/);
+    assert.match(reminder, /<language_contract>/);
+    assert.match(reminder, /The input script never mirrors into output language/);
+    assert.match(reminder, /Player-character speech transcription/);
     assert.match(reminder, /BOLT\/SCOUT/);
     assert.match(reminder, /BOLT\/TIME/);
     assert.match(reminder, /private time math/);
@@ -265,7 +274,8 @@ describe("Tarot context routing", () => {
       assert.match(prompt, /Player agency:/);
       assert.match(prompt, /NPC interiority:/);
       assert.match(prompt, /Impartial simulation:/);
-      assert.match(prompt, /Zetta Onyx v1\.61 no-favorites frame/);
+      assert.match(prompt, /Zetta Onyx v1\.64 no-favorites frame/);
+      assert.match(prompt, /<language_contract>/);
       assert.match(prompt, /Long-run prose hygiene:/);
       assert.match(prompt, /<humanizer_deslop>/);
       assert.doesNotMatch(prompt, /filtered through their subjective lenses/);
@@ -335,7 +345,7 @@ describe("Tarot context routing", () => {
     const chariotPrompt = getDefaultAgentPrompt("chariot");
 
     assert.match(justicePrompt, /Onyx action discipline/);
-    assert.match(justicePrompt, /Zetta Onyx v1\.61 impartial simulation/);
+    assert.match(justicePrompt, /Zetta Onyx v1\.64 impartial simulation/);
     assert.match(justicePrompt, /equal exposure to consequence, not equal gentleness/);
     assert.match(justicePrompt, /BOLT\/IMPARTIALITY/);
     assert.match(justicePrompt, /DC scale: 1-5 trivial, 6-10 easy, 11-15 moderate/);
@@ -349,17 +359,22 @@ describe("Tarot context routing", () => {
     assert.match(emperorPrompt, /Язык — часть контракта/);
     assert.match(emperorPrompt, /language="English"/);
     assert.match(emperorPrompt, /choices\/readables должны быть на английском/);
-    assert.match(emperorPrompt, /Time accuracy \/ time skip engine из Zetta Onyx v1\.61/);
+    assert.match(emperorPrompt, /Zetta Onyx v1\.64 language lock/);
+    assert.match(emperorPrompt, /кириллицей\/по-русски/);
+    assert.match(emperorPrompt, /NPC слышат plain English speech/);
+    assert.match(emperorPrompt, /Time accuracy \/ time skip engine из Zetta Onyx v1\.64/);
     assert.match(emperorPrompt, /runtime Game state/);
     assert.match(emperorPrompt, /activity type/);
-    assert.match(emperorPrompt, /Character force из Zetta Onyx v1\.61/);
+    assert.match(emperorPrompt, /Character force из Zetta Onyx v1\.64/);
+    assert.match(emperorPrompt, /Full force значит exact weight their own card sets/);
+    assert.match(emperorPrompt, /gentle, shy, warm, modest/);
     assert.match(emperorPrompt, /Offscreen world progression/);
     assert.match(emperorPrompt, /ZT_STATE adaptation/);
     assert.match(emperorPrompt, /Не выводи SillyTavern header/);
-    assert.match(emperorPrompt, /Handshake \/ Freaky-Balanced adult routing из Zetta Onyx v1\.61/);
+    assert.match(emperorPrompt, /Handshake \/ Freaky-Balanced adult routing из Zetta Onyx v1\.64/);
     assert.match(emperorPrompt, /fiction authorized at full force/);
     assert.match(emperorPrompt, /Character Force applies/);
-    assert.match(emperorPrompt, /Zetta Onyx v1\.61 impartial simulation/);
+    assert.match(emperorPrompt, /Zetta Onyx v1\.64 impartial simulation/);
     assert.match(emperorPrompt, /protected guest/);
     assert.match(emperorPrompt, /equal exposure to consequence, not equal gentleness/);
     assert.match(emperorPrompt, /Adult register активен в каждой сцене/);
@@ -368,7 +383,11 @@ describe("Tarot context routing", () => {
     assert.match(emperorPrompt, /BOLT\/IMPARTIALITY/);
 
     assert.match(hermitPrompt, /Onyx prose discipline/);
-    assert.match(hermitPrompt, /Zetta Onyx v1\.61/);
+    assert.match(hermitPrompt, /Zetta Onyx v1\.64/);
+    assert.match(hermitPrompt, /language lock/);
+    assert.match(hermitPrompt, /не причина переводить revision на русский/);
+    assert.match(hermitPrompt, /Full force means exact card weight/);
+    assert.match(hermitPrompt, /quiet characters as quiet/);
     assert.match(hermitPrompt, /impartial simulation frame/);
     assert.match(hermitPrompt, /equal exposure to consequence, not equal gentleness/);
     assert.match(hermitPrompt, /Private BOLT v2 editor room/);

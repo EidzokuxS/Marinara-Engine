@@ -465,3 +465,18 @@
 - GM/Tower prompts now carry a Zetta Onyx v1.61 no-favorites frame in the sim contract, visible scene contract, Tower contract, and BOLT audit.
 - Justice, Emperor, and Hermit now receive the same v1.61 impartiality contract in their owning responsibilities.
 - Verification passed: shared build, focused Tarot context test, full server test, server lint, server build, and backend health smoke on `:7860`.
+
+## Current Task: Adapt Zetta Onyx v1.64
+
+- [x] Locate donor preset and build scripts for v1.62-v1.64.
+- [x] Identify real donor deltas: full-force clarification and language/script lock.
+- [x] Adapt v1.64 into GM, Tower, Emperor, Hermit, and prompt tests.
+- [x] Run focused/full verification, rebuild, restart, commit, and push.
+
+## Current Task Review: Adapt Zetta Onyx v1.64
+
+- Donor diff confirmed v1.62 adds the full-force clarification: exact card weight, quiet characters stay quiet, fierce characters stay fierce.
+- Donor diff confirmed v1.63-v1.64 add the English/script lock, especially player-character dialogue typed in Russian/Cyrillic as transcription rather than in-fiction Russian speech.
+- GM/Tower prompts now carry `<language_contract>` next to the visible scene and BOLT contracts; BOLT audits the same contract.
+- Emperor and Hermit prompts now carry the v1.64 language/script lock and full-force clarification in their owned responsibilities.
+- Verification passed: shared build, focused Tarot context test, full server test, server lint, server build, and backend health smoke on `:7860`.

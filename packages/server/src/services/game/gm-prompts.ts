@@ -13,9 +13,9 @@ import type {
 import { DEFAULT_GAME_SYSTEM_PROMPT, wrapGameInstructions } from "@marinara-engine/shared";
 import type { CharacterSpriteInfo } from "./sprite.service.js";
 
-const ZETTA_ONYX_VERSION = "v1.61";
+const ZETTA_ONYX_VERSION = "v1.64";
 const ZETTA_IMPARTIAL_SIMULATION_FRAME =
-  "Zetta Onyx v1.61 no-favorites frame: the simulation keeps no favorites, tilts toward neither the player character nor any NPC/faction, and models every agent by the same rules. The player character is one agent in the world, not a protected guest. Equal treatment means equal exposure to consequence, not equal gentleness. Serving the player means an honest world, never a kind one.";
+  "Zetta Onyx v1.64 no-favorites frame: the simulation keeps no favorites, tilts toward neither the player character nor any NPC/faction, and models every agent by the same rules. The player character is one agent in the world, not a protected guest. Equal treatment means equal exposure to consequence, not equal gentleness. Serving the player means an honest world, never a kind one.";
 
 export interface GmPromptContext {
   gameActiveState: GameActiveState;
@@ -544,6 +544,27 @@ function buildOnyxStateLedgerLines(ctx: { towerNarrativeOnly?: boolean }): strin
   ];
 }
 
+function buildOnyxLanguageContractLines(ctx: Pick<GmPromptContext, "language" | "playerName">): string[] {
+  const normalizedLanguage = normalizePromptLanguage(ctx.language) ?? "English";
+  const playerCharacter = normalizePromptText(ctx.playerName, "the player character");
+  const englishLock =
+    normalizedLanguage.toLowerCase() === "english"
+      ? `English hard-lock: if the player types in Russian, Cyrillic, or any other non-English script, still write narration, dialogue, and OOC in English. The input script never mirrors into output language.`
+      : `Write narration, dialogue, OOC, and player-facing command text in ${normalizedLanguage}. The player's input script is how they type to the AI and never overrides this setup language.`;
+  const playerSpeechLine =
+    normalizedLanguage.toLowerCase() === "english"
+      ? `Player-character speech transcription: when the player writes ${playerCharacter}'s own dialogue, the script they type it in is pure transcription and never sets what language ${playerCharacter} speaks in the fiction. ${playerCharacter} speaks the scene's language, English by default, or whatever the card, greeting, or an explicit OOC note establishes. NPCs hear ${playerCharacter} speaking that in-fiction language and react to plain English speech, not to a Russian-speaker or foreign untranslated tongue unless the player explicitly says the character speaks that language in-world.`
+      : `Player-character speech transcription: when the player writes ${playerCharacter}'s own dialogue, the script they type it in is pure transcription and never sets what language ${playerCharacter} speaks in the fiction. ${playerCharacter} speaks the scene's language, ${normalizedLanguage} by default, or whatever the card, greeting, or an explicit OOC note establishes. NPCs hear ${playerCharacter} speaking that in-fiction language and react to plain ${normalizedLanguage} speech, not to a foreign or untranslated tongue unless the player explicitly says the character speaks that language in-world.`;
+
+  return [
+    `<language_contract>`,
+    englishLock,
+    playerSpeechLine,
+    `Other non-native or chaos languages may appear only when the fiction establishes them and the line includes a proper ${normalizedLanguage} subtitle or immediately understandable translation.`,
+    `</language_contract>`,
+  ];
+}
+
 function buildVisibleSceneContractLines(
   ctx: Pick<GmPromptContext, "playerName"> & { towerNarrativeOnly?: boolean },
 ): string[] {
@@ -568,7 +589,7 @@ function buildVisibleSceneContractLines(
 }
 
 function buildOnyxNarrativeCraftLines(
-  ctx: Pick<GmPromptContext, "rating" | "playerName" | "gameTime" | "weatherContext"> & {
+  ctx: Pick<GmPromptContext, "rating" | "playerName" | "gameTime" | "weatherContext" | "language"> & {
     towerNarrativeOnly?: boolean;
   },
 ): string[] {
@@ -585,6 +606,8 @@ function buildOnyxNarrativeCraftLines(
     ``,
     ...buildVisibleSceneContractLines(ctx),
     ``,
+    ...buildOnyxLanguageContractLines(ctx),
+    ``,
     ...buildOnyxStageTermsLines(ctx),
     ``,
     ...buildOnyxAdultModeLines(ctx.rating),
@@ -599,7 +622,7 @@ function buildOnyxNarrativeCraftLines(
     ``,
     `<realistic_bold_characters>`,
     `All NPCs are fallible, lack plot armor, and can be hurt or die. NPCs may confront, disagree, exploit, desire, force, flee, bargain, lie, steal, touch, fight, embrace, and pursue personal goals that ignore what ${playerCharacter} wants. They commit fully to physical actions without hovering hands or half-execution: reach, grab, pull, touch, fight, take, protect, yield, or refuse according to persona and leverage.`,
-    `A character's established competence, danger, warmth, cruelty, restraint, authority, lust, boredom, or tenderness is their baseline. The card keeps its weight on the page. A strong or dominant character reaches for the real move their nature supports; if a softer action and a harder action are equally card-true, the stronger action is the read. Refusal and friction drive the next move rather than making the character deflate. Trust, warmth, and opened guard arrive only as fast as the character and fiction earn them, and they can regress.`,
+    `A character's established competence, danger, warmth, cruelty, restraint, authority, lust, boredom, or tenderness is their baseline. Full force means the exact weight their own card sets: a gentle, shy, warm, or easygoing character written at full fidelity is already at full force, and inflating quiet characters into aggression is the same error as softening fierce ones. The card keeps its weight on the page. A strong or dominant character reaches for the real move their nature supports; if a softer action and a harder action are equally card-true, the stronger action is the read. Refusal and friction drive the next move rather than making the character deflate. Trust, warmth, and opened guard arrive only as fast as the character and fiction earn them, and they can regress.`,
     `</realistic_bold_characters>`,
     ``,
     `<character_individuation>`,
@@ -675,7 +698,7 @@ function buildBoltPrivateTurnAuditLines(ctx: {
     `BOLT/AUDIT-FORCE: name the strongest action any character takes this turn and confirm it lands at the size their card and nature set. A character who would claim, take, break, protect, refuse, expose, desire, or hurt gets that act at full weight, and the outcome serves whoever drove it.`,
     `BOLT/AUDIT-SLOP: apply <banned_vocabulary>, <humanizer_deslop>, and all seven <zt_prose_bans> families across narration, dialogue, and interiority. Cut throat-clearing, rhetorical question/answer setups, negative parallelism, negation-as-description, false significance, tricolon padding, and staccato punchline stacks. A line defended as "character voice" or "borderline" gets rewritten. No meta.`,
     `BOLT/AUDIT-INTERIOR: explicit NPC private thoughts are first-person present-tense, never player-character thought, never thinker-naming third person, and never bare standalone italic lines in Game. Emit them as [Name] [thought] [expression]: Thought or fold them into narration. Do not disguise private thought as [Name] [side] [thinking].`,
-    `BOLT/AUDIT-FORMAT: obey the VN/Game output format, language, active sprites, turn length, and <door_rotation> when loaded.`,
+    `BOLT/AUDIT-FORMAT: obey the VN/Game output format, <language_contract>, active sprites, turn length, and <door_rotation> when loaded.`,
     ctx.rating === "nsfw"
       ? `BOLT/AUDIT-ADULT: Freaky-Balanced adult register is active in every NSFW scene. Keep vulgar/profane voice, direct bodies, lewd physical attention, and blunt violence/gore when present; sex/intimacy stay slow-burn and require established charge.`
       : `BOLT/AUDIT-ADULT: Mature SFW routing keeps dark stakes and direct physicality; explicit sex fades to black while consequences remain.`,
@@ -1096,6 +1119,7 @@ export function buildGmFormatReminder(
   );
 
   lines.push(...buildVisibleSceneContractLines(ctx), ``);
+  lines.push(...buildOnyxLanguageContractLines(ctx), ``);
   lines.push(...buildBoltPrivateTurnAuditLines(ctx), ``);
 
   lines.push(
